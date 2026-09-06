@@ -6,6 +6,7 @@ import { getLandingCopy, landingLanguages, type LandingLanguage } from "@/lib/la
 import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
 import { LandingExample } from "./landing-examples";
+import { getGuideCopy } from "@/lib/guide-copy";
 import "./landing.css";
 import { chooseGuestLanguage, t, useLanguage } from "@/lib/client-language";
 
@@ -154,6 +155,7 @@ export function LandingScreen({ reason, onSignIn }: { reason: string | null; onS
             <p id="landing-login-note">{copy.loginNote}</p>
             <AppInstallButton placement="login" />
           </div>
+          <a className="landing-guide-link" href="/guide">{getGuideCopy(language).guideLink}<ArrowUpRight size={16} aria-hidden="true" /></a>
           {(reason === "failed" || unavailable) && <p className="landing-auth-error" role="alert">{unavailable ? copy.unavailable : copy.loginError}</p>}
         </section>
       </div>

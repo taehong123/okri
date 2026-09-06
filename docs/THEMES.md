@@ -225,3 +225,22 @@ font-size override.
   editor history and theme. They must not invalidate or refetch business data.
 - Browser checks cover all five languages at 320, 390, 1440 and 3840px, 200%
   text zoom, keyboard operation, all six themes and actual rendered glyphs.
+
+## Public OKR guide
+
+- `/guide` explains Objective, Key Result, Initiative, Project and Task with a
+  local fictional example. Keep KR metrics separate from task completion, and
+  distinguish the Project lead's accountability from the Task assignee's work.
+- Draw the tree in native HTML/CSS with nested lists, not raster screenshots.
+  Individual nodes may be framed; descendant lists stay outside those frames.
+  Use the existing hierarchy roles and shared fonts, sizes and semantic colors.
+- The root branches into two columns only when its container has enough space.
+  Narrow screens and larger user text use a vertical tree with bounded indents.
+  Expand/collapse controls remain keyboard accessible with 44px targets.
+- Share links contain only the guide language. A typed goal stays in same-tab
+  session storage for two hours, then is offered in the existing AI conversation.
+  Adding it requires an explicit click after draft hydration, preserves the
+  existing message, and must never automatically call AI or create work.
+- `tests/guide.test.mjs` checks all five catalogs, example topology and draft
+  bounds/expiry. `tests/e2e/guide.spec.ts` uses mocked APIs for guest/auth handoff,
+  keyboard access, all themes, font diagnostics and 320–3840px text-zoom layouts.

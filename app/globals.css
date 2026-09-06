@@ -2361,10 +2361,13 @@ button:active:not(:disabled) { transform: translateY(1px); }
 .workspace-integration-section .slack-manual-send { padding-top: 2px; }
 .slack-channel-load-error { grid-column: 1 / -1; min-height: 34px; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--red) 28%, var(--line)); border-radius: var(--radius-control); background: color-mix(in srgb, var(--red) 5%, var(--raised)); color: var(--red); font-size: var(--type-meta); }
 .slack-channel-load-error button { min-height: var(--control-height); padding: 0 8px; border: 1px solid currentColor; border-radius: var(--radius-control); background: transparent; color: inherit; font-size: var(--type-label); cursor: pointer; }
-.slack-channel-sync { grid-column: 1 / -1; min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--muted); font-size: var(--type-meta); }
+.slack-channel-sync { grid-column: 1 / -1; min-width: 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding-block: var(--space-3); color: var(--text-secondary); font-size: var(--type-meta); }
+.slack-channel-sync > span { flex: 1 1 15rem; min-width: 0; overflow-wrap: anywhere; }
+.management-bot-config > .slack-channel-sync { padding-inline: var(--space-4); }
 .slack-channel-sync.error { color: var(--red); }
-.slack-channel-sync button { flex: 0 0 auto; min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: 5px; padding: 0 9px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: var(--type-label); cursor: pointer; }
-.slack-channel-sync button:disabled { color: var(--muted); cursor: default; }
+.slack-channel-sync button { flex: 0 0 auto; min-width: min(8rem, 100%); max-width: 100%; min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--button-secondary-bg); color: var(--button-secondary-fg); font-size: var(--type-label); white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.slack-channel-sync button svg { flex-shrink: 0; }
+.slack-channel-sync button:active:not(:disabled) { transform: none; }
 @media (max-width: 700px) {
   .slack-work-command-groups > section { grid-template-columns: 1fr; gap: 7px; }
   .workspace-topbar { flex-wrap: wrap; }
@@ -2860,7 +2863,8 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .slack-onboarding-weekdays label { min-width: 44px; min-height: 44px; }
   .slack-onboarding-members label, .slack-onboarding-channels > label { min-height: 52px; }
   .slack-channel-sync { align-items: stretch; flex-direction: column; }
-  .slack-channel-sync button { min-height: 44px; }
+  .slack-channel-sync > span { flex-basis: auto; }
+  .slack-channel-sync button { align-self: flex-start; }
   .slack-onboarding-card > footer button, .slack-connected-title button { width: 100%; min-height: 44px; }
   .slack-connected-title { align-items: flex-start; flex-wrap: wrap; }
   .slack-connected-title button { flex-basis: 100%; }

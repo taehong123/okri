@@ -12,9 +12,9 @@ const billingSource = await source("lib/billing-paypal.ts");
 const migrations = await Promise.all((await readdir(new URL("../drizzle/", import.meta.url))).filter((name) => name.endsWith(".sql")).sort().map((name) => source(`drizzle/${name}`)));
 function compile(source, dependencies) {
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-  const module = { exports: {} };
-  new Function("require", "module", "exports", code)((name) => dependencies[name] ?? require(name), module, module.exports);
-  return module.exports;
+  const compiledModule = { exports: {} };
+  new Function("require", "module", "exports", code)((name) => dependencies[name] ?? require(name), compiledModule, compiledModule.exports);
+  return compiledModule.exports;
 }
 function fixture(t) {
   const db = new DatabaseSync(":memory:");

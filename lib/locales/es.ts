@@ -1,5 +1,9 @@
 import type { Catalog } from "./en";
 const messages = {
+  "Task를 추가하고 오늘 할 일에 선택했습니다.": "Task añadida y seleccionada para el trabajo de hoy.",
+  "추가 결과 닫기": "Cerrar resultado",
+  "추가하고 선택 중": "Añadiendo y seleccionando",
+  "추가를 완료하지 못했습니다. 입력한 내용으로 다시 시도할 수 있습니다.": "No se pudo completar la adición. Se conserva el texto para reintentar.",
   "활성 편집자 5명": "5 editores activos",
   "5명까지 무료로 함께 일하세요. 카드 등록 없이 시작할 수 있습니다.": "Colabora gratis con hasta 5 editores. No necesitas tarjeta.",
   "결제를 취소했습니다. 요금제는 변경되지 않았습니다.": "Pago cancelado. Tu plan no ha cambiado.",

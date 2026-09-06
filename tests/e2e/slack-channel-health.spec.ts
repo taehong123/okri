@@ -28,7 +28,7 @@ test("Slack channel selectors refresh on focus and label every supported channel
   await expect(page.getByText("#announcements", { exact: true })).toBeVisible();
   await expect(page.getByText("공개 · 선택 시 참여", { exact: true })).toBeVisible();
   await expect(page.getByText("비공개 · 봇 참여 중", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "지금 새로고침" })).toBeVisible();
+  await expect(page.locator(".slack-channel-sync").getByRole("button", { name: "새로고침", exact: true })).toBeVisible();
 
   channelRevision = 2;
   await page.evaluate(() => window.dispatchEvent(new Event("focus")));

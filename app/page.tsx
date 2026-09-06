@@ -94,6 +94,7 @@ import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
 import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
+import { GuideDraft } from "./guide-draft";
 import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
 
@@ -122,7 +123,7 @@ function navigationFromLocation() {
   const requestedView = (rawView === "kr_data" ? "data" : rawView) as View | null;
   const projectId = params.get("project");
   return {
-    view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : "okr",
+    view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : params.get("guide") === "1" ? "home" : "okr",
     projectId,
     taskId: projectId ? null : params.get("task"),
   };
@@ -718,7 +719,7 @@ function useLiveSlackChannels(enabled: boolean) {
 function SlackChannelSyncStatus({ loading, error, onRefresh }: { loading: boolean; error: boolean; onRefresh: () => void }) {
   return <div className={`slack-channel-sync ${error ? "error" : ""}`} aria-live="polite">
     <span>{error ? t("Slack 채널 변경사항을 확인하지 못했습니다.") : t("Slack 변경사항을 15초마다 자동 반영합니다.")}</span>
-    <button type="button" disabled={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("지금 새로고침")}</button>
+    <button className="secondary" type="button" disabled={loading} aria-busy={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("새로고침")}</button>
   </div>;
 }
 
@@ -4382,7 +4383,9 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
   }
   async function createDailyTask(event: FormEvent) {
     event.preventDefault(); if (!newTaskTitle.trim() || !newTaskParent) return;
-    if (await createTaskForDaily(newTaskParent, newTaskTitle, crypto.randomUUID())) setNewTaskTitle("");
+    if (await createTaskForDaily(newTaskParent, newTaskTitle, crypto.randomUUID())) {
+      setNewTaskTitle(""); onNotice(t("오늘 기한의 Task를 만들고 데일리에 선택했습니다."));
+    }
   }
   async function createTaskForDaily(parent: string, title: string, requestId: string) {
     if (currentScrum.member.role === "viewer") return false;
@@ -4391,8 +4394,8 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
     try {
       const [parentKind, parentId = ""] = parent.split(":", 2);
       const response = await fetch("/api/daily-scrum/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, title, parentKind, parentId: parentId || null, requestId }) });
-      const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(apiError(result, "Task를 만들지 못했습니다."));
-      await reload(); onNotice(t("오늘 기한의 Task를 만들고 데일리에 선택했습니다.")); return true;
+      const result = await response.json() as { error?: string; task: { title: string } }; if (!response.ok) throw new Error(apiError(result, "Task를 만들지 못했습니다."));
+      await reload(); return result.task.title;
     } catch (error) { onNotice(error instanceof Error ? error.message : t("Task를 만들지 못했습니다.")); return false; }
     finally { setSaving(null); }
   }
@@ -5007,6 +5010,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           </div>}
           {conversationHistory.some((entry) => entry.role === "user") && guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>{t("Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.")}</span></div>}
+          <GuideDraft active={Boolean(usageScope)} ready={draftHydrated && !saving} onUse={(value) => setMessage((current) => current.trim() ? `${current}\n\n${value}` : value)} />
           <div className="chat-input"><label htmlFor="assistant-message">{t("메시지")}</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? t("해야 할 일을 편하게 설명해 주세요") : mode === "project" ? t("만들 Project의 결과와 범위를 설명해 주세요") : mode === "routine" ? t("언제 무엇을 반복할지 설명해 주세요") : t("지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요")} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? t("답변 생성 중") : t("메시지 보내기")}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? t("답변 중") : t("보내기")}</span></button></div></div>
           <div className="chat-actions">
             {hasDraft && canWrite && <button className="welcome-primary" onClick={() => void save()} disabled={saving || !canApplyDraft}>{saving ? t("생성 중") : saveLabel}<ChevronRight size={14} /></button>}
