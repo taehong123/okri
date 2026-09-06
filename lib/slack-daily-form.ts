@@ -9,8 +9,19 @@ export type DailyChecklist = {
   choices: Record<string, "today" | "done" | "delete" | "exclude">;
   todayNote: string; yesterdayNote: string; blockersNote: string;
   noPlannedTasks: boolean; skipReason: string | null; skipNote: string; page: number;
+  taskFocused?: boolean;
+  taskTargets?: Array<{ key: string; title: string; hasTasks?: boolean }>;
+  taskEntry?: { parentKey: string; title: string; requestId: string; creating?: boolean };
 };
 export const DAILY_CHECKLIST_PAGE_SIZE = 20;
+
+// Slack preserves inputs by block/action ID; inserting a Task must not shift another Task's choice.
+export function dailyChoiceBlockId(input: DailyChecklist, entry: DailyWork, index: number) {
+  return `daily_choice_${input.taskFocused ? entry.key : index}`;
+}
+export function dailyNoPlannedActionId(input: DailyChecklist) {
+  return input.taskFocused ? `value_${input.work.length}` : "value";
+}
 
 export function dailyWorkGroup(work: DailyWork) {
   if (work.kind === "project") return { key: `project:${work.id}`, title: work.title };
@@ -39,15 +50,34 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
   input.work.slice(input.page * DAILY_CHECKLIST_PAGE_SIZE, (input.page + 1) * DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
     const group = dailyWorkGroup(entry);
     if (group.key !== lastGroup) {
-      blocks.push({ type: "section", text: { type: "plain_text", text: (group.key === "general" ? t("General") : group.title).slice(0, 2900) } });
+      const target = input.taskTargets?.find((target) => target.key === group.key);
+      blocks.push({ type: "section", text: { type: "plain_text", text: (group.key === "general" ? t("General") : group.title).slice(0, 2900) },
+        ...(target && !input.taskEntry ? { accessory: { type: "button", action_id: "daily_checklist_add_task", text: { type: "plain_text", text: t("Task 추가") }, value: target.key } } : {}) });
       lastGroup = group.key;
+      if (input.taskFocused && entry.kind === "project" && !input.work.some((task) => task.kind === "task" && task.parentId === entry.id)) {
+        blocks.push({ type: "context", elements: [{ type: "plain_text", text: t(target?.hasTasks === false ? "아직 Task가 없습니다." : "내게 할당된 미완료 Task가 없습니다.") }] });
+      }
+      if (input.taskEntry?.parentKey === group.key) {
+        if (input.taskEntry.creating) {
+          blocks.push({ type: "section", text: { type: "plain_text", text: t("처리 중") } });
+        } else {
+          blocks.push({ type: "input", block_id: "daily_new_task", optional: true, label: { type: "plain_text", text: t("새 Task 제목") },
+            element: { type: "plain_text_input", action_id: "title", max_length: 240, focus_on_load: true,
+              ...(input.taskEntry.title ? { initial_value: input.taskEntry.title } : {}) } });
+          blocks.push({ type: "actions", elements: [
+            { type: "button", action_id: "daily_checklist_create_task", text: { type: "plain_text", text: t("추가하고 오늘 할 일에 선택") }, style: "primary", value: group.key },
+            { type: "button", action_id: "daily_checklist_cancel_task", text: { type: "plain_text", text: t("취소") }, value: group.key },
+          ] });
+        }
+      }
     }
+    if (input.taskFocused && entry.kind === "project") return;
     if (entry.title.length > 180) blocks.push({ type: "section", text: { type: "plain_text", text: entry.title.slice(0, 2900) } });
     const options = [["today", "오늘 할 일"], ["done", "완료"], ...(entry.kind === "task" ? [["delete", "삭제"]] : [])]
       .map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));
     const initial = options.filter((option) => option.value === input.choices[entry.key]);
     const due = entry.dueDate ? `${entry.dueDate}${entry.dueDate < input.date ? ` · ${t("기한 초과")}` : ""}` : "";
-    blocks.push({ type: "input", block_id: `daily_choice_${input.page * DAILY_CHECKLIST_PAGE_SIZE + offset}`, optional: true,
+    blocks.push({ type: "input", block_id: dailyChoiceBlockId(input, entry, input.page * DAILY_CHECKLIST_PAGE_SIZE + offset), optional: true,
       label: { type: "plain_text", text: entry.title.slice(0, 180) || t(names[entry.kind]) },
       hint: { type: "plain_text", text: `${t(names[entry.kind])}${due ? ` · ${due}` : ""}` },
       element: { type: "checkboxes", action_id: "choice", options, ...(initial.length ? { initial_options: initial } : {}) } });
@@ -56,7 +86,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
   if (input.yesterdayCompleted?.length) blocks.push({ type: "section", text: { type: "plain_text", text: `${t("완료한 일")}\n${input.yesterdayCompleted.slice(0, 20).map((entry) => `• ${entry.title}`).join("\n")}`.slice(0, 2900) } });
   const none = { text: { type: "plain_text", text: t("오늘 예정 없음") }, value: "yes" };
   blocks.push({ type: "input", block_id: "no_planned", optional: true, label: { type: "plain_text", text: t("오늘 예정") },
-    element: { type: "checkboxes", action_id: "value", options: [none], ...(input.noPlannedTasks ? { initial_options: [none] } : {}) } });
+    element: { type: "checkboxes", action_id: dailyNoPlannedActionId(input), options: [none], ...(input.noPlannedTasks ? { initial_options: [none] } : {}) } });
   for (const [blockId, label, value] of [["yesterday_note", "완료 메모", input.yesterdayNote], ["today_note", "오늘 메모", input.todayNote], ["blockers_note", "도움이 필요한 일", input.blockersNote]]) {
     blocks.push({ type: "input", block_id: blockId, optional: true, label: { type: "plain_text", text: t(label) },
       element: { type: "plain_text_input", action_id: "value", multiline: true, max_length: 3000, ...(value ? { initial_value: value } : {}) } });

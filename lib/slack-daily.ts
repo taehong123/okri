@@ -786,9 +786,12 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
       const dashboard = await getDailyDashboard(authorization, todayInTimezone(preference.timezone));
       const view = await createDailyChecklist(authorization.ownerId, dashboard.member.id, {
         ...dashboard.draft, date: dashboard.date, work: dashboard.candidates.work, memberName: dashboard.member.displayName,
-        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.map((key) => [key, "today" as const])),
-        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
-        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday), page: 0,
+        taskFocused: true,
+        taskTargets: [...dashboard.createTargets.projects.map((project) => ({ key: `project:${project.id}`, title: project.title, hasTasks: project.hasTasks })),
+          ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title }))],
+        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.filter((key) => !key.startsWith("project:")).map((key) => [key, "today" as const])),
+        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind !== "project" && entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
+        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind !== "project" && entry.completedYesterday), page: 0,
       }, t);
       await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash, view });
     } catch {

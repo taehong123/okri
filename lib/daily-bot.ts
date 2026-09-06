@@ -159,7 +159,7 @@ export async function getDailyDashboard(authorization: RequestAuthorization, raw
       WHERE selection.owner_id = ? AND selection.member_id = ? AND draft.scrum_date = ?`)
       .bind(authorization.ownerId, member.id, date).all<{ id: string }>(),
     listAssignedTaskCandidates(authorization.ownerId, member.id),
-    listDriProjectTargets(authorization.ownerId, member.id),
+    listDailyProjectTargets(authorization.ownerId, member.id),
     listRoutineTargets(authorization.ownerId, member.id),
     d1.prepare(`SELECT member.id, member.display_name, member.email, member.role,
         draft.id AS draft_id, link.id AS slack_link_id,
@@ -327,19 +327,27 @@ export async function createExplicitDailyTask(
   if (!title) throw new Error("새 Task 제목을 입력해 주세요.");
   if (title.length > 240) throw new Error("Task 제목은 240자 이하로 입력해 주세요.");
   const member = await currentDailyMember(authorization);
+  if (authorization.role === "viewer" || member.role === "viewer") throw new Error("읽기 전용 멤버는 Task를 만들 수 없습니다.");
   const sourceRef = `daily:${member.id}:${date}:${normalizeRequestId(input.requestId)}`;
+  const parentKind = input.parentKind ?? "general";
+  const parentId = input.parentId?.trim() || null;
+  const allowed = await validateCreateTarget(authorization.ownerId, member.id, parentKind, parentId);
   const [existing] = await getDb().select().from(items).where(and(
     eq(items.ownerId, authorization.ownerId),
     eq(items.sourceRef, sourceRef),
   )).limit(1);
   if (existing) {
+    if (existing.kind !== "task" || existing.archivedAt || completedStatuses.has(existing.status) || existing.createdByUserId !== authorization.userId
+      || (allowed.parentKind === "project" && existing.parentId !== allowed.parentId)
+      || (allowed.parentKind === "routine" && existing.routineId !== allowed.parentId)) throw new Error("Task 생성 요청을 다시 확인해 주세요.");
+    const assignments = await env.DB.prepare("SELECT member_id FROM item_assignments WHERE owner_id = ? AND item_id = ? AND role = 'task_assignee'")
+      .bind(authorization.ownerId, existing.id).all<{ member_id: string }>();
+    if (assignments.results.some((assignment) => assignment.member_id !== member.id)) throw new Error("Task 생성 요청을 다시 확인해 주세요.");
+    if (!assignments.results.length) await replaceItemAssignmentRole(authorization.ownerId, existing.id, "task_assignee", [member.id]);
     await selectTaskInDraft(authorization, member, date, existing.id);
     return existing;
   }
 
-  const parentKind = input.parentKind ?? "general";
-  const parentId = input.parentId?.trim() || null;
-  const allowed = await validateCreateTarget(authorization.ownerId, member.id, parentKind, parentId);
   const created = await createItem(authorization.ownerId, {
     title,
     kind: "task",
@@ -534,8 +542,10 @@ async function listAssignedTaskCandidates(ownerId: string, memberId: string) {
   return rows.results.map(serializeCandidate);
 }
 
-async function listDriProjectTargets(ownerId: string, memberId: string) {
-  const rows = await env.DB.prepare(`SELECT project.id, project.title,
+async function listDailyProjectTargets(ownerId: string, memberId: string) {
+  const rows = await env.DB.prepare(`SELECT DISTINCT project.id, project.title,
+      EXISTS (SELECT 1 FROM items task WHERE task.owner_id = project.owner_id AND task.parent_id = project.id
+        AND task.kind = 'task' AND task.archived_at IS NULL) AS has_tasks,
       NOT EXISTS (
         SELECT 1 FROM items AS task WHERE task.owner_id = project.owner_id AND task.parent_id = project.id
           AND task.kind = 'task' AND task.archived_at IS NULL
@@ -543,12 +553,12 @@ async function listDriProjectTargets(ownerId: string, memberId: string) {
       ) AS needs_task
     FROM item_assignments AS assignment
     INNER JOIN items AS project ON project.id = assignment.item_id AND project.owner_id = assignment.owner_id
-    WHERE assignment.owner_id = ? AND assignment.member_id = ? AND assignment.role = 'project_dri'
+    WHERE assignment.owner_id = ? AND assignment.member_id = ? AND assignment.role IN ('project_dri','project_worker')
       AND project.kind = 'project' AND project.archived_at IS NULL
-      AND project.status NOT IN ('backlog', 'done', 'development_done', 'archived')
+      AND project.status NOT IN ('done', 'development_done', 'archived')
     ORDER BY project.title`)
-    .bind(ownerId, memberId).all<{ id: string; title: string; needs_task: number }>();
-  return rows.results.map((row) => ({ id: row.id, title: row.title, needsTask: Boolean(row.needs_task) }));
+    .bind(ownerId, memberId).all<{ id: string; title: string; needs_task: number; has_tasks: number }>();
+  return rows.results.map((row) => ({ id: row.id, title: row.title, needsTask: Boolean(row.needs_task), hasTasks: Boolean(row.has_tasks) }));
 }
 
 async function listRoutineTargets(ownerId: string, memberId: string) {
@@ -563,7 +573,8 @@ async function validateCreateTarget(ownerId: string, memberId: string, kind: "pr
     const row = await env.DB.prepare(`SELECT project.id FROM items AS project
       INNER JOIN item_assignments AS assignment ON assignment.item_id = project.id AND assignment.owner_id = project.owner_id
       WHERE project.owner_id = ? AND project.id = ? AND project.kind = 'project' AND project.archived_at IS NULL
-        AND assignment.member_id = ? AND assignment.role = 'project_dri' LIMIT 1`)
+        AND project.status NOT IN ('done','development_done','archived')
+        AND assignment.member_id = ? AND assignment.role IN ('project_dri','project_worker') LIMIT 1`)
       .bind(ownerId, id, memberId).first<{ id: string }>();
     if (row) return { parentKind: "project" as const, parentId: row.id };
   }
@@ -574,7 +585,7 @@ async function validateCreateTarget(ownerId: string, memberId: string, kind: "pr
     if (row) return { parentKind: "routine" as const, parentId: row.id };
   }
   if (kind === "general") {
-    const [projects, routinesForMember] = await Promise.all([listDriProjectTargets(ownerId, memberId), listRoutineTargets(ownerId, memberId)]);
+    const [projects, routinesForMember] = await Promise.all([listDailyProjectTargets(ownerId, memberId), listRoutineTargets(ownerId, memberId)]);
     if (projects.length === 0 && routinesForMember.length === 0) return { parentKind: "general" as const, parentId: null };
     throw new Error("책임 Project 또는 담당 Routine을 선택해 주세요.");
   }
@@ -607,8 +618,8 @@ async function ensureDraftId(ownerId: string, memberId: string, date: string, so
 
 async function selectTaskInDraft(authorization: RequestAuthorization, member: WorkspaceMember, date: string, taskId: string) {
   const draftId = await ensureDraftId(authorization.ownerId, member.id, date);
-  const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM daily_scrum_task_selections WHERE daily_scrum_id = ?")
-    .bind(draftId).first<{ count: number }>();
+  const count = await env.DB.prepare("SELECT COUNT(*) AS count FROM daily_scrum_task_selections WHERE daily_scrum_id = ? AND task_id != ?")
+    .bind(draftId, taskId).first<{ count: number }>();
   if (Number(count?.count ?? 0) >= MAX_DAILY_TASKS) throw new Error(`오늘 Task는 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
   await env.DB.prepare(`INSERT OR IGNORE INTO daily_scrum_task_selections
     (id, owner_id, daily_scrum_id, member_id, task_id) VALUES (?, ?, ?, ?, ?)`)

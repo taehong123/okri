@@ -52,6 +52,8 @@ export async function listDailyYesterdayWork(db: D1Database, ownerId: string, me
   const rows = await db.prepare(`SELECT * FROM (
     SELECT DISTINCT item.id, item.kind, item.title, item.status, item.priority,
       item.due_date AS dueDate, COALESCE(parent.title, routine.title, 'General') AS parentTitle,
+      COALESCE(parent.id, routine.id) AS parentId,
+      CASE WHEN parent.id IS NOT NULL THEN parent.kind WHEN routine.id IS NOT NULL THEN 'routine' ELSE 'general' END AS parentKind,
       EXISTS (
         SELECT 1 FROM activity_log activity
         WHERE activity.owner_id = item.owner_id AND activity.item_id = item.id AND activity.action = 'updated'
@@ -76,7 +78,7 @@ export async function listDailyYesterdayWork(db: D1Database, ownerId: string, me
       ))
     UNION ALL
     SELECT r.id, 'routine', r.title,
-      CASE WHEN completion.id IS NULL THEN 'todo' ELSE 'done' END, 'medium', NULL, 'Routine',
+      CASE WHEN completion.id IS NULL THEN 'todo' ELSE 'done' END, 'medium', NULL, 'Routine', NULL, 'routine',
       CASE WHEN completion.id IS NULL THEN 0 ELSE 1 END
     FROM routines r
     LEFT JOIN routine_completions completion ON completion.owner_id = r.owner_id
