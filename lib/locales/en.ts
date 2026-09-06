@@ -1,4 +1,8 @@
 const messages = {
+  "Task를 추가하고 오늘 할 일에 선택했습니다.": "Task added and selected for today's work.",
+  "추가 결과 닫기": "Close add result",
+  "추가하고 선택 중": "Adding and selecting",
+  "추가를 완료하지 못했습니다. 입력한 내용으로 다시 시도할 수 있습니다.": "Could not finish adding the Task. Your input is kept for retry.",
   "활성 편집자 5명": "5 active editors",
   "5명까지 무료로 함께 일하세요. 카드 등록 없이 시작할 수 있습니다.": "Work together for free with up to 5 editors. No card required.",
   "결제를 취소했습니다. 요금제는 변경되지 않았습니다.": "Checkout was canceled. Your plan has not changed.",
