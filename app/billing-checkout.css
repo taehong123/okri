@@ -51,3 +51,9 @@
 .billing-page .billing-usage-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
 }
+.billing-page .billing-usage-grid article > header { flex-wrap: wrap; }
+.billing-page .billing-usage-grid article > header b {
+  min-width: 0;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

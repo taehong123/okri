@@ -78,7 +78,7 @@ test("billing layouts preserve five languages, six themes, actual fonts and larg
     for (const width of [320, 390, 768, 1440, 3840]) {
       await page.setViewportSize({ width, height: 1000 });
       expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), `${language} ${width}`).toBeLessThanOrEqual(1);
-      const overflow = await page.locator(".billing-page button,.billing-page label,.billing-page h3,.billing-page h4").evaluateAll((elements) => elements
+      const overflow = await page.locator(".billing-page button,.billing-page label,.billing-page h3,.billing-page h4,.billing-usage-grid header,.billing-usage-grid header b").evaluateAll((elements) => elements
         .filter((el) => el.clientWidth && el.scrollWidth > el.clientWidth + 1).map((el) => el.textContent));
       expect(overflow, `${language} ${width}`).toEqual([]);
     }
@@ -91,6 +91,8 @@ test("billing layouts preserve five languages, six themes, actual fonts and larg
     await page.setViewportSize({ width: 390, height: 1000 });
     await page.evaluate(() => document.documentElement.style.fontSize = "200%");
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), theme).toBeLessThanOrEqual(1);
+    expect(await page.locator(".billing-usage-grid header,.billing-usage-grid header b").evaluateAll((elements) => elements
+      .filter((element) => element.scrollWidth > element.clientWidth + 1).map((element) => element.textContent)), theme).toEqual([]);
     const axe = await new AxeBuilder({ page: page as never }).include(".billing-page").analyze();
     expect(axe.violations.filter((v) => v.id === "color-contrast" || v.impact === "critical"), theme).toEqual([]);
     await page.screenshot({ path: info.outputPath(`billing-${theme}.png`), fullPage: true });
