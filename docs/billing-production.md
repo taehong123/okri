@@ -1,4 +1,70 @@
-# Payple 정기결제 운영 전환 체크리스트
+# OKRI 결제 운영 연결
+
+## 2026-09-06 확인 결과
+
+- 운영 환경에는 Payple/PayPal 상점 키가 없었다. `BILLING_ENFORCEMENT_ENABLED=false`였다.
+- Free의 활성 편집자 기준은 서버·화면·약관 모두 5명으로 변경했다.
+- 고객 화면의 운영 설정/사전 배포 설명은 제거했다. 실제로 검증한 결제 옵션만 노출한다.
+- PayPal REST 구독·거래 확인·서명 검증 webhook·해지·첫 결제 환불을 추가했다.
+- PayPal 비즈니스 계정, 운영 REST 앱, 실제 상품 가격은 소유자가 연결해야 한다.
+  모의 테스트 통과를 실결제 또는 상점 승인 완료로 보고하지 않는다.
+- 기존 Payple 어댑터는 상점별 운영 API 계약 검증이 남아 있다. 키만 복사해서 활성화하지 않는다.
+
+## PayPal 연결
+
+PayPal 한국 비즈니스 계정으로 해외 구매자의 결제를 받는 경로다.
+한국 계정 간 국내 거래는 지원되지 않는다. 웹의 Google 로그인/Google Pay는
+Google Play 구독 결제가 아니다. 현재 저장소에는 Play 스토어에 배포된 Android 앱과
+Play Billing 상품/구매 검증 구성이 없다.
+
+Sites 런타임에 다음 값을 보관한다. 다른 서비스의 상점 키를 가져오지 않는다.
+
+- `PAYPAL_ENVIRONMENT`: 운영은 `live`, 별도 검증 환경은 `sandbox`
+- `PAYPAL_CLIENT_ID`, `PAYPAL_CLIENT_SECRET`(secret)
+- `PAYPAL_TEAM_PLAN_ID`, `PAYPAL_BUSINESS_PLAN_ID`
+- `PAYPAL_WEBHOOK_ID`
+- `OKRI_PUBLIC_URL=https://okri.ai`
+
+플랜은 ACTIVE, 고정 월간/무기한, 수량 1, 무료 체험/설정비 없음으로 만든다.
+`payment_preferences.auto_bill_outstanding=false`로 설정한다. 별도 세금이 있으면
+표시 가격에 포함되어야 한다. 금액은 사업자가 승인한 실제 통화/가격을 사용하며
+코드에서 원화를 임의 환율로 환산하지 않는다. 화면의 금액과 승인 직전 서버 금액이
+다르면 새 가격을 확인하도록 결제를 중단한다.
+
+웹훅 URL: `https://okri.ai/api/billing/paypal/webhook`
+
+이벤트: `BILLING.SUBSCRIPTION.ACTIVATED`, `BILLING.SUBSCRIPTION.CANCELLED`,
+`BILLING.SUBSCRIPTION.SUSPENDED`, `BILLING.SUBSCRIPTION.EXPIRED`,
+`BILLING.SUBSCRIPTION.PAYMENT.FAILED`, `PAYMENT.SALE.COMPLETED`,
+`PAYMENT.SALE.REFUNDED`, `PAYMENT.SALE.REVERSED`.
+
+기존 Worker 예약 실행이 15분마다 PayPal 상태를 대조한다. 별도 GitHub 시크릿이 없어도
+작동하며, `/api/internal/billing/run`은 서명된 수동 복구 경로로 유지한다.
+실행당 가장 오래 확인하지 않은 5개 구독을 처리한다. 구독 수가 늘면 전용 큐로 확장한다. PayPal 구독은
+기존 Payple 예약 청구에서 제외하여 이중 청구하지 않는다. 읽기에서도 유료 기간
+만료를 확인하므로 webhook 누락만으로 유료 권한이 무기한 유지되지 않는다.
+반대로 갱신 알림이 누락되어도 주기적 대조나 소유자의 '결제 상태 확인'으로 복구한다.
+
+구독 생성은 워크스페이스별 잠금과 영속 요청 ID를 사용한다. 응답 유실 때 같은
+ID로 재시도하며, 48시간이 지나도 생성 결과가 불분명하면 관리자 대조 전까지
+새 구독을 만들지 않는다. 브라우저가 넘긴 구독 ID로 권한을 주지 않는다.
+환불과 취소가 최종 확인되어야 권한을 변경하며, 워크스페이스 삭제 전에 갱신을 중단한다.
+PayPal 거래 원문/이름/주소/카드는 저장하지 않고 식별번호·금액·통화·상태만 보관한다.
+거래 기록은 워크스페이스 삭제와 분리해 보존한다.
+
+검증 명령: `node --test --test-concurrency=1 tests/billing-paypal.test.mjs`
+화면 검증: `OKRI_E2E_BASE_URL`을 로컬 서버에 지정하고
+`playwright test tests/e2e/billing-checkout.spec.ts --workers=1`.
+모든 쓰기는 모킹한다. 운영에서 테스트 고객/구독을 만들거나 실제 카드를 과금하지 않는다.
+
+공식 근거:
+- https://developer.paypal.com/subscriptions/integrate
+- https://developer.paypal.com/api/subscriptions/v1
+- https://developer.paypal.com/api/rest/webhooks/rest/
+- https://www.paypal.com/kr/digital-wallet/system-enhancement-faq
+- https://developer.android.com/google/play/billing
+
+## 국내 Payple 검증
 
 현재 코드는 결제와 한도 기능을 포함하지만 `BILLING_ENFORCEMENT_ENABLED` 기본값은 꺼짐이다. 아래 검증이 끝나기 전에 이 값을 켜지 않는다.
 
@@ -12,6 +78,7 @@
 Sites 운영 보안값:
 
 - `PAYPLE_CST_ID`
+- `PAYPLE_CHECKOUT_VERIFIED=true`: 아래 승인·실제 API 계약 검증이 완료된 경우에만 설정
 - `PAYPLE_CUST_KEY`
 - `PAYPLE_AUTH_URL`: Payple이 제공한 운영 카드 등록 SDK URL
 - `PAYPLE_API_URL`: Payple이 제공한 운영 정기결제 API 기준 URL

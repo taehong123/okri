@@ -146,12 +146,13 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
       cancelAtPeriodEnd: false, graceEndsAt: null,
       usage: {
         projects: { used: 4, limit: 10, remaining: 6, resetsAt: "2026-09-30T15:00:00.000Z" },
-        editors: { used: 1, limit: 3, remaining: 2 },
+        editors: { used: 1, limit: 5, remaining: 4, enforced: false, graceEndsAt: null },
         ai: { usedWon: 120, limitWon: 500, remainingWon: 380, resetsAt: "2026-09-30T15:00:00.000Z" },
       },
       editorMembers: [{ id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: workspaceRole, selected: true, writeAllowed: true }],
       paymentMethod: null, transactions: [], canManage: workspaceRole === "owner",
       enforcementEnabled: false, checkoutAvailable: false,
+      providers: { payple: false, paypal: [] }, paypal: null, paypalTransactions: [],
     });
     if (url.pathname === "/api/assistant-drafts") {
       const key = url.searchParams.get("key") ?? "";

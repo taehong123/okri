@@ -1,0 +1,53 @@
+.billing-page .billing-free-intro,
+.billing-page .billing-payment-notice,
+.billing-paypal-section > p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--type-body);
+  line-height: 1.6;
+}
+.billing-paypal-section > header > a {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--control-height);
+  color: var(--text-link);
+  font-size: var(--type-label);
+}
+.billing-paypal-current, .billing-paypal-checkout {
+  margin-top: var(--space-4);
+}
+.billing-paypal-current { display: grid; gap: var(--space-3); }
+.billing-paypal-section .billing-owner-actions button,
+.billing-paypal-checkout > button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  white-space: normal;
+}
+.billing-page .billing-contract {
+  grid-template-columns: var(--control-height) minmax(0, 1fr);
+  border: 0;
+  padding: 0;
+  background: transparent;
+}
+.billing-page .billing-checkout input { flex: 0 0 var(--control-height); }
+.billing-page .billing-plan-card > header > div { min-width: 0; }
+.billing-page .billing-plan-card > header { display: grid; gap: var(--space-2); }
+.billing-page .billing-plan-card > header p { text-align: left; }
+.billing-page .billing-plan-card > header p { overflow-wrap: anywhere; }
+.billing-page .billing-checkout > div label { padding-block: var(--space-2); }
+.billing-page > section {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  padding: var(--space-6) 0;
+  background: transparent;
+  box-shadow: none;
+}
+.billing-page .billing-plan-grid,
+.billing-page .billing-usage-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
+}

@@ -745,13 +745,14 @@ test("핵심 화면은 axe 자동 접근성 검사에서 치명적 위반이 없
   expect(results.violations.filter((violation) => violation.impact === "critical" || violation.id === "color-contrast")).toEqual([]);
 });
 
-test("요금제 화면은 안전한 비활성 결제 상태와 모바일 페이지 스크롤을 제공한다", async ({ page }) => {
+test("요금제 화면은 무료 5명과 모바일 페이지 스크롤을 제공한다", async ({ page }) => {
   await installApiMocks(page);
   await page.goto("/?view=billing");
   await expect(page.getByRole("heading", { name: "Free 플랜" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "플랜 비교" })).toBeVisible();
-  await expect(page.getByText("안전한 사전 배포 상태")).toBeVisible();
-  await expect(page.getByText("결제는 아직 활성화하지 않았습니다")).toBeVisible();
+  await expect(page.getByText("활성 편집자 5명", { exact: true })).toBeVisible();
+  await expect(page.getByText("안전한 사전 배포 상태")).toHaveCount(0);
+  await expect(page.getByText("결제는 아직 활성화하지 않았습니다")).toHaveCount(0);
   await expect(page.getByRole("button", { name: /국내 카드 등록/ })).toHaveCount(0);
   const layout = await page.evaluate(() => ({
     horizontalOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,

@@ -1,8 +1,8 @@
 import { changePlan, parseBillingPlan } from "@/lib/billing";
-import { authorizeRequest } from "@/lib/pace-data";
+import { authorizeBillingOwner } from "@/lib/billing-route";
 
 export async function POST(request: Request) {
-  const authorization = await authorizeRequest(request);
+  const authorization = await authorizeBillingOwner(request);
   if (authorization instanceof Response) return authorization;
   if (authorization.role !== "owner") return Response.json({ error: "플랜은 Owner만 변경할 수 있습니다." }, { status: 403 });
   const payload = await request.json().catch(() => null) as Record<string, unknown> | null;

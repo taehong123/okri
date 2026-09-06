@@ -71,6 +71,7 @@ import {
   type SlackAutomationTrigger,
 } from "@/lib/slack-automation";
 import {
+  cancelSubscription,
   ensureBillingSchema,
   memberCanWrite,
   releaseEditorSeat,
@@ -2717,6 +2718,7 @@ export async function scheduleWorkspaceDeletionForUser(userId: string, workspace
   const remaining = (await listUserWorkspaces(userId, id)).filter((workspace) => workspace.id !== id && !workspace.scheduledDeletionAt);
   if (!remaining.length) throw new Error("Create or keep another workspace before deleting this one");
   const nextWorkspace = remaining.find((workspace) => workspace.personal) ?? remaining[0];
+  await cancelSubscription(id);
   const now = new Date().toISOString();
   const scheduledDeletionAt = row.workspace.scheduledDeletionAt ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
   const deletionRequestedAt = row.workspace.deletionRequestedAt ?? now;
@@ -2834,6 +2836,7 @@ async function purgeExpiredWorkspaces() {
 }
 
 async function permanentlyDeleteWorkspace(id: string) {
+  await cancelSubscription(id);
   const [workspace] = await getDb()
     .select({ avatarKey: workspaces.avatarKey })
     .from(workspaces)

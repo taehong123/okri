@@ -1,9 +1,11 @@
 import { env } from "cloudflare:workers";
 import { decryptPrivateValue, encryptPrivateValue } from "@/lib/secret-crypto";
 import { aiUsagePercent } from "@/lib/ai-usage";
+import { cancelPayPalSubscription, ensurePayPalSchema, expirePayPalEntitlement, getPayPalSubscription,
+  payPalCheckoutOptions, reconcilePayPalSubscriptions, refundPayPalFirstPayment, withWorkspaceLock } from "@/lib/billing-paypal";
 
 export const BILLING_PLANS = {
-  free: { label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 3, aiBudgetWon: 500 },
+  free: { label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 5, aiBudgetWon: 500 },
   team: { label: "Team", priceWon: 11_000, projectLimit: 100, editorLimit: 10, aiBudgetWon: 2_000 },
   business: { label: "Business", priceWon: 55_000, projectLimit: null, editorLimit: null, aiBudgetWon: 10_000 },
 } as const;
@@ -14,6 +16,7 @@ export type SubscriptionStatus = "free" | "trialing" | "active" | "past_due" | "
 type BillingRuntimeEnv = typeof env & {
   BILLING_ENFORCEMENT_ENABLED?: string;
   PAYPLE_CST_ID?: string;
+  PAYPLE_CHECKOUT_VERIFIED?: string;
   PAYPLE_CUST_KEY?: string;
   PAYPLE_AUTH_URL?: string;
   PAYPLE_API_URL?: string;
@@ -74,7 +77,8 @@ export function billingEnforcementEnabled() {
 export function paypleConfigured() {
   const runtime = env as BillingRuntimeEnv;
   return Boolean(
-    runtime.PAYPLE_CST_ID
+    runtime.PAYPLE_CHECKOUT_VERIFIED === "true"
+      && runtime.PAYPLE_CST_ID
       && runtime.PAYPLE_CUST_KEY
       && runtime.PAYPLE_AUTH_URL
       && runtime.PAYPLE_API_URL
@@ -177,7 +181,7 @@ export async function ensureBillingSchema() {
       d1.prepare("DELETE FROM phone_verification_requests"),
       d1.prepare("INSERT OR IGNORE INTO app_migrations (id, applied_at) VALUES ('billing_email_v1', CURRENT_TIMESTAMP)"),
       d1.prepare("PRAGMA optimize"),
-    ]).then(() => undefined);
+    ]).then(() => ensurePayPalSchema());
     void schemaReady.catch(() => { schemaReady = null; });
   }
   await schemaReady;
@@ -202,6 +206,7 @@ export async function getWorkspaceSubscription(workspaceId: string): Promise<Sub
   const d1 = (env as BillingRuntimeEnv).DB;
   await d1.prepare(`INSERT OR IGNORE INTO workspace_subscriptions (workspace_id, billing_owner_user_id)
     SELECT id, owner_user_id FROM workspaces WHERE id = ?`).bind(workspaceId).run();
+  await expirePayPalEntitlement(workspaceId);
   const row = await d1.prepare("SELECT * FROM workspace_subscriptions WHERE workspace_id = ? LIMIT 1").bind(workspaceId).first<SubscriptionRow>();
   if (!row) throw new Error("Workspace subscription could not be initialized");
   return row;
@@ -238,8 +243,13 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
     email: String(row.email || ""),
     role: String(row.role),
     selected: hasExplicitEditorSelection ? Boolean(row.explicitly_selected) : limits.editorLimit !== null && index < limits.editorLimit,
-    writeAllowed: limits.editorLimit === null || (hasExplicitEditorSelection ? Boolean(row.explicitly_selected) : index < limits.editorLimit),
+    writeAllowed: !editorEnforcement.enforced || limits.editorLimit === null || (hasExplicitEditorSelection ? Boolean(row.explicitly_selected) : index < limits.editorLimit),
   }));
+  const paypal = await getPayPalSubscription(workspaceId);
+  const paypalPlans = role === "owner" ? await payPalCheckoutOptions() : [];
+  const paypalTransactions = role === "owner" ? await d1.prepare(`SELECT t.*,s.plan FROM billing_paypal_transactions t
+    INNER JOIN billing_paypal_subscriptions s ON s.id=t.subscription_id WHERE t.workspace_id=? ORDER BY t.paid_at DESC LIMIT 20`)
+    .bind(workspaceId).all<Record<string, string>>() : { results: [] };
   return {
     plan,
     planLabel: limits.label,
@@ -271,8 +281,12 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
     })),
     canManage: role === "owner",
     enforcementEnabled: billingEnforcementEnabled(),
-    checkoutAvailable: paypleConfigured(),
-    checkoutState: paypleConfigured() ? "available" : "operator_setup_required",
+    checkoutAvailable: paypleConfigured() || paypalPlans.length > 0,
+    providers: { payple: paypleConfigured(), paypal: paypalPlans },
+    paypal: paypal ? { plan: paypal.plan, status: paypal.status, paidThrough: paypal.paid_through,
+      currency: paypal.currency, value: paypal.price_value } : null,
+    paypalTransactions: paypalTransactions.results.map((row) => ({ id: row.id, plan: row.plan, status: row.status,
+      currency: row.currency, value: row.price_value, createdAt: row.paid_at })),
     integrationsIncluded: true,
     requestedByUserId: userId,
   };
@@ -497,6 +511,8 @@ export async function createPaypleSession(workspaceId: string, userId: string, p
   if (plan === "free") throw new Error("유료 플랜을 선택해 주세요.");
   if (!contractAccepted) throw new Error("가격·자동 갱신·해지 및 환불 조건에 동의해 주세요.");
   await ensureBillingSchema();
+  return withWorkspaceLock(workspaceId, async () => {
+  if (await getPayPalSubscription(workspaceId)) throw new Error("진행 중인 구독을 먼저 확인해 주세요. 중복 결제는 진행하지 않습니다.");
   const token = crypto.randomUUID();
   const tokenHash = await sha256(token);
   const now = new Date();
@@ -516,6 +532,7 @@ export async function createPaypleSession(workspaceId: string, userId: string, p
     plan,
     priceWon: BILLING_PLANS[plan].priceWon,
   };
+  });
 }
 
 export async function completePaypleRegistration(input: {
@@ -604,6 +621,10 @@ export async function completePaypleRegistration(input: {
 
 export async function changePlan(workspaceId: string, plan: BillingPlan) {
   const current = await getWorkspaceSubscription(workspaceId);
+  if (await getPayPalSubscription(workspaceId)) {
+    if (plan === "free") return cancelPayPalSubscription(workspaceId);
+    throw new Error("PayPal 구독을 해지한 뒤 현재 이용 기간이 끝나면 다른 플랜을 선택할 수 있습니다.");
+  }
   if (plan === current.plan) {
     if (current.status === "cancel_at_period_end" && plan !== "free") {
       await (env as BillingRuntimeEnv).DB.prepare(`UPDATE workspace_subscriptions SET status = 'active', next_plan = NULL,
@@ -676,6 +697,7 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
 
 export async function cancelSubscription(workspaceId: string) {
   const subscription = await getWorkspaceSubscription(workspaceId);
+  if (await getPayPalSubscription(workspaceId)) return cancelPayPalSubscription(workspaceId);
   if (subscription.plan === "free") return { canceled: false, effective: "already_free" };
   await (env as BillingRuntimeEnv).DB.prepare(`UPDATE workspace_subscriptions SET cancel_at_period_end = 1,
     status = 'cancel_at_period_end', next_plan = 'free', updated_at = CURRENT_TIMESTAMP WHERE workspace_id = ?`).bind(workspaceId).run();
@@ -683,6 +705,8 @@ export async function cancelSubscription(workspaceId: string) {
 }
 
 export async function refundFirstPayment(workspaceId: string) {
+  await ensureBillingSchema();
+  if (await getPayPalSubscription(workspaceId)) return refundPayPalFirstPayment(workspaceId);
   if (!paypleConfigured()) throw new Error("Payple 환불 설정이 완료되지 않았습니다.");
   const runtime = env as BillingRuntimeEnv;
   const transaction = await runtime.DB.prepare(`SELECT * FROM billing_transactions
@@ -706,7 +730,8 @@ export async function refundFirstPayment(workspaceId: string) {
 
 export async function runBillingBatch() {
   await ensureBillingSchema();
-  if (!paypleConfigured()) return { processed: 0, skipped: true, reason: "payple_not_configured" };
+  const paypal = await reconcilePayPalSubscriptions();
+  if (!paypleConfigured()) return { processed: paypal.processed, skipped: false, paypal };
   const runtime = env as BillingRuntimeEnv;
   const holderId = crypto.randomUUID();
   const now = new Date();
@@ -717,6 +742,7 @@ export async function runBillingBatch() {
   if (!lease.meta.changes) return { processed: 0, skipped: true, reason: "lease_held" };
   const due = await runtime.DB.prepare(`SELECT * FROM workspace_subscriptions
     WHERE status IN ('trialing','active','past_due','cancel_at_period_end') AND next_billing_at IS NOT NULL AND next_billing_at <= ?
+      AND NOT EXISTS (SELECT 1 FROM billing_paypal_subscriptions p WHERE p.workspace_id=workspace_subscriptions.workspace_id AND p.closed_at IS NULL)
     ORDER BY next_billing_at LIMIT 100`).bind(now.toISOString()).all<SubscriptionRow>();
   let processed = 0;
   for (const subscription of due.results) {

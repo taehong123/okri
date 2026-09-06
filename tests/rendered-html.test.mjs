@@ -579,10 +579,10 @@ test("ships workspace plans, fail-closed Payple billing, and one billing screen"
   ]);
   assert.match(page, /view=\{?"billing"\}?|navigateView\("billing"\)/);
   assert.match(page, /<BillingView onNotice=\{showNotice\}/);
-  assert.match(billingView, /안전한 사전 배포 상태/);
-  assert.match(billingView, /Payple 실결제·이메일·예약 청구·환불 검증이 끝날 때까지/);
+  assert.doesNotMatch(billingView, /안전한 사전 배포 상태|결제는 아직 활성화하지 않았습니다|운영 보안값|해외 카드는 현재 지원하지 않습니다/);
+  assert.match(billingView, /PayPal로 결제/);
   assert.match(billingView, /Project·AI는 한국시간 매월 1일 초기화/);
-  assert.match(billing, /free: \{ label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 3, aiBudgetWon: 500 \}/);
+  assert.match(billing, /free: \{ label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 5, aiBudgetWon: 500 \}/);
   assert.match(billing, /team: \{ label: "Team", priceWon: 11_000, projectLimit: 100, editorLimit: 10, aiBudgetWon: 2_000 \}/);
   assert.match(billing, /business: \{ label: "Business", priceWon: 55_000, projectLimit: null, editorLimit: null, aiBudgetWon: 10_000 \}/);
   assert.match(billing, /BILLING_ENFORCEMENT_ENABLED\?\.toLocaleLowerCase\(\) === "true"/);
