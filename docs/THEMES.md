@@ -190,6 +190,22 @@ References: [VS Code role-based theme colors](https://code.visualstudio.com/api/
 
 ## Global language typography
 
+### Slack management forms
+
+- Management reports use Slack-native sections and input modals, not a web
+  banner or a custom visual theme. Keep one actionable row per work item,
+  urgency first, titles regular weight, and Task parent context secondary.
+- `정보 입력·수정` edits due date, accountable member, state and priority;
+  Project custom properties retain their workspace names, types and options.
+  Task forms link to their parent Project's properties instead of inventing
+  another Task property model. Unknown/missing values are not auto-filled.
+- Use native labelled date pickers and searchable member/option selectors.
+  Preserve typed values on errors and present only safe recovery instructions.
+  Five-language payload/limit tests use mocked Slack writes; no production
+  messages are sent for layout testing. Slack controls its own fonts and scale.
+
+### Web language typography
+
 The interface supports Korean, English, Japanese, Simplified Chinese and
 Spanish without changing the layout scale or the theme palette. Korean, Latin
 and numeral glyphs always remain on the self-hosted Pretendard family. Japanese

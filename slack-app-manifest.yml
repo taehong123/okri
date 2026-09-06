@@ -34,6 +34,7 @@ settings:
   interactivity:
     is_enabled: true
     request_url: https://okri.ai/api/slack/interactions
+    message_menu_options_url: https://okri.ai/api/slack/interactions
   event_subscriptions:
     request_url: https://okri.ai/api/slack/events
     bot_events:

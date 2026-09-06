@@ -2,6 +2,7 @@ import { env } from "cloudflare:workers";
 import { getSlackConnection } from "@/lib/pace-data";
 import { canAutoJoinSlackChannel, listSlackChannels, slackApi, slackTokenForConnection, type SlackDailyChannel } from "@/lib/slack-daily";
 import { deliverSlackBotMessage } from "@/lib/slack-bot-delivery";
+import { managementReportBlocks, slackText, type ManagementAssignee } from "./slack-management-report";
 
 export const managementBotSignalIds = [
   "missing_due_date",
@@ -234,27 +235,45 @@ async function prepareSlackChannel(ownerId: string, channelId: string): Promise<
 }
 
 async function sendReport(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, now = new Date()) {
-  const t = await serverTranslator(await workspaceMessageLanguage((env as RuntimeEnv).DB, ownerId));
-  const workspace = await (env as RuntimeEnv).DB.prepare("SELECT name FROM workspaces WHERE id = ? LIMIT 1").bind(ownerId).first<{ name: string }>();
-  const selected = snapshot.groups.filter((group) => group.count > 0);
-  const body = selected.length
-    ? selected.map((group) => renderSlackReportGroup(group, t)).join("\n\n")
-    : t("현재 선택한 관리 항목은 모두 정리되어 있습니다. ✅");
-  const appUrl = `${String((env as RuntimeEnv).OKRI_APP_URL || (env as RuntimeEnv).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?settings=workspace&tab=summary`;
+  const payload = await managementPayload(ownerId, settings, snapshot, test, true);
   return deliverSlackBotMessage((env as RuntimeEnv).DB, {
     ownerId, botKind: "management", subjectId: snapshot.date,
     eventKey: test ? `test:${crypto.randomUUID()}` : snapshot.date,
     expiresAt: new Date(zonedDayRange(snapshot.date, settings.timezone)[1]).toISOString(),
-    payload: { channel: settings.channelId, test,
-    text: `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: workspace?.name || "OKRI", date: snapshot.date })}`,
-    blocks: [
-      { type: "header", text: { type: "plain_text", text: `${test ? `${t("테스트")} · ` : ""}${t("관리 봇")} · ${t("워크스페이스 관리 리포트")}`.slice(0, 150) } },
-      { type: "context", elements: [{ type: "mrkdwn", text: `*${escapeSlack(workspace?.name || "OKRI").slice(0, 1800)}* · ${snapshot.date}` }] },
-      { type: "section", text: { type: "mrkdwn", text: body.slice(0, 2900) } },
-      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 정리") }, url: appUrl }] },
-    ],
-    },
+    payload,
   }, now);
+}
+
+async function managementPayload(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, mentions: boolean) {
+  const t = await serverTranslator(await workspaceMessageLanguage((env as RuntimeEnv).DB, ownerId));
+  const workspace = await (env as RuntimeEnv).DB.prepare("SELECT name FROM workspaces WHERE id = ? LIMIT 1").bind(ownerId).first<{ name: string }>();
+  const rows = await (env as RuntimeEnv).DB.prepare(`SELECT a.item_id, m.display_name, l.slack_user_id
+    FROM item_assignments a JOIN workspace_members m ON m.workspace_id=a.owner_id AND m.id=a.member_id AND m.status='active'
+    JOIN items i ON i.owner_id=a.owner_id AND i.id=a.item_id AND i.archived_at IS NULL
+    LEFT JOIN slack_connections c ON c.owner_id=a.owner_id
+    LEFT JOIN slack_member_links l ON l.owner_id=m.workspace_id AND l.member_id=m.id AND l.team_id=c.team_id
+    WHERE a.owner_id=? AND ((i.kind='project' AND a.role='project_dri') OR (i.kind='task' AND a.role='task_assignee'))
+      AND i.id IN (SELECT value FROM json_each(?)) ORDER BY a.item_id,m.id`)
+    .bind(ownerId, JSON.stringify([...new Set(snapshot.groups.flatMap((g) => g.items.map((i) => i.id)))])).all<{ item_id: string; display_name: string; slack_user_id: string | null }>();
+  const assignees: Record<string, ManagementAssignee[]> = {};
+  for (const row of rows.results) (assignees[row.item_id] ??= []).push({ name: row.display_name, slackId: row.slack_user_id });
+  const appUrl = String((env as RuntimeEnv).OKRI_APP_URL || (env as RuntimeEnv).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "");
+  return { channel: settings.channelId, test,
+    text: `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: slackText((workspace?.name || "OKRI").slice(0, 300)), date: snapshot.date })}`,
+    blocks: managementReportBlocks({ ...snapshot, appUrl, workspace: workspace?.name || "OKRI", test, assignees, mentions }, t),
+  };
+}
+
+export async function refreshManagementReport(ownerId: string, channel: string, ts: string) {
+  // Only modify our own recorded management message, never an arbitrary thread.
+  const receipt = await (env as RuntimeEnv).DB.prepare(`SELECT subject_id FROM slack_bot_deliveries
+    WHERE owner_id=? AND bot_kind='management' AND status='sent' AND message_ts=? AND json_extract(payload,'$.channel')=? LIMIT 1`)
+    .bind(ownerId, ts, channel).first<{ subject_id: string }>();
+  const settings = await readSettings(ownerId), connection = await getSlackConnection(ownerId);
+  if (!receipt || !connection || settings.channelId !== channel) return;
+  const snapshot = await collectWorkspaceManagementSnapshot(ownerId, receipt.subject_id, settings.timezone, settings.signals);
+  const payload = await managementPayload(ownerId, settings, snapshot, false, false);
+  await slackApi(await slackTokenForConnection(connection), "chat.update", { channel, ts, text: payload.text, blocks: payload.blocks });
 }
 
 function serializeSettings(row: Record<string, string | number | null>): ManagementBotSettings {
@@ -318,33 +337,6 @@ function groupManagementItems(items: ManagementBotItem[]): ManagementBotProjectG
   });
 }
 
-function renderSlackReportGroup(group: ManagementBotGroup, t: import("./server-language").Translator) {
-  const lines = [`*${t(signalLabel(group.signal))} · ${t("{count}개", { count: group.count })}*`];
-  let shown = 0;
-  for (const projectGroup of group.projects) {
-    if (shown >= 5) break;
-    if (projectGroup.project) {
-      const project = projectGroup.project;
-      const due = project.isOverdue
-        ? ` · *${t("Project 기한 초과")} · ${project.dueDate}*`
-        : project.dueDate ? ` · ${project.dueDate}` : "";
-      lines.push(`*${escapeSlack(project.title)}* _(${t("Project")})_${due}`);
-    } else {
-      lines.push(`*${t("연결된 Project 없음")}*`);
-    }
-    if (projectGroup.projectMatchesSignal) shown += 1;
-    for (const task of projectGroup.tasks) {
-      if (shown >= 5) break;
-      const due = task.isOverdue
-        ? ` · *${t("Task 기한 초과")} · ${task.dueDate}*`
-        : task.dueDate ? ` · ${task.dueDate}` : "";
-      lines.push(`   - ${escapeSlack(task.title)} _(${t("Task")})_${due}`);
-      shown += 1;
-    }
-  }
-  if (group.count > shown) lines.push(`_${t("외 {count}개", { count: group.count - shown })}_`);
-  return lines.join("\n");
-}
 
 function compareManagementItems(left: ManagementBotItem, right: ManagementBotItem) {
   if (left.dueDate && right.dueDate && left.dueDate !== right.dueDate) return left.dueDate.localeCompare(right.dueDate);
@@ -429,9 +421,5 @@ function localWeekday(value: string) {
 }
 
 function pad(value: number) { return String(value).padStart(2, "0"); }
-function escapeSlack(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
-function signalLabel(signal: ManagementBotSignal) {
-  return { missing_due_date: "기한 없음", missing_owner: "책임자·담당자 없음", overdue: "기한 초과", completed_yesterday: "어제 완료", due_today: "오늘 마감" }[signal];
-}
 import { workspaceMessageLanguage } from "./language-preferences";
 import { serverTranslator } from "./server-language";

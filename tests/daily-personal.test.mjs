@@ -552,6 +552,7 @@ test("Slack acknowledges checklist submission before slow work finishes", async 
   let finish;
   const workResult = new Promise((resolve) => { finish = resolve; });
   const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "@/lib/slack-management-actions": {},
     "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
@@ -578,6 +579,7 @@ test("signed Task actions acknowledge first and update the same Slack modal with
   const pending = [], calls = [], updates = [];
   let signature = true;
   const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "@/lib/slack-management-actions": {},
     "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => signature },
@@ -764,6 +766,7 @@ test("signed Slack submission passes every personal checklist and rejects other-
   const saved = [], submitted = [], pending = [];
   const state = { memberId: "me", fail: false, signature: true, role: "owner", language: "en" };
   const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "@/lib/slack-management-actions": {},
     "@/lib/slack-daily-checklist": {},
     "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: { prepare: () => ({ bind: () => ({ first: async () => ({ yesterday_note: "Yesterday" }) }) }) } }, waitUntil: (p) => pending.push(p) },
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },

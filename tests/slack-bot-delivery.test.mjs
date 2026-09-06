@@ -18,6 +18,7 @@ function compile(source, dependencies = {}) {
 const transport = compile(await read("../lib/slack-automation.ts"));
 const source = await read("../lib/slack-bot-delivery.ts");
 const managementSource = await read("../lib/workspace-management-bot.ts");
+const managementReport = compile(await read("../lib/slack-management-report.ts"));
 const dailySource = await read("../lib/slack-daily.ts");
 const files = await readdir(new URL("../drizzle/", import.meta.url));
 const migrationName = files.find((name) => name.endsWith("_slack_bot_deliveries.sql"));
@@ -34,7 +35,8 @@ function harness(t) {
     CREATE TABLE workspace_management_bot_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, report_time TEXT, timezone TEXT,
       channel_id TEXT, channel_name TEXT, signals TEXT, last_sent_date TEXT, last_sent_at TEXT, last_error TEXT DEFAULT '', updated_at TEXT);
     CREATE TABLE items(id TEXT PRIMARY KEY, owner_id TEXT, parent_id TEXT, kind TEXT, title TEXT, status TEXT, due_date TEXT, archived_at TEXT);
-    CREATE TABLE item_assignments(owner_id TEXT, item_id TEXT, role TEXT);
+    CREATE TABLE item_assignments(owner_id TEXT, item_id TEXT, role TEXT, member_id TEXT);
+    CREATE TABLE slack_member_links(owner_id TEXT, member_id TEXT, team_id TEXT, slack_user_id TEXT);
     CREATE TABLE activity_log(owner_id TEXT, item_id TEXT, action TEXT, payload TEXT, created_at TEXT);
     CREATE TABLE slack_automations(id TEXT PRIMARY KEY, owner_id TEXT, active INTEGER, channel_id TEXT, trigger_type TEXT, trigger_status TEXT,
       message_template TEXT, last_triggered_at TEXT, last_delivery_status TEXT, last_error TEXT);
@@ -84,10 +86,12 @@ function harness(t) {
     "@/lib/slack-automation": transport,
   });
   const management = compile(managementSource, {
+    "./slack-management-report": managementReport,
     "./language-preferences": preferences, "./server-language": serverLanguage,
     "cloudflare:workers": { env: { DB: raw } },
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
-    "@/lib/slack-daily": { listSlackChannels: async () => [] },
+    "@/lib/slack-daily": { listSlackChannels: async () => [], slackTokenForConnection: async (connection) => connection.encrypted_bot_token,
+      slackApi: async (token, method, payload) => { calls.push({ token: `Bearer ${token}`, method, payload }); return { ok: true }; } },
     "@/lib/slack-bot-delivery": api,
   });
   const daily = compile(dailySource, {
@@ -273,9 +277,11 @@ test("management groups tasks under projects and emphasizes project and task ove
   ]);
 
   await management.runDueWorkspaceManagementBots(raw, NOW, "a");
-  const report = calls[0].payload.blocks.find((block) => block.type === "section").text.text;
-  assert.match(report, /\*출시 준비\* _\(Project\)_ · \*Project 기한 초과 · 2026-09-01\*/);
-  assert.match(report, / {3}- 배포 점검 _\(Task\)_ · \*Task 기한 초과 · 2026-09-02\*/);
+  const rows = calls[0].payload.blocks.filter((block) => block.accessory?.action_id === "management_edit");
+  const report = rows.map((block) => block.text.text).join("\n");
+  assert.match(report, /출시 준비>[\s\S]*\*2일 지연\* · 2026-09-01/);
+  assert.match(report, /배포 점검>[\s\S]*\*1일 지연\* · 2026-09-02\nProject · 출시 준비/);
+  assert.equal(rows.length, 3);
   assert.ok(report.indexOf("출시 준비") < report.indexOf("배포 점검"));
 });
 
@@ -289,6 +295,31 @@ test("management rejects invalid dates and report blocks remain within Slack lim
   assert.ok(blocks.find((block) => block.type === "section").text.text.length <= 3000);
   assert.ok(blocks.find((block) => block.type === "context").elements[0].text.length <= 2000);
   assert.ok(calls[0].payload.text.length <= 4000);
+});
+
+test("report tags only its current linked assignees, and refresh only edits its recorded message without re-mentioning", async (t) => {
+  const { management, raw, db, calls } = harness(t);
+  db.exec(`UPDATE workspace_management_bot_settings SET signals='["overdue"]' WHERE owner_id='a';
+    UPDATE items SET due_date='2026-09-01' WHERE id='item-a';
+    INSERT INTO item_assignments VALUES('a','item-a','task_assignee','member-a');
+    INSERT INTO slack_member_links VALUES('a','member-a','T-a','U123'),('a','member-a','old-team','UOLD'),('b','member-b','T-b','UOTHER');`);
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  assert.match(JSON.stringify(calls[0].payload.blocks), /<@U123>/);
+  assert.doesNotMatch(JSON.stringify(calls[0].payload.blocks), /UOLD|UOTHER/);
+  const receipt = db.prepare("SELECT message_ts FROM slack_bot_deliveries WHERE owner_id='a'").get();
+  await management.refreshManagementReport("a", "C-b", receipt.message_ts);
+  await management.refreshManagementReport("b", "C-a", receipt.message_ts);
+  await management.refreshManagementReport("a", "C-a", "forged-message");
+  assert.equal(calls.length, 1);
+  await management.refreshManagementReport("a", "C-a", receipt.message_ts);
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].method, "chat.update");
+  assert.equal(calls[1].payload.ts, receipt.message_ts);
+  assert.doesNotMatch(JSON.stringify(calls[1].payload.blocks), /<@U123>/);
+  db.exec("UPDATE items SET status='done' WHERE id='item-a'");
+  await management.refreshManagementReport("a", "C-a", receipt.message_ts);
+  assert.equal(calls[2].payload.blocks.filter((b) => b.accessory).length, 0);
+  assert.equal(db.prepare("SELECT count(*) n FROM slack_bot_deliveries").get().n, 1);
 });
 
 test("management can recover a rejected report after reconnection but never resends an uncertain report", async (t) => {

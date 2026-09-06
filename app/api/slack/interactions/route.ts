@@ -7,6 +7,7 @@ import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib
 import { memberMessageLanguage, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
 import { openSlackWorkCommandModal, slackWorkCommandOptions, submitSlackWorkCommand } from "@/lib/slack-work-command";
+import { finishManagementSubmission, managementEditorOptions, managementEditorSource, managementStatusView, openManagementEditor } from "@/lib/slack-management-actions";
 
 type SlackInteraction = {
   type?: string;
@@ -15,6 +16,9 @@ type SlackInteraction = {
   user?: { id?: string };
   action_id?: string;
   value?: string;
+  container?: { channel_id?: string; message_ts?: string };
+  channel?: { id?: string };
+  message?: { ts?: string };
   actions?: Array<{ action_id?: string; value?: string }>;
   view?: {
     id?: string;
@@ -49,6 +53,26 @@ export async function POST(request: Request) {
     return Response.json({ response_type: "ephemeral", text: workspaceT("OKRI 계정을 먼저 연결해 주세요: {link}", { link }) });
   }
   const t = await serverTranslator(await memberMessageLanguage(env.DB, linked.authorization.ownerId, linked.memberId));
+  const managementActor = { ...linked, teamId, slackUserId };
+  if (payload.type === "block_suggestion" && payload.action_id?.startsWith("mg_")) {
+    try { return Response.json(await managementEditorOptions(managementActor, payload.view?.private_metadata ?? "", payload.action_id, payload.value ?? "", t)); }
+    catch { return Response.json({ options: [] }); }
+  }
+  const managementAction = payload.type === "block_actions" ? payload.actions?.find((a) => ["management_edit", "management_parent", "management_reload"].includes(a.action_id ?? "")) : undefined;
+  if (managementAction?.value && payload.trigger_id) {
+    try {
+      const source = managementAction.action_id === "management_edit"
+        ? { channel: payload.container?.channel_id ?? payload.channel?.id ?? "", ts: payload.container?.message_ts ?? payload.message?.ts ?? "" }
+        : await managementEditorSource(managementActor, payload.view?.private_metadata ?? "", managementAction.value, managementAction.action_id === "management_parent");
+      await openManagementEditor(managementActor, payload.trigger_id, managementAction.value, source, t,
+        { push: managementAction.action_id === "management_parent", replaceViewId: managementAction.action_id === "management_reload" ? payload.view?.id : undefined });
+      return new Response(null, { status: 200 });
+    } catch { return Response.json({ response_type: "ephemeral", text: t("입력창을 열지 못했습니다. 권한을 확인하고 다시 시도해 주세요.") }); }
+  }
+  if (payload.type === "view_submission" && payload.view?.callback_id === "management_submit" && payload.view.id) {
+    finishManagementSubmission(managementActor, payload.view.id, payload.view.private_metadata ?? "", payload.view.state?.values ?? {}, t);
+    return Response.json({ response_action: "update", view: managementStatusView(t("저장 중입니다."), t) });
+  }
 
   if (payload.type === "block_suggestion") {
     if (payload.action_id?.startsWith("work_")) {

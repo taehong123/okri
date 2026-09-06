@@ -1069,8 +1069,11 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(route, /testWorkspaceManagementBot/);
   assert.match(domain, /activity_log/);
   assert.match(domain, /parent_project/);
-  assert.match(domain, /renderSlackReportGroup/);
-  assert.match(domain, /Project 기한 초과/);
+  assert.match(domain, /managementReportBlocks/);
+  const report = await readFile(new URL("../lib/slack-management-report.ts", import.meta.url), "utf8");
+  assert.match(report, /management_edit/);
+  assert.match(report, /\{count\}일 지연/);
+  assert.match(report, /item\.parentProject/);
   assert.match(domain, /listSlackChannels/);
   assert.match(domain, /last_sent_date/);
   assert.match(domain, /`\[\$\{t\("관리 봇"\)\}\]/);

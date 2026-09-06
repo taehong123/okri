@@ -10,6 +10,7 @@
    - OAuth Redirect: `/api/slack/callback`
    - Slash Command: `/api/slack/commands`
    - Interactivity: `/api/slack/interactions`
+   - Options Load URL: `/api/slack/interactions` (`settings.interactivity.message_menu_options_url`)
    - Events API: `/api/slack/events`
 4. Bot Token Scopes에 `commands`, `chat:write`, `im:write`, `im:history`, `users:read`, `users:read.email`, `channels:read`, `channels:join`, `groups:read`가 있는지 확인한다.
 5. Event Subscription에 `message.im`이 있는지 확인한다.
@@ -48,6 +49,13 @@
 테스트 워크스페이스 A에서 기본 흐름을 확인한 뒤 Slack 앱의 **Manage Distribution**에서 배포 체크리스트를 완료하고 비공개 목록 방식의 Public Distribution을 활성화한다. 이어서 별도의 테스트 워크스페이스 B에서도 OKRI의 연결 버튼만으로 설치되는지 확인한다.
 
 고객은 OKRI의 **Slack 연결** 버튼으로 OAuth 설치를 시작한다. Slack 승인 화면에서 자기 워크스페이스를 선택하며 훅 URL, Client ID, Signing Secret 같은 개발자 설정은 입력하지 않는다.
+
+관리봇의 `정보 입력·수정`은 추가 OAuth 권한 없이 기존 연결을 사용한다.
+100개 이하의 담당자·속성 선택지는 Slack 안에서 바로 검색하며, 더 큰 목록은
+위 Options Load URL을 사용한다. 운영자는 기존 공용 앱에도 이 URL이 지정됐는지
+확인해야 한다. 매니페스트 파일 수정만으로 설치된 Slack 앱 설정이 바뀌지는 않는다.
+([Slack 매니페스트 규격](https://docs.slack.dev/reference/app-manifest/))
+검증은 모의 API로 수행하며 운영 레코드나 실제 발송으로 테스트하지 않는다.
 
 한 OKRI 워크스페이스에는 Slack 워크스페이스 하나만 연결한다. 같은 Slack 워크스페이스를 다른 OKRI 워크스페이스로 옮기려면 기존 연결을 먼저 해제한다.
 

@@ -2174,7 +2174,7 @@ export async function testSlackAutomation(ownerId: string, id: string) {
 
 export async function dispatchSlackAutomationEvent(ownerId: string, event: {
   triggerType: SlackAutomationTrigger;
-  item: PaceItem;
+  item: Pick<PaceItem, "id" | "ownerId" | "kind" | "title" | "status" | "priority" | "updatedAt">;
   fromStatus?: string | null;
 }) {
   if (event.item.kind !== "task" || event.item.ownerId !== ownerId) return;
