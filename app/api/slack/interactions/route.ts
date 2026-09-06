@@ -150,12 +150,12 @@ async function submitFromModal(payload: SlackInteraction, authorization: Awaited
     return Response.json({ response_action: "errors", errors: { [workErrorBlock]: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") } });
   }
   if ((selectedYesterdayWorkIds?.length ?? 0) > 50) {
-    return Response.json({ response_action: "errors", errors: { yesterday_work: t("어제 완료한 일은 최대 50개까지 선택할 수 있습니다.") } });
+    return Response.json({ response_action: "errors", errors: { yesterday_work: t("완료한 일은 최대 50개까지 선택할 수 있습니다.") } });
   }
   if (selectedYesterdayWorkIds?.some((key) => selectedWorkIds?.includes(key))) {
     return Response.json({ response_action: "errors", errors: {
-      yesterday_work: t("같은 업무를 어제 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다."),
-      today_work: t("같은 업무가 어제 완료한 일에도 선택되어 있습니다."),
+      yesterday_work: t("같은 업무를 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다."),
+      today_work: t("같은 업무가 완료한 일에도 선택되어 있습니다."),
     } });
   }
   if (!skipReason && !noPlannedTasks && (selectedWorkIds?.length ?? selectedTaskIds.length) === 0 && !newTaskTitle && !todayNote.trim()) {

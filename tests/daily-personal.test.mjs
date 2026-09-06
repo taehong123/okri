@@ -139,12 +139,13 @@ test("failed selection writes roll back both notes and previous selections", asy
   assert.equal(original.work_selection_json, '["project:project"]');
 });
 
-test("Slack v2 modal uses searchable yesterday and today multi-selects", () => {
+test("Slack v2 modal uses searchable completed and today multi-selects", () => {
   const entries = Array.from({ length: 75 }, (_, i) => ({ key: `task:${i}`, id: String(i), title: "Long title ".repeat(20), kind: "task", parentTitle: "Project", dueDate: null }));
   const yesterday = entries.map((entry, index) => ({ ...entry, completedYesterday: index === 0, willCompleteOnSubmit: index !== 0 }));
   const modal = form.dailyForm({ work: entries, yesterdayWork: yesterday, memberName: "Me", date, selected: ["task:72"], selectedYesterday: ["task:0", "task:2"], yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false });
   const inputs = modal.blocks.filter((b) => b.type === "input");
   assert.equal(inputs[0].block_id, "yesterday_work");
+  assert.equal(inputs[0].label.text, "완료한 일");
   assert.equal(inputs[0].element.type, "multi_external_select");
   assert.equal(inputs[0].element.initial_options.length, 2);
   assert.match(inputs[0].element.initial_options[1].description.text, /제출 시 완료 처리/);
@@ -442,7 +443,7 @@ test("paged checklists preserve notes and choices, reject foreign/viewer access,
   await assert.rejects(checklist.handleDailyChecklist(authorization, back.view.private_metadata, {}, false, (key) => key));
 });
 
-test("yesterday candidates auto-select actual completions and mark incomplete choices only on submit", async (t) => {
+test("completed candidates auto-select actual completions and mark incomplete choices only on submit", async (t) => {
   const { raw, db, api } = fixture(t);
   db.exec(`INSERT INTO activity_log (id,owner_id,item_id,action,source,payload,created_at)
     VALUES ('completed-yesterday','w','done','updated','web','{"status":"done"}','2026-09-03T02:00:00.000Z')`);
@@ -461,17 +462,18 @@ test("yesterday candidates auto-select actual completions and mark incomplete ch
   assert.equal(submitted.newlyCompletedCount, 2);
   assert.deepEqual(submitted.yesterdayWork.map((entry) => entry.key), ["task:done", "task:task", "routine:routine"]);
   assert.deepEqual({ ...db.prepare("SELECT status,progress FROM items WHERE id='task'").get() }, { status: "done", progress: 100 });
-  assert.equal(db.prepare("SELECT completion_date FROM routine_completions WHERE routine_id='routine'").get().completion_date, "2026-09-03");
+  assert.equal(db.prepare("SELECT completion_date FROM routine_completions WHERE routine_id='routine'").get().completion_date, date);
   const activity = db.prepare("SELECT source,payload,created_at FROM activity_log WHERE item_id='task'").get();
   assert.equal(activity.source, "daily");
-  assert.equal(JSON.parse(activity.payload).effectiveDate, "2026-09-03");
+  assert.equal(JSON.parse(activity.payload).effectiveDate, date);
+  assert.equal(JSON.parse(activity.payload).origin, "daily_completed_selection");
   assert.match(activity.created_at, /^2026-/);
   assert.equal((await api.submitDailyDraft(authorization, date, "web", "request-1")).id, submitted.id);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM daily_submissions").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM activity_log WHERE item_id='task'").get().count, 1);
 });
 
-test("yesterday draft rejects overlap and failed submit rolls back completions", async (t) => {
+test("completed-work draft rejects overlap and failed submit rolls back completions", async (t) => {
   const { db, api } = fixture(t);
   await assert.rejects(api.saveDailyDraft(authorization, {
     date, selectedWorkIds: ["task:task"], selectedYesterdayWorkIds: ["task:task"],

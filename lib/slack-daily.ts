@@ -949,34 +949,29 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
     ] };
   }
-  const yesterdayWork = submission.yesterdayWork ?? [];
-  const visibleYesterday = yesterdayWork.slice(0, 20);
-  const yesterdayLines = visibleYesterday.length
-    ? visibleYesterday.map((work) => `• ${escapeSlack(work.title)} _(${t(work.kind === "project" ? "Project" : work.kind === "task" ? "Task" : "Routine")} · ${escapeSlack(work.parentTitle)})_`).join("\n")
-    : `• ${t("선택한 업무 없음")}`;
-  const yesterdayOverflow = yesterdayWork.length > 20 ? `\n_${t("외 {count}개", { count: yesterdayWork.length - 20 })}_` : "";
-  const allWork = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
-  const completedWork = allWork.filter((work) => work.completedToday);
+  type CardWork = { taskTitle: string; parentTitle: string; groupKey: string; completedToday: boolean };
+  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
+  const completedSnapshots = [...new Map([...(submission.yesterdayWork ?? []), ...(submission.work ?? []).filter((work) => work.completedToday)].map((work) => [work.key, work])).values()];
+  const completedWork = completedSnapshots.map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: true }));
   const plannedWork = allWork.filter((work) => !work.completedToday);
-  const groupedLines = (work: typeof allWork) => {
+  const groupedLines = (work: CardWork[], emptyText = t("오늘 예정 없음")) => {
     const groups = new Map<string, { title: string; lines: string[] }>();
     for (const task of work.slice(0, 20)) {
       const group = groups.get(task.groupKey) ?? { title: task.parentTitle, lines: [] };
       group.lines.push(`• ${escapeSlack(task.taskTitle)}`);
       groups.set(task.groupKey, group);
     }
-    const lines = work.length ? [...groups.values()].map((group) => `*${escapeSlack(group.title)}*\n${group.lines.join("\n")}`).join("\n\n") : `• ${t("오늘 예정 없음")}`;
+    const lines = work.length ? [...groups.values()].map((group) => `*${escapeSlack(group.title)}*\n${group.lines.join("\n")}`).join("\n\n") : `• ${emptyText}`;
     return lines + (work.length > 20 ? `\n_${t("외 {count}개", { count: work.length - 20 })}_` : "");
   };
   const blocker = submission.blockersNote ? `\n*${t("블로커")}*\n${escapeSlack(submission.blockersNote)}` : "";
   const note = submission.todayNote ? `\n*${t("오늘 메모")}*\n${escapeSlack(submission.todayNote)}` : "";
-  const yesterdayNote = submission.yesterdayNote ? `\n*${t("어제 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
+  const completedNote = submission.yesterdayNote ? `\n*${t("완료 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
-    { type: "section", text: { type: "mrkdwn", text: `*${t("어제 완료한 일")}*\n${yesterdayLines}${yesterdayOverflow}${yesterdayNote}`.slice(0, 2900) } },
-    ...(completedWork.length ? [{ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 완료한 일")}*\n${groupedLines(completedWork)}`.slice(0, 2900) } }] : []),
+    { type: "section", text: { type: "mrkdwn", text: `*${t("완료한 일")}*\n${groupedLines(completedWork, t("선택한 업무 없음"))}${completedNote}`.slice(0, 2900) } },
     { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };

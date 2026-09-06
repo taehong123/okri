@@ -39,8 +39,8 @@ test("my assigned projects, tasks and routines can be selected and submitted wit
   await page.getByRole("checkbox", { name: title + " 선택", exact: true }).focus();
   await page.keyboard.press("Space");
   await page.getByRole("checkbox", { name: "고객 의견 점검 선택", exact: true }).check();
-  const yesterdayPicker = page.getByRole("group", { name: "어제 완료한 일" });
-  await yesterdayPicker.getByText("어제 완료한 일", { exact: true }).click();
+  const yesterdayPicker = page.getByRole("group", { name: "완료한 일" });
+  await yesterdayPicker.getByText("완료한 일", { exact: true }).click();
   await page.getByRole("checkbox", { name: "어제 회고 마감 선택", exact: true }).check();
   await expect(yesterdayPicker).toContainText("제출 시 완료 처리");
   await expect(page.getByRole("textbox", { name: "새 Task 제목" })).toBeHidden();

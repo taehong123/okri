@@ -2,7 +2,7 @@ import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { bootstrap, installApiMocks } from "./api-mocks";
 
-test("daily summaries separate completed work in five languages with keyboard access and responsive text", async ({ page, context }, testInfo) => {
+test("daily summaries merge completed work in five languages with keyboard access and responsive text", async ({ page, context }, testInfo) => {
   test.setTimeout(120_000);
   await installApiMocks(page, { teamWorkspace: true });
   let language = "ko";
@@ -25,11 +25,11 @@ test("daily summaries separate completed work in five languages with keyboard ac
     return route.fallback();
   });
   const labels = {
-    ko: ["어제 완료한 일", "오늘 완료한 일", "오늘 할 일"],
-    en: ["Yesterday's completed work", "Today's completed work", "Today’s tasks"],
-    ja: ["昨日完了した仕事", "今日完了した仕事", "今日のタスク"],
-    zh: ["昨天完成的工作", "今天完成的工作", "今日任务"],
-    es: ["Trabajo completado ayer", "Trabajo completado hoy", "Tareas de hoy"],
+    ko: ["완료한 일", "오늘 할 일"],
+    en: ["Completed work", "Today’s tasks"],
+    ja: ["完了した仕事", "今日のタスク"],
+    zh: ["已完成的工作", "今日任务"],
+    es: ["Trabajo completado", "Tareas de hoy"],
   };
   for (const [id, headings] of Object.entries(labels)) {
     language = id;
@@ -37,18 +37,19 @@ test("daily summaries separate completed work in five languages with keyboard ac
     const summary = page.locator(".daily-submission-summary");
     await expect(summary).toBeVisible();
     const lists = summary.getByRole("list");
-    await expect(lists).toHaveCount(3);
+    await expect(lists).toHaveCount(2);
     for (let i = 0; i < headings.length; i++) await expect(lists.nth(i)).toHaveAccessibleName(headings[i]);
-    await expect(lists.nth(1)).toContainText(doneTitle);
-    await expect(lists.nth(2)).toContainText("앞으로 할 업무");
-    await expect(lists.nth(2)).not.toContainText(doneTitle);
-    const completed = lists.nth(1).getByRole("button", { name: doneTitle });
+    await expect(lists.nth(0)).toContainText("어제 마친 업무");
+    await expect(lists.nth(0)).toContainText(doneTitle);
+    await expect(lists.nth(1)).toContainText("앞으로 할 업무");
+    await expect(lists.nth(1)).not.toContainText(doneTitle);
+    const completed = lists.nth(0).getByRole("button", { name: doneTitle });
     expect(await completed.evaluate((element) => element.scrollWidth - element.clientWidth)).toBeLessThanOrEqual(1);
     await expect(completed).toHaveCSS("white-space", "normal");
     await completed.focus();
     await expect(completed).toBeFocused();
     await page.keyboard.press("Tab");
-    await expect(lists.nth(2).getByRole("button")).toBeFocused();
+    await expect(lists.nth(1).getByRole("button")).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: testInfo.outputPath(`daily-summary-${id}.png`), fullPage: true });
   }
@@ -68,7 +69,7 @@ test("daily summaries separate completed work in five languages with keyboard ac
       const client = await context.newCDPSession(page);
       await client.send("DOM.enable"); await client.send("CSS.enable");
       const doc = await client.send("DOM.getDocument");
-      const node = await client.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: '.daily-submission-summary ul[aria-label="오늘 완료한 일"] button' });
+      const node = await client.send("DOM.querySelector", { nodeId: doc.root.nodeId, selector: '.daily-submission-summary ul[aria-label="완료한 일"] button' });
       const fonts = await client.send("CSS.getPlatformFontsForNode", { nodeId: node.nodeId });
       expect(fonts.fonts.some((font) => font.glyphCount > 0 && /Pretendard/.test(font.familyName))).toBeTruthy();
       await client.detach();

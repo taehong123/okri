@@ -284,9 +284,9 @@ export async function saveDailyDraft(
   const selectedWorkIds = skipReason || noPlannedTasks ? [] : (workKeys ?? parseDailyWorkKeys(previousWork?.work_selection_json || "[]")).filter((key) => !key.startsWith("task:"));
   const selectedYesterdayWorkIds = skipReason ? [] : (yesterdayKeys ?? parseDailyWorkKeys(previousWork?.yesterday_work_selection_json || "[]", "yesterday"));
   if (selectedWorkIds.length + selectedTaskIds.length > MAX_DAILY_TASKS) throw new Error("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.");
-  if (selectedYesterdayWorkIds.length > MAX_DAILY_TASKS) throw new Error("어제 완료한 일은 최대 50개까지 선택할 수 있습니다.");
+  if (selectedYesterdayWorkIds.length > MAX_DAILY_TASKS) throw new Error("완료한 일은 최대 50개까지 선택할 수 있습니다.");
   const todayKeys = new Set([...selectedWorkIds, ...selectedTaskIds.map((id) => `task:${id}`)]);
-  if (selectedYesterdayWorkIds.some((key) => todayKeys.has(key))) throw new Error("같은 업무를 어제 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.");
+  if (selectedYesterdayWorkIds.some((key) => todayKeys.has(key))) throw new Error("같은 업무를 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.");
   await validateDailyWork(env.DB, authorization.ownerId, member.id, date, selectedWorkIds);
   await validateDailyYesterdayWork(env.DB, authorization.ownerId, member.id, date, await dailyTimezone(env.DB, authorization.ownerId, member.id), selectedYesterdayWorkIds);
   await assertAssignedTaskIds(authorization.ownerId, member.id, selectedTaskIds);
@@ -395,9 +395,9 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     throw new Error("오늘 Task를 선택하거나 ‘오늘 예정 없음’을 선택해 주세요.");
   }
   if (selected.length + work.length + completedToday.length + deletedTasks.length > MAX_DAILY_TASKS) throw new Error(`오늘 할 업무는 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
-  if (yesterdayWork.length > MAX_DAILY_TASKS) throw new Error(`어제 완료한 일은 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
+  if (yesterdayWork.length > MAX_DAILY_TASKS) throw new Error(`완료한 일은 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
   const todayKeys = new Set([...work.map((entry) => entry.key), ...selected.map((entry) => `task:${entry.id}`)]);
-  if (yesterdayWork.some((entry) => todayKeys.has(entry.key))) throw new Error("같은 업무를 어제 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.");
+  if (yesterdayWork.some((entry) => todayKeys.has(entry.key))) throw new Error("같은 업무를 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.");
   if (completedToday.some((entry) => todayKeys.has(entry.key) || yesterdayWork.some((other) => other.key === entry.key))) throw new Error("업무마다 한 가지 상태만 선택해 주세요.");
   if (deletedTasks.some((entry) => todayKeys.has(entry.key) || yesterdayWork.some((other) => other.key === entry.key) || completedToday.some((other) => other.key === entry.key))) throw new Error("업무마다 한 가지 상태만 선택해 주세요.");
 
@@ -456,11 +456,11 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
         .bind(submittedAt, authorization.ownerId, entry.id, submissionId),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
         SELECT ?, ?, ?, 'updated', 'daily', ?, ? WHERE EXISTS (SELECT 1 FROM daily_submissions WHERE id = ?)`)
-        .bind(crypto.randomUUID(), authorization.ownerId, entry.id, JSON.stringify({ status: "done", fromStatus: entry.status, progress: 100, effectiveDate: entry.completedToday ? date : addDays(date, -1), origin: entry.completedToday ? "daily_today_selection" : "daily_yesterday_selection", requestId: normalizedRequestId }), submittedAt, submissionId),
+        .bind(crypto.randomUUID(), authorization.ownerId, entry.id, JSON.stringify({ status: "done", fromStatus: entry.status, progress: 100, effectiveDate: date, origin: "daily_completed_selection", requestId: normalizedRequestId }), submittedAt, submissionId),
     ]),
     ...newlyCompleted.filter((entry) => entry.kind === "routine").map((entry) => d1.prepare(`INSERT OR IGNORE INTO routine_completions
       (id, owner_id, routine_id, completion_date, created_at) SELECT ?, ?, ?, ?, ? WHERE EXISTS (SELECT 1 FROM daily_submissions WHERE id = ?)`)
-      .bind(crypto.randomUUID(), authorization.ownerId, entry.id, entry.completedToday ? date : addDays(date, -1), submittedAt, submissionId)),
+      .bind(crypto.randomUUID(), authorization.ownerId, entry.id, date, submittedAt, submissionId)),
     ...selected.map((task, index) => d1.prepare(`INSERT INTO daily_task_snapshots
       (id, owner_id, submission_id, task_id, task_title, parent_kind, parent_id, parent_title, status, is_new, sort_order)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -730,12 +730,6 @@ function cleanNote(value: string | undefined) {
 
 function cleanSkipNote(value: string | undefined) {
   return (value ?? "").trim().slice(0, 500);
-}
-
-function addDays(value: string, amount: number) {
-  const date = new Date(`${value}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + amount);
-  return date.toISOString().slice(0, 10);
 }
 
 export function normalizeDailySkipReason(value: unknown): DailySkipReason | null {

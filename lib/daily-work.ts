@@ -10,10 +10,10 @@ export type DailyWork = {
 export function parseDailyWorkKeys(raw: unknown, context: "today" | "yesterday" = "today"): string[] {
   const value: unknown = typeof raw === "string" ? JSON.parse(raw) : raw;
   if (!Array.isArray(value) || value.some((key) => typeof key !== "string" || !/^(project|task|routine):[^:]{1,150}$/.test(key))) {
-    throw new Error(context === "yesterday" ? "어제 완료한 일 선택을 다시 확인해 주세요." : "오늘 할 업무 선택을 다시 확인해 주세요.");
+    throw new Error(context === "yesterday" ? "완료한 일 선택을 다시 확인해 주세요." : "오늘 할 업무 선택을 다시 확인해 주세요.");
   }
   const keys = [...new Set(value as string[])];
-  if (keys.length > 50) throw new Error(context === "yesterday" ? "어제 완료한 일은 최대 50개까지 선택할 수 있습니다." : "오늘 할 업무는 최대 50개까지 선택할 수 있습니다.");
+  if (keys.length > 50) throw new Error(context === "yesterday" ? "완료한 일은 최대 50개까지 선택할 수 있습니다." : "오늘 할 업무는 최대 50개까지 선택할 수 있습니다.");
   return keys;
 }
 
@@ -99,7 +99,7 @@ export async function validateDailyYesterdayWork(db: D1Database, ownerId: string
   if (!requested.length) return [];
   const available = new Map((await listDailyYesterdayWork(db, ownerId, memberId, date, timezone)).map((work) => [work.key, work]));
   const selected = requested.map((key) => available.get(key));
-  if (selected.some((work) => !work)) throw new Error("업무의 담당자·상태 또는 휴지통 여부가 변경됐습니다. 어제 완료한 일을 다시 확인해 주세요.");
+  if (selected.some((work) => !work)) throw new Error("업무의 담당자·상태 또는 휴지통 여부가 변경됐습니다. 완료한 일을 다시 확인해 주세요.");
   return selected as DailyWork[];
 }
 

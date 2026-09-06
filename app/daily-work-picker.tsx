@@ -28,6 +28,6 @@ export function DailyWorkPicker({ label, work, selected, disabled, noPlanned, ye
       {!visible.length && <p className="daily-empty">{query ? t("검색 결과가 없습니다.") : yesterday ? t("선택할 수 있는 업무가 없습니다.") : t("배정된 미완료 업무가 없습니다.")}</p>}
       {onNoPlanned && <label className="daily-none"><input type="checkbox" checked={Boolean(noPlanned)} disabled={disabled} onChange={(event) => onNoPlanned(event.target.checked)} />{t("오늘 예정 없음")}</label>}
     </div>
-    {hasConflict && <p className="daily-picker-error" role="alert">{t("같은 업무를 어제 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.")}</p>}
+    {hasConflict && <p className="daily-picker-error" role="alert">{t("같은 업무를 완료한 일과 오늘 할 일에 동시에 선택할 수 없습니다.")}</p>}
   </details>;
 }
