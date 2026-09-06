@@ -22,7 +22,7 @@ const install = compile("lib/app-install.ts");
 const installButton = compile("app/app-install-button.tsx", { "@/lib/app-install": install });
 const brandLogo = compile("app/brand-logo.tsx", { "@/lib/brand-artwork": compile("lib/brand-artwork.ts") });
 const examples = compile("app/landing-examples.tsx");
-const { LandingScreen } = compile("app/landing.tsx", { "@/lib/landing-copy": translations, "./landing-examples": examples, "./app-install-button": installButton, "./brand-logo": brandLogo });
+const { LandingScreen } = compile("app/landing.tsx", { "@/lib/landing-copy": translations, "@/lib/guide-copy": compile("lib/guide-copy.ts"), "./landing-examples": examples, "./app-install-button": installButton, "./brand-logo": brandLogo });
 const { getLandingCopy, landingLanguages, resolveLandingLanguage } = translations;
 const landingCopy = Object.fromEntries(await Promise.all(landingLanguages.map(async ({ id }) => [id, getLandingCopy(await serverLanguage.serverTranslator(id), id)])));
 
@@ -51,6 +51,7 @@ test("server rendering puts the stories before an independent Google sign-in", (
   assert.match(html, /Google로 시작하기/);
   assert.match(html, /목표부터 오늘 할 일까지/);
   assert.match(html, /href="\/download"/);
+  assert.match(html, /href="\/guide"/);
   assert.match(html, /OKRI 앱 다운로드/);
   assert.equal((html.match(/class="landing-slide"/g) ?? []).length, 4);
   assert.equal((html.match(/ inert=""/g) ?? []).length, 3);

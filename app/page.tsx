@@ -94,6 +94,7 @@ import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
 import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
+import { GuideDraft } from "./guide-draft";
 import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
 
@@ -122,7 +123,7 @@ function navigationFromLocation() {
   const requestedView = (rawView === "kr_data" ? "data" : rawView) as View | null;
   const projectId = params.get("project");
   return {
-    view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : "okr",
+    view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : params.get("guide") === "1" ? "home" : "okr",
     projectId,
     taskId: projectId ? null : params.get("task"),
   };
@@ -5007,6 +5008,7 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           </div>}
           {conversationHistory.some((entry) => entry.role === "user") && guideQuestions.length > 0 && <div className="assistant-followups">{guideQuestions.map((question) => <button className="followup-message" onClick={() => chooseQuickReply(question)} key={question}>{question}</button>)}</div>}
           {!canWrite && <div className="assistant-readonly"><Eye size={14} /><span>{t("Viewer는 대화와 분석을 이용할 수 있지만 항목을 생성할 수 없습니다.")}</span></div>}
+          <GuideDraft active={Boolean(usageScope)} ready={draftHydrated && !saving} onUse={(value) => setMessage((current) => current.trim() ? `${current}\n\n${value}` : value)} />
           <div className="chat-input"><label htmlFor="assistant-message">{t("메시지")}</label><div className="chat-composer"><textarea id="assistant-message" value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void organizeMessage(); }} rows={4} placeholder={mode === "task" ? t("해야 할 일을 편하게 설명해 주세요") : mode === "project" ? t("만들 Project의 결과와 범위를 설명해 주세요") : mode === "routine" ? t("언제 무엇을 반복할지 설명해 주세요") : t("지금 이루고 싶은 목표나 막힌 일을 편하게 적어 주세요")} /><button type="button" className="chat-send-button" onClick={() => void organizeMessage()} disabled={saving || !message.trim()} aria-label={saving ? t("답변 생성 중") : t("메시지 보내기")}>{saving ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}<span>{saving ? t("답변 중") : t("보내기")}</span></button></div></div>
           <div className="chat-actions">
             {hasDraft && canWrite && <button className="welcome-primary" onClick={() => void save()} disabled={saving || !canApplyDraft}>{saving ? t("생성 중") : saveLabel}<ChevronRight size={14} /></button>}

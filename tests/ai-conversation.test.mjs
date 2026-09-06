@@ -21,6 +21,11 @@ const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.me
 const assistantCommand = compile(await readFile(new URL("../lib/assistant-command.ts", import.meta.url), "utf8"));
 const routeSource = await readFile(new URL("../app/api/okr-organize/route.ts", import.meta.url), "utf8");
 const pageSource = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
+const guideDraft = compile(await readFile(new URL("../app/guide-draft.tsx", import.meta.url), "utf8"), {
+  "@/lib/guide-copy": compile(await readFile(new URL("../lib/guide-copy.ts", import.meta.url), "utf8")),
+  "@/lib/guide-draft": compile(await readFile(new URL("../lib/guide-draft.ts", import.meta.url), "utf8")),
+  "./guide-draft.css": {},
+});
 const ast = ts.createSourceFile("page.tsx", pageSource, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = new Set(["HomeOkrChat", "countOkrDraft", "planStringFieldsWithValues", "hasOkrDraft", "assistantOpeningMessage"]);
 const components = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && names.has(node.name?.text)).map((node) => node.getText(ast)).join("\n");
@@ -28,10 +33,11 @@ const { HomeOkrChat } = compile(`
 import { useState, useMemo, useRef, useEffect } from "react";
 import { t, messageValue } from "@/lib/client-language";
 import { parseAssistantCommand } from "@/lib/assistant-command";
+import { GuideDraft } from "./guide-draft";
 import { Bot, Link2, LoaderCircle, CheckCircle2, AlertTriangle, Eye, Send } from "lucide-react";
 ${components}
 export { HomeOkrChat };
-`, { "@/lib/assistant-command": assistantCommand });
+`, { "@/lib/assistant-command": assistantCommand, "./guide-draft": guideDraft });
 
 for (const entry of ["coach", "onboarding", "create", "task", "project", "routine"]) {
   test(`${entry} starts with conversation, not examples or an inventory`, () => {

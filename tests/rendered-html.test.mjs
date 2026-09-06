@@ -74,6 +74,18 @@ async function renderAsset(path) {
   );
 }
 
+test("public guide renders its complete native example without authentication", async () => {
+  const response = await render("/guide");
+  assert.equal(response.status, 200);
+  const html = await response.text();
+  assert.match(html, /id="guide-goal"/);
+  assert.match(html, /id="guide-title-task-7"/);
+  assert.match(html, /class="guide-roles"/);
+  assert.match(html, /https:\/\/okri.ai\/guide/);
+  assert.match(html, /data-ready="false"/);
+  assert.doesNotMatch(html, /landing-login-button|guide-screenshot/);
+});
+
 test("server-renders the OKRI application loading shell", async () => {
   const response = await render();
   assert.equal(response.status, 200);
