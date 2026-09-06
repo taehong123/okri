@@ -165,6 +165,29 @@ References: [VS Code role-based theme colors](https://code.visualstudio.com/api/
 [Dark Modern palette](https://github.com/microsoft/vscode/blob/main/extensions/theme-defaults/themes/dark_modern.json),
 [WCAG text contrast](https://www.w3.org/WAI/WCAG22/Understanding/contrast-minimum.html).
 
+## Workspace navigation and search
+
+- The closed workspace selector shows its avatar and name; the open switcher
+  retains personal/team type, role and current selection. The adjacent settings
+  gear, existing menu order and home destination remain unchanged.
+- The top bar uses a compact home action and workspace-scoped search instead of
+  a duplicate brand/page breadcrumb. Search reuses the native overlay dialog and
+  shared typography, input, action, focus and surface tokens.
+- Search is an unframed grouped list inside one dialog, not nested cards. Work
+  titles are regular weight; type, parent, assignee and due date are secondary.
+  Filters scroll horizontally on phones so larger user text does not push the
+  result actions out of reach. No viewport-based font scaling is introduced.
+- `search=1` represents the temporary search overlay; result navigation retains
+  its history entry. `cycle` and `focus` identify an OKR file and the item to
+  reveal. Closing search leaves the underlying view and drafts intact.
+- Recent queries and opaque work references are session-local and keyed by both
+  user and workspace. Their titles and permissions are revalidated on the server;
+  authenticated search responses must remain `private, no-store`.
+- `tests/workspace-search.test.mjs` checks full-database search, scope, paging,
+  filtering and trash exclusion. `tests/e2e/workspace-search.spec.ts` covers
+  keyboard/history/draft behavior, all five languages, six real themes, actual
+  fonts, 320–3840px layouts and short phones with 200% user text.
+
 ## Global language typography
 
 The interface supports Korean, English, Japanese, Simplified Chinese and

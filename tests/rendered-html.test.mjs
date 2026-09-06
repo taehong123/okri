@@ -594,7 +594,8 @@ test("ships workspace plans, fail-closed Payple billing, and one billing screen"
   assert.match(statusRoute, /getBillingStatus/);
   assert.match(sessionRoute, /payload\?\.contractAccepted === true/);
   assert.match(internalRoute, /verifyInternalBillingRequest/);
-  assert.match(workflow, /schedule:/);
+  assert.match(workflow, /workflow_dispatch:/);
+  assert.match(workflow, /cron: "17 \* \* \* \*"/);
   assert.match(workflow, /x-okri-signature/);
   assert.match(terms, /Free 0원, Team 11,000원, Business 55,000원/);
 });

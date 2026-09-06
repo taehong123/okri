@@ -245,14 +245,13 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
         : <div className="billing-owner-actions">{billing.plan !== "free" && <button type="button" onClick={() => void cancel()} disabled={Boolean(working) || billing.cancelAtPeriodEnd}>{billing.cancelAtPeriodEnd ? t("해지 예약됨") : working === "cancel" ? t("해지 중") : t("구독 해지")}</button>}<button type="button" onClick={() => void refund()} disabled={Boolean(working)}>{working === "refund" ? t("환불 처리 중") : t("첫 결제 환불 확인")}</button></div>}
     </section>}
 
-    {billing.canManage && (billing.providers?.paypal.length || billing.paypal) ? <section className="billing-paypal-section">
+    {billing.canManage && !billing.paymentMethod && (billing.providers?.paypal.length || billing.paypal) ? <section className="billing-paypal-section">
       <header><div><h3>{t("PayPal 결제")}</h3></div><a href="https://www.paypal.com/myaccount/autopay/" target="_blank" rel="noreferrer">{t("PayPal에서 관리")}<ExternalLink size={15} aria-hidden="true" /></a></header>
       <p>{t("한국 외 지역의 PayPal 계정으로 결제할 수 있습니다. 결제 통화와 금액을 확인해 주세요.")}</p>
       {billing.paypal ? <div className="billing-paypal-current"><b>{billing.paypal.plan === "team" ? "Team" : "Business"} · {formatMoney(billing.paypal.value, billing.paypal.currency)}{t("/ 월")}</b>
         <div className="billing-owner-actions"><button className="secondary" type="button" onClick={() => void syncPayPal()} disabled={Boolean(working)}><RefreshCw size={16} aria-hidden="true" />{t("결제 상태 확인")}</button>
           <button className="secondary" type="button" onClick={() => void cancel()} disabled={Boolean(working) || billing.cancelAtPeriodEnd}>{billing.cancelAtPeriodEnd ? t("해지 예약됨") : t("구독 해지")}</button>
           {billing.paypal.paidThrough && <button className="secondary" type="button" onClick={() => void refund()} disabled={Boolean(working)}>{t("첫 결제 환불 확인")}</button>}
-          {billing.paypal.status === "APPROVAL_PENDING" && <button type="button" onClick={() => { setSelectedPlan(billing.paypal!.plan); setPaypalAccepted(false); }} disabled={Boolean(working)}>{t("결제 다시 시작")}</button>}
         </div>
       </div> : null}
       {(!billing.paypal || ["CREATING", "APPROVAL_PENDING"].includes(billing.paypal.status)) && <div className="billing-checkout billing-paypal-checkout">

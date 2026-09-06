@@ -113,13 +113,29 @@ export type PayPalTransaction = { id: string; status: string; time: string;
 
 export type PayPalEvent = { id: string; event_type: string; resource: { id?: string; billing_agreement_id?: string; sale_id?: string } };
 export async function verifyPayPalWebhook(request: Request): Promise<PayPalEvent> {
-  const body = await request.text();
-  if (body.length > 100_000) throw new PayPalError("invalid_webhook", 413);
+  const reader = request.body?.getReader();
+  if (!reader) throw new PayPalError("invalid_webhook", 400);
+  const decoder = new TextDecoder();
+  let size = 0;
+  let body = "";
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    size += chunk.value.byteLength;
+    if (size > 100_000) { await reader.cancel(); throw new PayPalError("invalid_webhook", 413); }
+    body += decoder.decode(chunk.value, { stream: true });
+  }
+  body += decoder.decode();
   let event: PayPalEvent;
   try { event = JSON.parse(body) as PayPalEvent; } catch { throw new PayPalError("invalid_webhook", 400); }
   if (!event.id || !event.event_type || !event.resource) throw new PayPalError("invalid_webhook", 400);
   const fields = ["paypal-auth-algo", "paypal-cert-url", "paypal-transmission-id", "paypal-transmission-sig", "paypal-transmission-time"];
   if (fields.some((name) => !request.headers.get(name))) throw new PayPalError("invalid_webhook_signature", 401);
+  let certificate: URL;
+  try { certificate = new URL(request.headers.get("paypal-cert-url")!); } catch { throw new PayPalError("invalid_webhook_signature", 401); }
+  if (certificate.protocol !== "https:" || certificate.username || certificate.password || certificate.port
+    || !["api.paypal.com", "api-m.paypal.com", "api.sandbox.paypal.com", "api-m.sandbox.paypal.com"].includes(certificate.hostname)
+    || !certificate.pathname.startsWith("/v1/notifications/certs/")) throw new PayPalError("invalid_webhook_signature", 401);
   const verified = await paypalRequest<{ verification_status: string }>("/v1/notifications/verify-webhook-signature", {
     method: "POST", body: {
       auth_algo: request.headers.get(fields[0]), cert_url: request.headers.get(fields[1]),

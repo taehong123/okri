@@ -94,6 +94,8 @@ import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
 import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
+import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
+import type { SearchResult } from "@/lib/workspace-search";
 
 function slackErrorMessage(error: unknown, fallback?: string) {
   return t(baseSlackErrorMessage(error, fallback));
@@ -883,15 +885,19 @@ function WorkspaceApp() {
   const [inviteLoadError, setInviteLoadError] = useState("");
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [okrCycles, setOkrCycles] = useState<OkrCycle[]>([]);
-  const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(null);
+  const [selectedOkrCycleId, setSelectedOkrCycleId] = useState<string | null>(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("cycle"));
+  const [searchOpen, setSearchOpen] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("search") === "1");
+  const [searchFocusId, setSearchFocusId] = useState<string | null>(() => typeof window === "undefined" ? null : new URLSearchParams(window.location.search).get("focus"));
+  const [searchNavigationId, setSearchNavigationId] = useState(0);
   const [, setVisibleOkrCycleIds] = useState<string[]>([]);
   const [activeView, setActiveView] = useState<View>(() => navigationFromLocation().view);
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"cards" | "table" | "board">("table");
   const [notice, setNotice] = useState<AppNotice | null>(null);
-  const [integrationOpen, setIntegrationOpen] = useState(false);
+  const [integrationOpen, setIntegrationOpen] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("settings") === "ai");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [propertyPanelOpen, setPropertyPanelOpen] = useState(false);
+  const [propertyPanelOpen, setPropertyPanelOpen] = useState(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("settings") === "personal");
+  const [routineEditorDirty, setRoutineEditorDirty] = useState(false);
   const [workspaceAvatarOpen, setWorkspaceAvatarOpen] = useState(false);
   const [profilePromptMember, setProfilePromptMember] = useState<TeamMember | null>(null);
   const [requestedGroupHandle, setRequestedGroupHandle] = useState<string | null>(null);
@@ -1159,6 +1165,13 @@ function WorkspaceApp() {
   useEffect(() => {
     function syncFromHistory() {
       const next = navigationFromLocation();
+      if (window.history.state?.__okriSearchOriginView === "home") next.view = "home";
+      const params = new URLSearchParams(window.location.search);
+      setSearchOpen(params.get("search") === "1");
+      setSearchFocusId(params.get("focus"));
+      if (params.has("cycle")) setSelectedOkrCycleId(params.get("cycle"));
+      setPropertyPanelOpen(params.get("settings") === "personal");
+      setIntegrationOpen(params.get("settings") === "ai");
       if (activeView === "okr" && next.view !== "okr" && okrEditorDirty) {
         void confirmAction({ title: t("OKR 수정 중"), message: t("저장하지 않은 OKR 변경사항을 버리고 이동할까요?"), confirmLabel: t("변경사항 버리기"), danger: true }).then((confirmed) => {
           if (!confirmed) {
@@ -1237,6 +1250,7 @@ function WorkspaceApp() {
   const selectedTask = activeItems.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
   const activeWorkspaces = workspaces.filter((entry) => !entry.scheduledDeletionAt);
+  const searchDataRevision = useMemo(() => [items, routines], [items, routines]);
   const scheduledWorkspaces = workspaces.filter((entry) => Boolean(entry.scheduledDeletionAt));
   const workspaceNameCounts = workspaces.reduce((counts, workspace) => {
     const key = workspace.name.trim().toLocaleLowerCase();
@@ -1273,9 +1287,115 @@ function WorkspaceApp() {
     else url.searchParams.set("view", view);
     if (projectId) url.searchParams.set("project", projectId); else url.searchParams.delete("project");
     if (taskId && !projectId) url.searchParams.set("task", taskId); else url.searchParams.delete("task");
+    url.searchParams.delete("search");
+    url.searchParams.delete("focus");
     const state = { ...window.history.state, __okriNavigation: true };
     delete state.__okriOverlay;
+    delete state.__okriSearch;
+    delete state.__okriSearchDestination;
+    delete state.__okriSearchOriginView;
     window.history[mode === "push" ? "pushState" : "replaceState"](state, "", url);
+  }
+
+  function openSearch() {
+    setWorkspaceMenuOpen(false);
+    setSearchOpen(true);
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("search") === "1") return;
+    const originState = { ...window.history.state, __okriSearchOriginView: activeView };
+    window.history.replaceState(originState, "", window.location.href);
+    if (selectedOkrCycle) url.searchParams.set("cycle", selectedOkrCycle.id);
+    url.searchParams.set("search", "1");
+    window.history.pushState({ ...originState, __okriSearch: true }, "", url);
+  }
+
+  function closeSearch() {
+    if (window.history.state?.__okriSearch) { window.history.back(); return; }
+    setSearchOpen(false);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("search");
+    window.history.replaceState(window.history.state, "", url);
+  }
+
+  useEffect(() => {
+    const shortcut = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || event.key.toLowerCase() !== "k" || event.isComposing) return;
+      // Respect the top-most editor/confirmation rather than bypassing its guard.
+      if (document.querySelector("dialog[open]") && !searchOpen) return;
+      event.preventDefault();
+      if (!searchOpen) openSearch();
+      else document.querySelector<HTMLInputElement>(".workspace-search-panel input")?.focus();
+    };
+    window.addEventListener("keydown", shortcut);
+    return () => window.removeEventListener("keydown", shortcut);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchOpen, selectedOkrCycle?.id]);
+
+  const hydrateSearchResult = useCallback(async (kind: SearchResult["kind"], id: string, signal: AbortSignal) => {
+    const response = await fetch(`/api/search/resolve?kind=${kind}&id=${encodeURIComponent(id)}&date=${localDate()}`, { signal, cache: "no-store", headers: { "x-okri-workspace-id": currentWorkspace?.id ?? "" } });
+    if (!response.ok) throw new Error("search_item_unavailable");
+    const data = await response.json() as { items: OkriItem[]; cycles: OkrCycle[]; routines: Routine[]; propertyValues: PropertyValueMap; hiddenByProject: ProjectHiddenPropertyMap };
+    if (signal.aborted) return null;
+    setItems((current) => [...current.filter((item) => !data.items.some((fresh) => fresh.id === item.id)), ...data.items]);
+    setOkrCycles((current) => [...current.filter((cycle) => !data.cycles.some((fresh) => fresh.id === cycle.id)), ...data.cycles]);
+    setRoutines((current) => [...current.filter((routine) => !data.routines.some((fresh) => fresh.id === routine.id)), ...data.routines]);
+    if (data.routines.length) routineMemoryCache.delete(`routines:${currentWorkspace?.id}:${localDate()}`);
+    setPropertyValues((current) => ({ ...current, ...data.propertyValues }));
+    setHiddenProperties((current) => ({ ...current, ...data.hiddenByProject }));
+    return data;
+  }, [currentWorkspace?.id]);
+
+  async function navigateSearch(target: SearchResult | SearchDestination, signal: AbortSignal) {
+    if (okrEditorDirty) {
+      const confirmed = await confirmAction({ title: t("OKR 수정 중"), message: t("저장하지 않은 OKR 변경사항을 버리고 이동할까요?"), confirmLabel: t("변경사항 버리기"), danger: true });
+      if (!confirmed || signal.aborted) return false;
+    }
+    if (routineEditorDirty) {
+      const confirmed = await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true });
+      if (!confirmed || signal.aborted) return false;
+    }
+    const result = "kind" in target ? target : null;
+    let targetCycleId = result?.cycleId ?? null;
+    const destination: SearchDestination = result ? { view: result.kind === "project" ? "work" : result.kind === "task" ? "inbox" : result.kind === "routine" ? "routines" : "okr" } : target as SearchDestination;
+    if (result) {
+      const data = await hydrateSearchResult(result.kind, result.id, signal);
+      if (!data) return false;
+      targetCycleId = data.cycles[0]?.id ?? null;
+      if (data.cycles[0] && destination.view === "okr") setSelectedOkrCycleId(data.cycles[0].id);
+    }
+    if (signal.aborted) return false;
+    if (result) setSearchNavigationId((current) => current + 1);
+    setOkrCreating(false); setOkrEditorDirty(false); setSearchOpen(false);
+    const view = (destination.view ?? (activeView === "home" ? "okr" : activeView)) as View;
+    setActiveView(view);
+    setSelectedProjectId(result?.kind === "project" ? result.id : null);
+    setSelectedTaskId(result?.kind === "task" ? result.id : null);
+    setSearchFocusId(result && !["project", "task"].includes(result.kind) ? result.id : null);
+    writeNavigation(view, result?.kind === "project" ? result.id : null, result?.kind === "task" ? result.id : null);
+    const url = new URL(window.location.href);
+    if (result && !["project", "task"].includes(result.kind)) url.searchParams.set("focus", result.id);
+    if (targetCycleId && view === "okr") url.searchParams.set("cycle", targetCycleId);
+    for (const key of ["settings", "tab", "bot"]) url.searchParams.delete(key);
+    if (destination.tab) {
+      url.searchParams.set("settings", "workspace"); url.searchParams.set("tab", destination.tab);
+      if (destination.bot) url.searchParams.set("bot", destination.bot);
+      setWorkspaceSettingsTab(destination.tab as WorkspaceSettingsTab);
+    } else if (destination.personal || destination.ai) url.searchParams.set("settings", destination.personal ? "personal" : "ai");
+    setWorkspaceSettingsOpen(Boolean(destination.tab));
+    setPropertyPanelOpen(Boolean(destination.personal));
+    setIntegrationOpen(Boolean(destination.ai));
+    window.history.replaceState({ ...window.history.state, __okriSearchDestination: true }, "", url);
+    return true;
+  }
+
+  function closePersonalDestination(kind: "personal" | "ai") {
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("settings") === kind) {
+      if (window.history.state?.__okriSearchDestination) { window.history.back(); return; }
+      url.searchParams.delete("settings");
+      window.history.replaceState(window.history.state, "", url);
+    }
+    if (kind === "personal") setPropertyPanelOpen(false); else setIntegrationOpen(false);
   }
 
   function openWorkspaceSettings(tab: WorkspaceSettingsTab = "general", mode: "push" | "replace" = "push") {
@@ -1292,6 +1412,7 @@ function WorkspaceApp() {
   }
 
   function closeWorkspaceSettings() {
+    if (window.history.state?.__okriSearchDestination) { window.history.back(); return; }
     setWorkspaceSettingsOpen(false);
     setRequestedGroupHandle(null);
     const url = new URL(window.location.href);
@@ -1360,14 +1481,17 @@ function WorkspaceApp() {
     const missingProject = selectedProjectId && !items.some((entry) => entry.id === selectedProjectId && entry.kind === "project" && !entry.archivedAt);
     const missingTask = selectedTaskId && !items.some((entry) => entry.id === selectedTaskId && entry.kind === "task" && !entry.archivedAt);
     if (!missingProject && !missingTask) return;
-    const timeout = window.setTimeout(() => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort("timeout"), 12_000);
+    const loadTimer = window.setTimeout(() => { void hydrateSearchResult(missingProject ? "project" : "task", (missingProject ? selectedProjectId : selectedTaskId)!, controller.signal).catch(() => {
+      if (controller.signal.aborted && controller.signal.reason !== "timeout") return;
       setSelectedProjectId(null);
       setSelectedTaskId(null);
       writeNavigation(activeView === "home" ? "okr" : activeView, null, null, "replace");
       showNotice(t("요청한 상세 항목을 찾을 수 없습니다."), "error");
-    }, 0);
-    return () => window.clearTimeout(timeout);
-  }, [activeView, items, selectedProjectId, selectedTaskId, showNotice, workspaceDataState]);
+    }).finally(() => window.clearTimeout(timeout)); }, 0);
+    return () => { window.clearTimeout(loadTimer); window.clearTimeout(timeout); controller.abort(); };
+  }, [activeView, items, selectedProjectId, selectedTaskId, showNotice, workspaceDataState, hydrateSearchResult]);
 
   useEffect(() => {
     if (!freshWorkspaceDataReady || !currentWorkspace || currentWorkspace.role !== "owner" || hasActiveObjective) return;
@@ -2120,7 +2244,7 @@ function WorkspaceApp() {
             aria-haspopup="menu"
           >
             <WorkspaceAvatar workspace={currentWorkspace} className="brand-mark" />
-            <span><strong>{currentWorkspace?.name || t("개인 워크스페이스")}</strong><small>{currentWorkspace?.personal ? t("개인 워크스페이스") : t("팀 워크스페이스")}</small></span>
+            <span><strong>{currentWorkspace?.name || t("개인 워크스페이스")}</strong></span>
             <ChevronDown size={14} />
           </button>
           <button className="workspace-settings-trigger" onClick={() => openWorkspaceSettings("general")} aria-label={t("워크스페이스 설정")} title={t("워크스페이스 설정")}><Settings size={17} /></button>
@@ -2132,7 +2256,7 @@ function WorkspaceApp() {
                   <div className="workspace-row" key={workspace.id}>
                     <button onClick={() => void switchWorkspace(workspace.id)} disabled={workspaceSaving}>
                       <WorkspaceAvatar workspace={workspace} />
-                      <span><b>{workspace.name}</b><small>{workspace.personal ? t("개인") : `${teamRoleLabel(workspace.role)}${(workspaceNameCounts.get(workspace.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? t(" · 생성 {value1}", { value1: messageValue(formatDateTime(workspace.createdAt)) }) : ""}`}</small></span>
+                      <span><b>{workspace.name}</b><small>{workspace.personal ? t("개인") : `${t("팀")} · ${teamRoleLabel(workspace.role)}`}{(workspaceNameCounts.get(workspace.name.trim().toLocaleLowerCase()) ?? 0) > 1 ? t(" · 생성 {value1}", { value1: messageValue(formatDateTime(workspace.createdAt)) }) : ""}</small></span>
                       {workspace.current && <Check size={14} />}
                     </button>
                   </div>
@@ -2227,7 +2351,7 @@ function WorkspaceApp() {
             aria-label={t("홈으로 이동")}
             aria-current={activeView === "okr" && !selectedProject && !selectedTask ? "page" : undefined}
           >
-            <BrandLogo size="compact" decorative />
+            <House size={18} />
           </button>
           <button
             type="button"
@@ -2238,8 +2362,8 @@ function WorkspaceApp() {
           >
             <House size={15} /><span>{t("홈")}</span>
           </button>
-          <ChevronRight size={13} /><b>{selectedProject ? t("Project") : viewTitles[activeView]}</b>
-          <div><button className="mobile-assistant-trigger" aria-label={t("AI 대화 열기")} title={t("AI 대화 열기")} onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button aria-label={t("워크스페이스 설정")} title={t("워크스페이스 설정")} onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label={t("서비스 안내")} title={t("서비스 안내")} onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
+          <button type="button" className="workspace-search-trigger" onClick={openSearch} aria-label={t("업무 또는 메뉴 검색")} aria-haspopup="dialog"><Search size={16} /><span>{t("업무 또는 메뉴 검색…")}</span><kbd>{typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}</kbd></button>
+          <div className="workspace-topbar-actions"><button className="mobile-assistant-trigger" aria-label={t("AI 대화 열기")} title={t("AI 대화 열기")} onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button className="workspace-topbar-settings" aria-label={t("워크스페이스 설정")} title={t("워크스페이스 설정")} onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label={t("서비스 안내")} title={t("서비스 안내")} onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
         </header>
         <div className="page-body">
           {languageRecovery}
@@ -2249,7 +2373,7 @@ function WorkspaceApp() {
             onNotice={(message) => showNotice(message, "error")}
           />
           {activeView !== "home" && !selectedProject && <header className="page-header">
-            <div><h1>{viewTitles[activeView]}</h1><p>{pageSubtitle(activeView)}</p></div>
+            <div><h1>{viewTitles[activeView]}</h1><p>{activeView === "billing" ? `${currentWorkspace?.name ?? ""} · ${pageSubtitle(activeView)}` : pageSubtitle(activeView)}</p></div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />{t("목록보기")}</button>
             ) : activeView === "inbox" ? (
@@ -2306,6 +2430,7 @@ function WorkspaceApp() {
               hiddenPropertyIds={hiddenProperties[selectedProject.id] ?? []}
               teamMembers={teamMembers}
               onClose={closeDetail}
+              onBackToList={() => navigateView("work")}
               onPatch={patchItem}
               onPropertyChange={setPropertyValue}
               onPropertyVisibility={(propertyId, hidden) => void setProjectPropertyVisibility(selectedProject.id, propertyId, hidden)}
@@ -2346,13 +2471,14 @@ function WorkspaceApp() {
               />
             </section>
           )}
-          {activeView === "routines" && <RoutineView key={currentWorkspace?.id} workspaceId={currentWorkspace?.id ?? ""} readOnly={!canWriteWorkspace} canManageProperties={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
+          {activeView === "routines" && <RoutineView key={`${currentWorkspace?.id}:${searchNavigationId}`} focusId={searchFocusId} onDirtyChange={setRoutineEditorDirty} workspaceId={currentWorkspace?.id ?? ""} readOnly={!canWriteWorkspace} canManageProperties={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
           {activeView === "data" && <ClientDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} items={activeItems} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
                 {okrCreating || selectedOkrCycle ? <OkrFileSurface
-                  key={`${currentWorkspace?.id ?? ""}:${okrCreating ? "new" : selectedOkrCycle?.id}`}
+                  focusId={searchFocusId}
+                  key={`${currentWorkspace?.id ?? ""}:${okrCreating ? "new" : selectedOkrCycle?.id}:${searchNavigationId}`}
                   workspaceId={currentWorkspace?.id ?? ""}
                   cycle={okrCreating ? null : selectedOkrCycle ?? null}
                   creating={okrCreating}
@@ -2463,14 +2589,14 @@ function WorkspaceApp() {
           }}
         />
       )}
-      {integrationOpen && <AIConnectionsDialog onNotice={showNotice} onClose={() => setIntegrationOpen(false)} />}
+      {integrationOpen && <AIConnectionsDialog onNotice={showNotice} onClose={() => closePersonalDestination("ai")} />}
       {propertyPanelOpen && (
         <PropertyPanel
           user={authState.user}
           displayName={accountDisplayName}
           themeMode={themeMode}
           onThemeModeChange={setThemeMode}
-          onClose={() => setPropertyPanelOpen(false)}
+          onClose={() => closePersonalDestination("personal")}
           onSignOut={() => { clearCachedBootstrap(); clearAccountLanguage(); window.location.href = "/api/auth/logout"; }}
         />
       )}
@@ -2529,6 +2655,14 @@ function WorkspaceApp() {
           routines={routines}
           teamMembers={teamMembers}
           onClose={closeDetail}
+          onOpenParent={(kind, id) => {
+            if (kind === "project") openProjectPage(id);
+            else {
+              navigateView("routines"); setSearchFocusId(id);
+              const url = new URL(window.location.href); url.searchParams.set("focus", id);
+              window.history.replaceState(window.history.state, "", url);
+            }
+          }}
           onPatch={(patch) => patchItem(selectedTask.id, patch)}
           onAssignmentsChange={(assignments) => updateItemAssignments(selectedTask.id, assignments)}
           onNotice={showNotice}
@@ -2537,6 +2671,7 @@ function WorkspaceApp() {
           onToggleSelect={() => toggleDeleteSelection(selectedTask.id)}
         />
       )}
+      {currentWorkspace && authState.user && <WorkspaceSearch key={`${authState.user.id}:${currentWorkspace.id}`} open={searchOpen} identity={authState.user.id} workspaceId={currentWorkspace.id} workspaceName={currentWorkspace.name} personal={currentWorkspace.personal} members={teamMembers} cycles={okrCycles} refreshKey={searchDataRevision} onClose={closeSearch} onNavigate={navigateSearch} />}
     </main>
   );
 }
@@ -2978,8 +3113,9 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
+function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onBackToList, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
   project: OkriItem;
+  onBackToList: () => void;
   allItems: OkriItem[];
   properties: PropertyDefinition[];
   propertyValues: PropertyValueMap;
@@ -2999,6 +3135,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   selectedItemIds: Set<string>;
   onToggleSelect: (id: string) => void;
 }) {
+  const confirmAction = useAppConfirm();
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
@@ -3069,7 +3206,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
       {(requestClose) => <aside className={`property-panel project-detail-panel ${project.status === "archived" ? "archived" : ""}`}>
         <header className="project-page-head">
           <div>
-            <p>{t("Project")}</p>
+            <button type="button" className="detail-parent-link" onClick={async () => { if (!quickTaskTitle.trim() || await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) onBackToList(); }}><ArrowLeft size={14} />{t("Project 목록")}</button>
             <textarea
               className="project-title-input"
               defaultValue={project.title}
@@ -3313,8 +3450,9 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
   );
 }
 
-function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
+function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onOpenParent, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
   task: OkriItem;
+  onOpenParent: (kind: "project" | "routine", id: string) => void;
   allItems: OkriItem[];
   routines: Routine[];
   teamMembers: TeamMember[];
@@ -3443,7 +3581,7 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onPat
   return (
     <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel task-detail-panel">
-        <header><div><p>{lineageTitle}</p><textarea className="task-title-input" defaultValue={task.title} rows={1} aria-label={t("Task 이름")} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
+        <header><div>{project?.kind === "project" || routine ? <button type="button" className="detail-parent-link" onClick={async () => { if (title.trim() && !await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) return; if (project?.kind === "project") onOpenParent("project", project.id); else if (routine) onOpenParent("routine", routine.id); }}><ArrowLeft size={14} />{lineageTitle}</button> : <p>{lineageTitle}</p>}<textarea className="task-title-input" defaultValue={task.title} rows={1} aria-label={t("Task 이름")} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
         <button type="button" className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
         <section className="task-detail-fields" aria-label={t("Task 정보")}>
           <label><span>{t("우선순위")}</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
@@ -3785,7 +3923,7 @@ function CreatePropertyField({ property, value, members, onChange }: { property:
   return <label><span>{systemPropertyLabel(property, t)}</span><PropertyValueInput type={property.type} value={value} options={property.options} members={members} onChange={(next) => onChange(property, next)} /></label>;
 }
 
-function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat, readOnly, canManageProperties }: { readOnly: boolean; canManageProperties: boolean; workspaceId: string; initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
+function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat, readOnly, canManageProperties }: { focusId?: string | null; onDirtyChange: (dirty: boolean) => void; readOnly: boolean; canManageProperties: boolean; workspaceId: string; initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
   const confirmAction = useAppConfirm();
   const initialDate = localDate();
   const initialCacheKey = `routines:${workspaceId}:${initialDate}`;
@@ -3808,6 +3946,15 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
   const [propertiesReady, setPropertiesReady] = useState(false);
   const activeProperties = propertyDefinitions.filter((property) => property.active);
   const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set());
+  useEffect(() => {
+    if (!focusId) return;
+    const timer = window.setTimeout(() => {
+      setExpandedIds((current) => new Set([...current, focusId]));
+      const target = document.getElementById(`routine-search-${focusId}`);
+      target?.scrollIntoView({ block: "center" }); target?.focus({ preventScroll: true });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusId]);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -4016,6 +4163,9 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
   }
 
   const createDirty = Boolean(title.trim() || description.trim() || triggerPoint.trim() || actionPlace.trim() || actionSteps.trim() || cadence !== "daily" || assigneeMemberId || Object.keys(createProperties).length);
+  const routineDirty = Boolean(rows?.some((routine) => hasDraftChange(routine)));
+  useEffect(() => onDirtyChange(routineDirty), [routineDirty, onDirtyChange]);
+  useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
 
   return (<>
     <section className="routine-section">
@@ -4030,7 +4180,7 @@ function RoutineView({ workspaceId, initialRoutines, teamMembers, onNotice, onRo
           const expanded = expandedIds.has(routine.id);
           const detailsId = `routine-details-${routine.id}`;
           return (
-            <article className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""}`} key={routine.id}>
+            <article id={`routine-search-${routine.id}`} tabIndex={-1} className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""} ${focusId === routine.id ? "search-target" : ""}`} key={routine.id}>
               <header>
                 {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? t("완료 취소") : t("완료 처리")}><Check size={12} /></button>}
                 {routine.systemKey === "general" ? <div><b>{routine.title}<em className="system-badge">{t("기본")}</em></b><small>{t("Project·Routine에 연결하지 않은 Task가 모이는 기본 목록")}</small></div> : <button type="button" className="routine-expand" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedIds((current) => { const next = new Set(current); if (next.has(routine.id)) next.delete(routine.id); else next.add(routine.id); return next; })}><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? t("오늘 완료") : t("오늘 미완료")} · {teamMembers.find((member) => member.id === routine.assigneeMemberId)?.displayName ?? t("담당자 없음")}{hasDraftChange(routine) ? t(" · 저장하지 않은 변경") : ""}</small></span><ChevronDown size={16} /></button>}

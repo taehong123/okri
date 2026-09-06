@@ -141,12 +141,14 @@ async function fetchEditableOkrFile(workspaceId: string, cycleId: string) {
   return request;
 }
 
-function buildBootstrapOkrFile(cycle: OkrFileCycleSummary, items: OkrExecutionItem[]): OkrFile {
+function buildBootstrapOkrFile(cycle: OkrFileCycleSummary, items: OkrExecutionItem[], focusId?: string | null): OkrFile {
   const rows = items
     .filter((item): item is OkrExecutionItem & { status: ItemStatus } => item.cycleId === cycle.id && !item.archivedAt && item.status !== "archived" && ["objective", "key_result", "initiative"].includes(item.kind))
     .sort(compareExecutionItems);
   const objectives = rows.filter((item) => item.kind === "objective");
-  const objectiveRow = objectives[0] ?? null;
+  let target = rows.find((row) => row.id === focusId);
+  for (let depth = 0; target?.parentId && depth < 3; depth += 1) target = rows.find((row) => row.id === target?.parentId);
+  const objectiveRow = objectives.find((row) => row.id === target?.id) ?? objectives[0] ?? null;
   const keyResultRows = objectiveRow ? rows.filter((item) => item.kind === "key_result" && item.parentId === objectiveRow.id) : [];
   const objective: Objective | null = objectiveRow ? {
     id: objectiveRow.id,
@@ -203,6 +205,7 @@ const cycleStatuses: Array<{ value: CycleStatus; label: string }> = [
 ];
 
 export function OkrFileSurface({
+  focusId,
   workspaceId,
   cycle,
   creating = false,
@@ -218,6 +221,7 @@ export function OkrFileSurface({
   onDirtyChange,
   onConfirm,
 }: {
+  focusId?: string | null;
   workspaceId: string;
   cycle: OkrFileCycleSummary | null;
   creating?: boolean;
@@ -235,7 +239,7 @@ export function OkrFileSurface({
 }) {
   const cycleId = cycle?.id ?? null;
   const fileCacheKey = cycleId ? `${workspaceId}:${cycleId}` : `${workspaceId}:new`;
-  const readFile = useMemo(() => !creating && cycle ? buildBootstrapOkrFile(cycle, executionItems) : null, [creating, cycle, executionItems]);
+  const readFile = useMemo(() => !creating && cycle ? buildBootstrapOkrFile(cycle, executionItems, focusId) : null, [creating, cycle, executionItems, focusId]);
   const initialEditorDraft = readFile ? draftFromFile(readFile) : emptyDraft();
   const [file, setFile] = useState<OkrFile | null>(null);
   const [draft, setDraft] = useState<Draft>(initialEditorDraft);
@@ -246,6 +250,21 @@ export function OkrFileSurface({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(okrExpandedRows.get(fileCacheKey) ?? []));
+  const focusedKeyResultId = readFile?.objective?.keyResults.find((row) => row.initiatives.some((initiative) => initiative.id === focusId))?.id;
+  useEffect(() => {
+    if (!focusId || editing) return;
+    const timer = window.setTimeout(() => {
+      if (focusedKeyResultId) setExpandedRows((current) => {
+        const next = new Set([...current, focusedKeyResultId]);
+        okrExpandedRows.set(fileCacheKey, next); return next;
+      });
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(`okr-search-${focusId}`);
+        target?.scrollIntoView({ block: "center" }); target?.focus({ preventScroll: true });
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [focusId, focusedKeyResultId, editing, fileCacheKey]);
 
   const currentSnapshot = JSON.stringify({ draft, resolutions });
   const dirty = editing && currentSnapshot !== initialDraft;
@@ -486,10 +505,11 @@ export function OkrFileSurface({
     <header className="okr-file-read-header"><div><small>{t("OKR 파일 · v{version}", { version: readFile.cycle.version })}</small><h2>{readFile.cycle.name}</h2><p>{readFile.cycle.startDate} – {readFile.cycle.endDate} · {cycleStatuses.find((status) => status.value === readFile.cycle.status)?.label} · {readFile.cycle.department || t("부서 미지정")}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? t("편집 준비 중") : t("파일 수정")}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />{t("Project 탭")}</button></div></header>
     {error && <div className="okr-file-refresh-state error" role="status"><AlertTriangle size={12} />{error}</div>}
     {readFile.objective ? <section className="okr-file-read-tree">
-      <div className="okr-file-read-objective"><span className="type-icon type-objective">O</span><div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div></div>
+      <div id={`okr-search-${readFile.objective.id}`} tabIndex={-1} className={`okr-file-read-objective ${focusId === readFile.objective.id ? "search-target" : ""}`}><span className="type-icon type-objective">O</span><div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div></div>
       {readFile.objective.keyResults.map((keyResult, keyResultIndex) => <OkrReadKeyResult
         key={keyResult.id}
         keyResult={keyResult}
+        focusId={focusId}
         keyResultIndex={keyResultIndex}
         projectsByInitiative={executionTree.projectsByInitiative}
         tasksByProject={executionTree.tasksByProject}
@@ -503,6 +523,7 @@ export function OkrFileSurface({
 }
 
 function OkrReadKeyResult({
+  focusId,
   keyResult,
   keyResultIndex,
   projectsByInitiative,
@@ -512,6 +533,7 @@ function OkrReadKeyResult({
   onOpenProject,
   onOpenTask,
 }: {
+  focusId?: string | null;
   keyResult: KeyResult;
   keyResultIndex: number;
   projectsByInitiative: Map<string, OkrExecutionItem[]>;
@@ -525,7 +547,7 @@ function OkrReadKeyResult({
   const keyResultExpanded = expandedRows.has(keyResultId);
   const initiativesId = `okr-tree-${keyResultId}`;
   const hasInitiatives = keyResult.initiatives.length > 0;
-  return <section className="okr-file-read-kr">
+  return <section id={`okr-search-${keyResultId}`} tabIndex={-1} className={`okr-file-read-kr ${focusId === keyResultId ? "search-target" : ""}`}>
     {hasInitiatives ? <button type="button" className="okr-tree-row okr-tree-kr-row" aria-expanded={keyResultExpanded} aria-controls={initiativesId} onClick={() => onToggle(keyResultId)}>
       <TreeChevron expanded={keyResultExpanded} />
       <span className="type-icon type-key_result">KR</span>
@@ -545,7 +567,7 @@ function OkrReadKeyResult({
         const projects = projectsByInitiative.get(initiativeId) ?? [];
         const initiativeExpanded = expandedRows.has(initiativeId);
         const projectsId = `okr-tree-${initiativeId}`;
-        return <section className="okr-file-read-initiative" key={initiativeId}>
+        return <section id={`okr-search-${initiativeId}`} tabIndex={-1} className={`okr-file-read-initiative ${focusId === initiativeId ? "search-target" : ""}`} key={initiativeId}>
           {projects.length ? <button type="button" className="okr-tree-row okr-tree-initiative-row" aria-expanded={initiativeExpanded} aria-controls={projectsId} onClick={() => onToggle(initiativeId)}>
             <TreeChevron expanded={initiativeExpanded} />
             <span className="type-icon type-initiative">I</span>

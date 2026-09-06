@@ -181,7 +181,7 @@ test("webhooks reject invalid signatures and replay without duplicating transact
   const f = fixture(t); await f.create(); f.pay();
   const event = { id: "WH-EVENT", event_type: "PAYMENT.SALE.COMPLETED", resource: { billing_agreement_id: "I-EXAMPLE" } };
   const request = () => new Request("https://okri.example/api/billing/paypal/webhook", { method: "POST", body: JSON.stringify(event),
-    headers: Object.fromEntries(["auth-algo", "cert-url", "transmission-id", "transmission-sig", "transmission-time"].map((key) => [`paypal-${key}`, "example"])) });
+    headers: Object.fromEntries(["auth-algo", "cert-url", "transmission-id", "transmission-sig", "transmission-time"].map((key) => [`paypal-${key}`, key === "cert-url" ? "https://api.sandbox.paypal.com/v1/notifications/certs/EXAMPLE" : "example"])) });
   f.state.signature = "FAILURE";
   await assert.rejects(() => f.service.receivePayPalWebhook(request()), /invalid_webhook_signature/);
   assert.equal(f.subscription().plan, "free");
@@ -203,7 +203,7 @@ test("webhook refund cannot be undone by an older completed transaction snapshot
   const f = fixture(t); await f.create(); f.pay(); await f.service.syncPayPalWorkspace("a");
   const event = { id: "WH-REFUND", event_type: "PAYMENT.SALE.REFUNDED", resource: { sale_id: "SALE-EXAMPLE" } };
   const request = new Request("https://okri.example/api/billing/paypal/webhook", { method: "POST", body: JSON.stringify(event),
-    headers: Object.fromEntries(["auth-algo", "cert-url", "transmission-id", "transmission-sig", "transmission-time"].map((key) => [`paypal-${key}`, "example"])) });
+    headers: Object.fromEntries(["auth-algo", "cert-url", "transmission-id", "transmission-sig", "transmission-time"].map((key) => [`paypal-${key}`, key === "cert-url" ? "https://api.sandbox.paypal.com/v1/notifications/certs/EXAMPLE" : "example"])) });
   await f.service.receivePayPalWebhook(request);
   await f.service.syncPayPalWorkspace("a");
   assert.equal(f.subscription().plan, "free");

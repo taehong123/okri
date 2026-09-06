@@ -38,8 +38,9 @@ Sites 런타임에 다음 값을 보관한다. 다른 서비스의 상점 키를
 `BILLING.SUBSCRIPTION.PAYMENT.FAILED`, `PAYMENT.SALE.COMPLETED`,
 `PAYMENT.SALE.REFUNDED`, `PAYMENT.SALE.REVERSED`.
 
-기존 Worker 예약 실행이 15분마다 PayPal 상태를 대조한다. 별도 GitHub 시크릿이 없어도
-작동하며, `/api/internal/billing/run`은 서명된 수동 복구 경로로 유지한다.
+기존 Worker 예약 핸들러에 15분마다 PayPal 상태를 대조하는 경로를 연결했다.
+운영 트리거의 실행 여부는 별도로 확인해야 한다. `/api/internal/billing/run`은
+서명된 복구 경로이며 GitHub의 시간당 실행과 수동 실행에서도 호출한다.
 실행당 가장 오래 확인하지 않은 5개 구독을 처리한다. 구독 수가 늘면 전용 큐로 확장한다. PayPal 구독은
 기존 Payple 예약 청구에서 제외하여 이중 청구하지 않는다. 읽기에서도 유료 기간
 만료를 확인하므로 webhook 누락만으로 유료 권한이 무기한 유지되지 않는다.
@@ -102,14 +103,17 @@ Sites 운영 보안값:
 6. Team→Business 일할 상향과 Business→Team 다음 갱신 하향을 확인한다.
 7. 해지 시 자동 갱신은 즉시 멈추고 데이터는 유지되는지 확인한다.
 
-## 3. 시간당 청구 실행
+## 3. 예약 실행과 수동 복구
 
-GitHub 저장소에 다음 Actions secret을 등록한다.
+Worker 예약 실행과 별도로 GitHub의 시간당 복구 실행을 유지한다. 다음 Actions secret을 등록해야 한다.
 
 - `OKRI_BILLING_RUN_URL=https://okri.ai/api/internal/billing/run`
 - `OKRI_INTERNAL_BILLING_SECRET`: Sites의 `INTERNAL_BILLING_SECRET`과 동일한 값
 
-`.github/workflows/billing-hourly.yml`을 수동 실행해 서명 검증, D1 lease, 고유 주문번호 중복 방지를 확인한 뒤 스케줄을 사용한다.
+`.github/workflows/billing-hourly.yml`은 매시 17분 실행과 수동 복구를 지원한다.
+중복 실행은 서버 잠금으로 보호한다. 2026-09-06 보안 승인에서 전용 서명키 등록이
+중단되었으므로, 운영 키 등록과 서명된 호출의 성공을 확인하기 전에는 이 경로를
+활성화 완료로 보고하지 않는다.
 
 ## 4. 한도 활성화
 
