@@ -466,32 +466,6 @@ async function createOkriServer(authorization: RequestAuthorization, origin = "h
   );
 
   server.registerTool(
-    "prepare_work",
-    {
-      title: "Prepare work with classification and connection choices",
-      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
-      inputSchema: {
-        kind: z.enum(WORK_KINDS).default("unsure").describe("Your semantic hypothesis or the user's chosen type; unsure does not silently classify or save"),
-        query: z.string().max(120).optional().describe("Short existing parent title/topic to filter candidates, not the full work request. Omit to browse recent parents."),
-        member_query: z.string().max(120).optional().describe("Named person's name/email to narrow members; never guess IDs"),
-        include_members: z.boolean().default(true),
-        limit: z.number().int().min(1).max(20).default(6),
-      },
-      outputSchema: { context: workContextOutput },
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
-    },
-    async ({ kind, query, member_query, include_members, limit }) => {
-      const context = await readWorkContext(env.DB, ownerId, authorization.userId, {
-        kind, query, memberQuery: member_query, includeMembers: include_members, limit,
-      });
-      return {
-        structuredContent: { context: { ...context, rules } },
-        content: [{ type: "text", text: "Work context ready. Choose the type/connection from the user's intent, ask only essential gaps, then save once. Nothing has been saved." }],
-      };
-    },
-  );
-
-  server.registerTool(
     "get_workspace_rules",
     {
       title: "Get OKRI workspace rules",

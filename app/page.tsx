@@ -719,7 +719,7 @@ function useLiveSlackChannels(enabled: boolean) {
 function SlackChannelSyncStatus({ loading, error, onRefresh }: { loading: boolean; error: boolean; onRefresh: () => void }) {
   return <div className={`slack-channel-sync ${error ? "error" : ""}`} aria-live="polite">
     <span>{error ? t("Slack 채널 변경사항을 확인하지 못했습니다.") : t("Slack 변경사항을 15초마다 자동 반영합니다.")}</span>
-    <button type="button" disabled={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("지금 새로고침")}</button>
+    <button className="secondary" type="button" disabled={loading} aria-busy={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("새로고침")}</button>
   </div>;
 }
 
@@ -4383,7 +4383,9 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
   }
   async function createDailyTask(event: FormEvent) {
     event.preventDefault(); if (!newTaskTitle.trim() || !newTaskParent) return;
-    if (await createTaskForDaily(newTaskParent, newTaskTitle, crypto.randomUUID())) setNewTaskTitle("");
+    if (await createTaskForDaily(newTaskParent, newTaskTitle, crypto.randomUUID())) {
+      setNewTaskTitle(""); onNotice(t("오늘 기한의 Task를 만들고 데일리에 선택했습니다."));
+    }
   }
   async function createTaskForDaily(parent: string, title: string, requestId: string) {
     if (currentScrum.member.role === "viewer") return false;
@@ -4392,8 +4394,8 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
     try {
       const [parentKind, parentId = ""] = parent.split(":", 2);
       const response = await fetch("/api/daily-scrum/tasks", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, title, parentKind, parentId: parentId || null, requestId }) });
-      const result = await response.json() as { error?: string }; if (!response.ok) throw new Error(apiError(result, "Task를 만들지 못했습니다."));
-      await reload(); onNotice(t("오늘 기한의 Task를 만들고 데일리에 선택했습니다.")); return true;
+      const result = await response.json() as { error?: string; task: { title: string } }; if (!response.ok) throw new Error(apiError(result, "Task를 만들지 못했습니다."));
+      await reload(); return result.task.title;
     } catch (error) { onNotice(error instanceof Error ? error.message : t("Task를 만들지 못했습니다.")); return false; }
     finally { setSaving(null); }
   }

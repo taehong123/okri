@@ -176,7 +176,10 @@ function mcpFixture() {
   const tools = new Map();
   class FakeServer {
     constructor(_identity, options) { this.instructions = options.instructions; }
-    registerTool(name, definition, callback) { tools.set(name, { definition, callback }); }
+    registerTool(name, definition, callback) {
+      if (tools.has(name)) throw new Error(`Tool ${name} is already registered`);
+      tools.set(name, { definition, callback });
+    }
   }
   const serverModule = compile(`${mcpSource}\nexport { createOkriServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
