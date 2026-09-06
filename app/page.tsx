@@ -718,7 +718,7 @@ function useLiveSlackChannels(enabled: boolean) {
 function SlackChannelSyncStatus({ loading, error, onRefresh }: { loading: boolean; error: boolean; onRefresh: () => void }) {
   return <div className={`slack-channel-sync ${error ? "error" : ""}`} aria-live="polite">
     <span>{error ? t("Slack 채널 변경사항을 확인하지 못했습니다.") : t("Slack 변경사항을 15초마다 자동 반영합니다.")}</span>
-    <button type="button" disabled={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("지금 새로고침")}</button>
+    <button className="secondary" type="button" disabled={loading} aria-busy={loading} onClick={onRefresh}>{loading ? <LoaderCircle className="spin" size={13} /> : <RefreshCw size={13} />}{loading ? t("확인 중") : t("새로고침")}</button>
   </div>;
 }
 
