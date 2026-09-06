@@ -120,15 +120,22 @@ export async function createPayPalCheckout(workspaceId: string, userId: string, 
   });
 }
 
-export function paidMonthEndsAt(value: string) {
-  const date = new Date(value);
-  if (!Number.isFinite(date.getTime())) throw new PayPalError("paypal_invalid_payment_time");
-  const day = date.getUTCDate();
-  date.setUTCDate(1);
-  date.setUTCMonth(date.getUTCMonth() + 1);
-  const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
-  date.setUTCDate(Math.min(day, last));
-  return date.toISOString();
+export function paidMonthEndsAt(value: string, startTime = value) {
+  const paid = new Date(value);
+  const anchor = new Date(startTime);
+  if (![paid, anchor].every((date) => Number.isFinite(date.getTime()))) throw new PayPalError("paypal_invalid_payment_time");
+  const atMonth = (offset: number) => {
+    const date = new Date(anchor);
+    date.setUTCDate(1);
+    date.setUTCMonth(date.getUTCMonth() + offset);
+    const last = new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0)).getUTCDate();
+    date.setUTCDate(Math.min(anchor.getUTCDate(), last));
+    return date;
+  };
+  const months = (paid.getUTCFullYear() - anchor.getUTCFullYear()) * 12 + paid.getUTCMonth() - anchor.getUTCMonth();
+  let end = atMonth(Math.max(1, months));
+  if (end <= paid) end = atMonth(Math.max(1, months) + 1);
+  return end.toISOString();
 }
 
 export function validatePayPalSubscription(row: Pick<Row, "id" | "provider_plan_id" | "provider_subscription_id">, remote: PayPalSubscription) {
@@ -162,7 +169,7 @@ async function syncSubscription(row: Row) {
   // Approval and ACTIVE alone are not evidence of a successful charge.
   const paid = await env.DB.prepare(`SELECT paid_at FROM billing_paypal_transactions
     WHERE subscription_id=? AND status='COMPLETED' ORDER BY paid_at DESC LIMIT 1`).bind(row.id).first<{ paid_at: string }>();
-  const paidThrough = paid ? paidMonthEndsAt(paid.paid_at) : null;
+  const paidThrough = paid ? paidMonthEndsAt(paid.paid_at, remote.start_time) : null;
   const entitled = Boolean(paidThrough && paidThrough > now);
   const canceled = ["CANCELLED", "EXPIRED"].includes(remote.status);
   const pending = ["APPROVAL_PENDING", "APPROVED"].includes(remote.status);

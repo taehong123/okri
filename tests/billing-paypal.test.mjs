@@ -195,6 +195,8 @@ test("monthly access clamps month ends instead of skipping into the following mo
   const f = fixture(t);
   assert.equal(f.service.paidMonthEndsAt("2026-01-31T10:00:00.000Z"), "2026-02-28T10:00:00.000Z");
   assert.equal(f.service.paidMonthEndsAt("2028-01-31T10:00:00.000Z"), "2028-02-29T10:00:00.000Z");
+  assert.equal(f.service.paidMonthEndsAt("2026-02-28T10:00:00.000Z", "2026-01-31T10:00:00.000Z"), "2026-03-31T10:00:00.000Z");
+  assert.equal(f.service.paidMonthEndsAt("2026-02-01T10:00:00.000Z", "2026-01-31T10:00:00.000Z"), "2026-02-28T10:00:00.000Z");
 });
 
 test("webhook refund cannot be undone by an older completed transaction snapshot", async (t) => {
