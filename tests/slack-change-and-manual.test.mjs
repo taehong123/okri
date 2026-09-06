@@ -223,12 +223,13 @@ test("delivery queues resume each minute without accelerating existing maintenan
     "@/lib/slack-task-changes": { runDueTaskChanges: mark("changes") },
     "@/lib/slack-daily-manual": { runDueDailyManualRuns: mark("manual") },
     "@/lib/billing": { runBillingBatch: mark("billing") },
+    "@/lib/slack-daily-digest": { runDueDailyDigests: mark("digest") },
   }).default;
   for (const minute of [0, 1, 14, 15]) {
     calls.length = 0;
     const pending = [];
     worker.scheduled({ scheduledTime: Date.UTC(2026, 8, 5, 1, minute) }, { DB: {} }, { waitUntil: (job) => pending.push(job) });
     await Promise.all(pending);
-    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["deliveries", "changes", "manual", "kr", "backups", "management", "reminders", "billing"] : ["deliveries", "changes", "manual"]).sort());
+    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["deliveries", "changes", "manual", "digest", "kr", "backups", "management", "reminders", "billing"] : ["deliveries", "changes", "manual", "digest"]).sort());
   }
 });

@@ -107,6 +107,7 @@ const worker = {
     ctx.waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(_env.DB)));
     ctx.waitUntil(import("@/lib/slack-task-changes").then(({ runDueTaskChanges }) => runDueTaskChanges(_env.DB)));
     ctx.waitUntil(import("@/lib/slack-daily-manual").then(({ runDueDailyManualRuns }) => runDueDailyManualRuns(_env.DB)));
+    ctx.waitUntil(import("@/lib/slack-daily-digest").then(({ runDueDailyDigests }) => runDueDailyDigests(_env.DB)));
     if (new Date(_controller.scheduledTime).getUTCMinutes() % 15 !== 0) return;
     ctx.waitUntil(import("@/lib/billing").then(({ runBillingBatch }) => runBillingBatch()));
     const managementBotRun = import("@/lib/workspace-management-bot")

@@ -225,6 +225,7 @@ export async function getSlackDailySettings(authorization: RequestAuthorization)
 
 export async function updateSlackDailySettings(ownerId: string, input: {
   enabled?: boolean; weekdays?: number[]; reminderTime?: string; timezone?: string; channelIds?: string[];
+  summaryEnabled?: boolean; summaryTime?: string;
 }) {
   const connection = await getSlackConnection(ownerId);
   if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
@@ -235,6 +236,8 @@ export async function updateSlackDailySettings(ownerId: string, input: {
   await upsertSlackDailySettings(ownerId, {
     enabled: input.enabled ?? current.enabled,
     weekdays: JSON.stringify(weekdays), reminderTime, timezone,
+    summaryEnabled: input.summaryEnabled ?? current.summaryEnabled,
+    summaryTime: input.summaryTime === undefined ? current.summaryTime : normalizeReminderTime(input.summaryTime),
   });
   if (input.channelIds) {
     const selected = await prepareSlackDailyChannels(ownerId, input.channelIds);
@@ -372,6 +375,7 @@ export async function testDailyChannel(ownerId: string, channelId: string) {
 
 export async function configureSlackDailyOnboarding(authorization: RequestAuthorization, input: {
   weekdays: number[]; reminderTime: string; timezone: string; memberIds: string[]; channelIds: string[]; sendTests?: boolean;
+  summaryEnabled?: boolean; summaryTime?: string;
 }) {
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
@@ -397,6 +401,8 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   }
 
   const selectedChannels = await prepareSlackDailyChannels(authorization.ownerId, input.channelIds);
+  const currentSettings = await ensureDailySettingsRow(authorization.ownerId, connection);
+  const summaryTime = input.summaryTime === undefined ? currentSettings.summaryTime : normalizeReminderTime(input.summaryTime);
   const now = new Date().toISOString();
   await upsertSlackDailySettings(authorization.ownerId, {
     enabled: true,
@@ -404,6 +410,8 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
     reminderTime,
     timezone,
     onboardingCompletedAt: now,
+    summaryEnabled: input.summaryEnabled ?? currentSettings.summaryEnabled,
+    summaryTime,
     installStatus: "connected",
     requiredScopes: "",
     lastError: "",
@@ -748,6 +756,8 @@ export async function publishDailySubmission(ownerId: string, submissionId: stri
         .bind(error instanceof Error ? error.message : "Slack 채널 전송 실패", now, ownerId, publication.id).run();
     }
   }
+  const { runDueDailyDigests } = await import("@/lib/slack-daily-digest");
+  await runDueDailyDigests(env.DB, new Date(), ownerId);
 }
 
 export async function retryDailyPublication(ownerId: string, publicationId: string) {
@@ -982,6 +992,7 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
 
 function serializeSettings(settings: typeof slackDailySettings.$inferSelect) {
   return { enabled: settings.enabled, weekdays: parseWeekdays(settings.weekdays), reminderTime: settings.reminderTime, timezone: settings.timezone,
+    summaryEnabled: settings.summaryEnabled, summaryTime: settings.summaryTime,
     installStatus: settings.installStatus, requiredScopes: settings.requiredScopes ? settings.requiredScopes.split(",").filter(Boolean) : [],
     onboardingCompletedAt: settings.onboardingCompletedAt,
     lastSyncedAt: settings.lastSyncedAt, lastError: settings.lastError, updatedAt: settings.updatedAt };

@@ -2,6 +2,7 @@ import { authorizeRequest, canManageTeam } from "@/lib/pace-data";
 import { env, waitUntil } from "cloudflare:workers";
 import { getDailyManualRun, latestDailyManualRun, processDailyManualRun, startDailyManualRun } from "@/lib/slack-daily-manual";
 import { runDueSlackBotDeliveries } from "@/lib/slack-bot-delivery";
+import { parseDigestSettings } from "@/lib/slack-daily-digest";
 import { getSlackDailySettings, reconcileDailyReminders, retryDailyPublication, sendDailyReminderNow, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
@@ -58,6 +59,7 @@ export async function PATCH(request: Request) {
       return Response.json(await getSlackDailySettings(authorization));
     }
     return Response.json(await updateSlackDailySettings(authorization.ownerId, {
+      ...parseDigestSettings(payload),
       enabled: typeof payload.enabled === "boolean" ? payload.enabled : undefined,
       weekdays: Array.isArray(payload.weekdays) ? payload.weekdays.map(Number) : undefined,
       reminderTime: typeof payload.reminderTime === "string" ? payload.reminderTime : undefined,
@@ -69,5 +71,5 @@ export async function PATCH(request: Request) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Slack 데일리 설정을 처리하지 못했습니다.";
-  return Response.json({ error: message }, { status: /필요|선택|시간|시간대|채널|찾을 수/i.test(message) ? 400 : 500 });
+  return Response.json({ error: message }, { status: /필요|선택|시간|시간대|채널|찾을 수|설정/i.test(message) ? 400 : 500 });
 }

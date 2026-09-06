@@ -6731,7 +6731,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
 type SlackDailyAdminData = {
   connected: boolean; teamName: string | null; needsReauthorization: boolean; setupComplete: boolean;
   delivery?: ReturnType<typeof dailyDeliveryHealth>;
-  settings: { enabled: boolean; weekdays: number[]; reminderTime: string; timezone: string; installStatus: string; onboardingCompletedAt: string | null; lastSyncedAt: string | null; lastError: string };
+  settings: { enabled: boolean; weekdays: number[]; reminderTime: string; summaryEnabled: boolean; summaryTime: string; timezone: string; installStatus: string; onboardingCompletedAt: string | null; lastSyncedAt: string | null; lastError: string };
   channels: SlackChannelOption[];
   members: Array<{ memberId: string; displayName: string; email: string; linked: boolean; slackDisplayName: string | null; preference: { enabled: boolean; reminderTime: string | null; timezone: string | null }; reminder: { status: string; postAt: number; error: string } | null }>;
   failedPublications: Array<{ id: string; channelId: string; memberName: string; date: string; error: string; attempts: number }>;
@@ -6863,6 +6863,8 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
         body: JSON.stringify({
           weekdays: admin.settings.weekdays,
           reminderTime: admin.settings.reminderTime,
+          summaryEnabled: admin.settings.summaryEnabled ?? true,
+          summaryTime: admin.settings.summaryTime ?? "12:00",
           timezone: admin.settings.timezone,
           memberIds,
           channelIds: admin.channels.map((channel) => channel.id),
@@ -6953,7 +6955,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
   if (!admin) return <div className="slack-daily-loading"><LoaderCircle className="spin" size={15} />{t("데일리 설정 확인 중")}</div>;
 
   const showSetup = !admin.setupComplete || editing;
-  const settingsValue = (value: SlackDailyAdminData | null) => value ? JSON.stringify({ settings: [value.settings.reminderTime, value.settings.timezone, value.settings.weekdays], members: value.members.filter((member) => member.linked && member.preference.enabled).map((member) => member.memberId).sort(), channels: value.channels.map((channel) => channel.id).sort() }) : "";
+  const settingsValue = (value: SlackDailyAdminData | null) => value ? JSON.stringify({ settings: [value.settings.reminderTime, value.settings.timezone, value.settings.weekdays, value.settings.summaryEnabled ?? true, value.settings.summaryTime ?? "12:00"], members: value.members.filter((member) => member.linked && member.preference.enabled).map((member) => member.memberId).sort(), channels: value.channels.map((channel) => channel.id).sort() }) : "";
   const dirty = settingsValue(admin) !== settingsValue(savedAdmin);
   const targetMembers = admin.members.filter((member) => member.linked && member.preference.enabled);
   const linkedMembers = admin.members.filter((member) => member.linked);
@@ -6971,6 +6973,12 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
       <div className="slack-onboarding-grid single">
         <label><span>{t("발송 시간")}</span><input disabled={busy} aria-label={t("Slack 데일리 발송 시간")} type="time" value={admin.settings.reminderTime} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, reminderTime: event.target.value } })} /></label>
       </div>
+      <div className="daily-digest-settings">
+        <label className="daily-digest-toggle"><input type="checkbox" disabled={busy} checked={admin.settings.summaryEnabled ?? true} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, summaryEnabled: event.target.checked } })} /><span>{t("팀원·KR별 Task 요약 공유")}</span></label>
+        {(admin.settings.summaryEnabled ?? true) && <div className="slack-onboarding-grid single"><label><span>{t("요약 공유 마감 시간")}</span><input type="time" disabled={busy} required aria-label={t("요약 공유 마감 시간")} value={admin.settings.summaryTime ?? "12:00"} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, summaryTime: event.target.value } })} /></label></div>}
+        <p>{t("모두 공유하면 즉시, 미공유 인원이 있으면 마감 시간에 공유합니다.")}</p>
+        {!admin.channels.length && <p className="daily-digest-no-channel">{t("요약을 받으려면 공유 채널을 선택해 주세요.")}</p>}
+      </div>
       <fieldset className="slack-onboarding-weekdays"><legend>{t("발송 요일")}</legend><div>{weekdayLabels.map((label, day) => <label key={label}><input disabled={busy} type="checkbox" checked={admin.settings.weekdays.includes(day)} onChange={(event) => setAdmin({ ...admin, settings: { ...admin.settings, weekdays: event.target.checked ? [...admin.settings.weekdays, day].sort() : admin.settings.weekdays.filter((entry) => entry !== day) } })} /><span>{label}</span></label>)}</div></fieldset>
       <fieldset className="slack-onboarding-members"><legend>{t("알림 받을 멤버")}</legend><div className="bot-target-shortcut"><p>{t("이메일이 같은 Slack 계정을 연결합니다.")}</p><button type="button" disabled={busy} onClick={() => setAdmin({ ...admin, members: admin.members.map((member) => member.linked ? { ...member, preference: { ...member.preference, enabled: true } } : member) })}>{t("연결 멤버 전체 선택")}</button></div><div>{admin.members.map((member) => <label key={member.memberId} className={member.linked ? "" : "disabled"}><input aria-label={t("{value1} Slack 알림 대상", { value1: messageValue(member.displayName) })} type="checkbox" disabled={busy || !member.linked} checked={member.linked && member.preference.enabled} onChange={(event) => setAdmin({ ...admin, members: admin.members.map((entry) => entry.memberId === member.memberId ? { ...entry, preference: { ...entry.preference, enabled: event.target.checked } } : entry) })} /><span><b>{member.displayName}</b><small>{member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")}</small></span></label>)}</div></fieldset>
       <fieldset className="slack-onboarding-channels"><legend>{t("공유 채널")}</legend><SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} /><label className="slack-no-channel"><input disabled={busy} aria-label={t("채널 공유 안 함")} type="radio" name="slack-channel-sharing" checked={admin.channels.length === 0} onChange={() => setAdmin({ ...admin, channels: [] })} /><span><b>{t("공유 안 함")}</b><small>{t("개인 DM만 발송")}</small></span></label>{channels.map((channel) => <label key={channel.id}><input disabled={busy} aria-label={t("{value1} Slack 공유 채널", { value1: messageValue(channel.name) })} type="checkbox" checked={admin.channels.some((entry) => entry.id === channel.id)} onChange={(event) => setAdmin({ ...admin, channels: event.target.checked ? [...admin.channels, channel] : admin.channels.filter((entry) => entry.id !== channel.id) })} /><span><b>#{channel.name}</b><small>{slackChannelKindLabel(channel)}</small></span></label>)}</fieldset>
@@ -6978,6 +6986,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
     </section> : <section className="slack-connected-summary">
       <div className="slack-connected-title">{delivery.status === "ready" ? <CheckCircle2 size={19} /> : <span><AlertTriangle size={19} /></span>}<p><b>{t("데일리 봇")}{dailyDeliveryLabel(delivery.status)}</b><span>{teamName}</span></p><button type="button" disabled={busy} onClick={() => { setSavedAdmin(admin); setSaveError(""); setEditing(true); }}>{t("설정")}</button></div>
       <dl><div><dt>{t("대상")}</dt><dd>{t("{count}명", { count: targetMembers.length })}</dd></div><div><dt>{t("다음 발송")}</dt><dd>{nextReminder ? new Date(nextReminder * 1000).toLocaleString(getClientLocale(), { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" }) : t("예약 확인 필요")}</dd></div><div><dt>{t("공유 채널")}</dt><dd>{admin.channels.length ? admin.channels.map((channel) => `#${channel.name}`).join(", ") : t("공유 안 함")}</dd></div></dl>
+      <div className="daily-digest-summary"><b>{t("데일리 팀 요약")}</b><span>{!(admin.settings.summaryEnabled ?? true) ? t("꺼짐") : !admin.channels.length ? t("공유 채널 미지정") : t("전원 공유 시 즉시 · 늦어도 {time}", { time: admin.settings.summaryTime ?? "12:00" })}</span></div>
       <section className="slack-manual-send" aria-labelledby="slack-manual-send-title">
         <header><div><b id="slack-manual-send-title">{t("즉시 발송")}</b><small>{t("멤버에게 데일리 DM을 바로 보냅니다.")}</small></div><button type="button" disabled={busy || sendingMemberId !== null || bulkSending || bulkResult?.status === "pending" || !linkedMembers.length || Boolean(bulkError)} onClick={() => { if (bulkResult?.status === "complete") bulkRequestRef.current = null; void sendDailyToAll(); }}><Send size={14} />{bulkSending || bulkResult?.status === "pending" ? t("발송 중") : t("전체 보내기")}</button></header>
         {bulkResult && <p className="slack-bulk-result" role="status">{bulkResult.createdAt && <>{t("최근 수동 발송")} · {formatSlackAutomationTime(bulkResult.createdAt)}<br /></>}{t("전체 {total}명 · 성공 {sent} · 실패 {failed} · 확인 필요 {uncertain} · 대기 {pending}", { total: bulkResult.total, sent: bulkResult.sent, failed: bulkResult.failed, uncertain: bulkResult.uncertain, pending: bulkResult.pending })}</p>}

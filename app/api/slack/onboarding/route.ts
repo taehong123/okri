@@ -1,4 +1,5 @@
 import { configureSlackDailyOnboarding } from "@/lib/slack-daily";
+import { parseDigestSettings } from "@/lib/slack-daily-digest";
 import { authorizeRequest, canManageTeam } from "@/lib/pace-data";
 
 export async function POST(request: Request) {
@@ -9,6 +10,7 @@ export async function POST(request: Request) {
   try {
     const payload = await request.json() as Record<string, unknown>;
     return Response.json(await configureSlackDailyOnboarding(authorization, {
+      ...parseDigestSettings(payload),
       weekdays: Array.isArray(payload.weekdays) ? payload.weekdays.map(Number) : [],
       reminderTime: typeof payload.reminderTime === "string" ? payload.reminderTime : "",
       timezone: typeof payload.timezone === "string" ? payload.timezone : "",
@@ -17,6 +19,6 @@ export async function POST(request: Request) {
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Slack 초기 설정을 완료하지 못했습니다.";
-    return Response.json({ error: message }, { status: /필요|선택|시간|시간대|채널|멤버|연결/i.test(message) ? 400 : 500 });
+    return Response.json({ error: message }, { status: /필요|선택|시간|시간대|채널|멤버|연결|설정/i.test(message) ? 400 : 500 });
   }
 }

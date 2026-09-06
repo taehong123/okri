@@ -4,13 +4,18 @@ import test from "node:test";
 import ts from "typescript";
 
 const sources = Object.fromEntries(await Promise.all([
-  ["settings", "daily/settings"], ["disconnect", "disconnect"], ["callback", "callback"], ["events", "events"],
+  ["settings", "daily/settings"], ["onboarding", "onboarding"], ["disconnect", "disconnect"], ["callback", "callback"], ["events", "events"],
 ].map(async ([name, path]) => [name, ts.transpileModule(await readFile(new URL(`../app/api/slack/${path}/route.ts`, import.meta.url), "utf8"), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText])));
 const oauthOutput = ts.transpileModule(await readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
 }).outputText;
+
+const digestSource = ts.createSourceFile("digest.ts", await readFile(new URL("../lib/slack-daily-digest.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+const digestFunction = digestSource.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "parseDigestSettings").getFullText(digestSource);
+const digestCode = ts.transpileModule(digestFunction.replace("export function", "function"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+const parseDigestSettings = new Function(`${digestCode}; return parseDigestSettings;`)();
 
 function harness() {
   const calls = [], pending = [], receipts = new Set();
@@ -25,6 +30,7 @@ function harness() {
   class SlackWorkspaceConnectionError extends Error {}
   class SlackOAuthExchangeError extends Error {}
   const deps = {
+    "@/lib/slack-daily-digest": { parseDigestSettings },
     "@/lib/slack-daily-manual": {
       async latestDailyManualRun() { return null; },
       async startDailyManualRun(_db, auth, id) { calls.push(["bulk-start", auth.ownerId, id]); return { id, status: "pending" }; },
@@ -59,6 +65,8 @@ function harness() {
       SlackWorkspaceConnectionError,
     },
     "@/lib/slack-daily": {
+      async updateSlackDailySettings(ownerId, input) { calls.push(["update", ownerId, input]); return { settings: input }; },
+      async configureSlackDailyOnboarding(auth, input) { calls.push(["setup", auth.ownerId, input]); return { settings: input }; },
       async disconnectSlackDaily(id, connection) {
         calls.push(["cleanup", id, connection.id]);
         if (state.cleanupError) throw new Error(state.cleanupError);
@@ -96,6 +104,24 @@ function harness() {
   });
   return { routes, state, calls, pending, request, old };
 }
+
+test("summary settings and onboarding preserve OFF/time and validate input under workspace admin authorization", async () => {
+  for (const [name, method] of [["settings", "PATCH"], ["onboarding", "POST"]]) {
+    const h = harness();
+    const response = await h.routes[name][method](h.request(method, { ownerId: "foreign", summaryEnabled: false, summaryTime: "13:30" }));
+    assert.equal(response.status, 200);
+    const write = h.calls.find((call) => ["update", "setup"].includes(call[0]));
+    assert.equal(write[1], "workspace"); assert.equal(write[2].summaryEnabled, false); assert.equal(write[2].summaryTime, "13:30");
+    for (const input of [{ summaryEnabled: "false" }, { summaryTime: "24:00" }, { summaryTime: null }]) {
+      assert.equal((await h.routes[name][method](h.request(method, input))).status, 400);
+    }
+    for (const role of ["member", "viewer"]) {
+      h.state.authorization.role = role;
+      assert.equal((await h.routes[name][method](h.request(method, { summaryEnabled: true }))).status, 403);
+    }
+    assert.equal(h.calls.filter((call) => ["update", "setup"].includes(call[0])).length, 1);
+  }
+});
 
 test("daily settings do not require channel message history or mention access", () => {
   const loaded = { exports: {} };

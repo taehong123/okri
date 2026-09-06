@@ -816,6 +816,7 @@ async function ensureSchema() {
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_settings (
           owner_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 0,
           weekdays TEXT NOT NULL DEFAULT '[1,2,3,4,5]', reminder_time TEXT NOT NULL DEFAULT '09:00',
+          summary_enabled INTEGER NOT NULL DEFAULT 1, summary_time TEXT NOT NULL DEFAULT '12:00',
           timezone TEXT NOT NULL DEFAULT 'Asia/Seoul', install_status TEXT NOT NULL DEFAULT 'not_connected',
           required_scopes TEXT NOT NULL DEFAULT '', onboarding_completed_at TEXT, last_synced_at TEXT, last_error TEXT NOT NULL DEFAULT '',
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -913,6 +914,8 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_reason TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN onboarding_completed_at TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN summary_enabled INTEGER NOT NULL DEFAULT 1");
+      await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN summary_time TEXT NOT NULL DEFAULT '12:00'");
       await d1.prepare(`UPDATE slack_daily_settings
         SET onboarding_completed_at = COALESCE(last_synced_at, updated_at)
         WHERE install_status = 'connected'
@@ -970,6 +973,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       daily_scrum.skip_reason,
       daily_submission.skip_reason,
       slack_daily_setting.reminder_time,
+      slack_daily_setting.summary_enabled,
+      slack_daily_setting.summary_time,
       slack_daily_setting.onboarding_completed_at
       ,management_bot.report_time
       ,assistant_draft.updated_at

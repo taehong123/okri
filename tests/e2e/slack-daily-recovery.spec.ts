@@ -22,7 +22,7 @@ test("daily settings save explicitly, cancel restores values, and saving never s
   await page.goto("/?settings=workspace&tab=integrations&bot=daily");
   await page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true }).click();
   const panel = page.locator(".slack-onboarding-card");
-  const input = panel.locator('input[type="time"]');
+  const input = panel.getByLabel("Slack 데일리 발송 시간", { exact: true });
   await input.fill("10:15");
   await expect(panel.getByRole("status")).toHaveText("저장하지 않은 변경사항");
   expect(writes).toEqual([]);

@@ -993,6 +993,8 @@ export const slackDailySettings = sqliteTable(
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(false),
     weekdays: text("weekdays").notNull().default("[1,2,3,4,5]"),
     reminderTime: text("reminder_time").notNull().default("09:00"),
+    summaryEnabled: integer("summary_enabled", { mode: "boolean" }).notNull().default(true),
+    summaryTime: text("summary_time").notNull().default("12:00"),
     timezone: text("timezone").notNull().default("Asia/Seoul"),
     installStatus: text("install_status").notNull().default("not_connected"),
     requiredScopes: text("required_scopes").notNull().default(""),

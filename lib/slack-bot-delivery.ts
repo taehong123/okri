@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { decryptSlackSecret, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
 
-type BotKind = "management" | "automation" | "daily_publication" | "daily_manual";
+type BotKind = "management" | "automation" | "daily_publication" | "daily_manual" | "daily_digest";
 type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string };
 type Row = {
   id: string; owner_id: string; bot_kind: BotKind; subject_id: string; event_key: string;
@@ -12,6 +12,27 @@ type Row = {
 type Connection = { id: string; team_id: string; connected_at: string; encrypted_bot_token: string };
 const LEASE_MS = 120_000;
 const MAX_ATTEMPTS = 5;
+
+export async function queueDailyDigest(db: D1Database, input: {
+  ownerId: string; channel: string; date: string; memberIds: string[]; pages: Array<{ text: string; blocks: unknown[] }>; expiresAt: string;
+}, now: Date) {
+  const connection = await readConnection(db, input.ownerId);
+  const policy = await readPolicy(db, input.ownerId, "daily_digest", input.channel, false);
+  if (!connection || !policy) throw new Error("데일리 요약 공유 설정을 확인해 주세요.");
+  if (!("members" in policy) || JSON.stringify([...input.memberIds].sort()) !== JSON.stringify(policy.members) || policy.date !== input.date) {
+    throw new Error("데일리 요약 공유 설정을 확인해 주세요.");
+  }
+  const stamp = now.toISOString();
+  // Persist every page together so an interrupted worker cannot lose later pages.
+  const pages = input.pages.map((page, index) => ({ page, index }));
+  await db.batch([...pages.slice(1), pages[0]].filter(Boolean).map(({ page, index }) => db.prepare(`INSERT INTO slack_bot_deliveries
+    (id, owner_id, bot_kind, subject_id, event_key, connection_key, policy, payload, status, attempts, retry_at, expires_at, last_error, created_at, updated_at)
+    SELECT ?, ?, 'daily_digest', ?, ?, ?, ?, ?, 'pending', 0, ?, ?, '', ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_digest' AND event_key = ?)
+    ON CONFLICT(owner_id, bot_kind, event_key) DO NOTHING`).bind(crypto.randomUUID(), input.ownerId, input.channel,
+      `${input.date}/${input.channel}/${index}`, connectionKey(connection), JSON.stringify(policy), JSON.stringify({ channel: input.channel, ...page }),
+      stamp, input.expiresAt, stamp, stamp, input.ownerId, `${input.date}/${input.channel}/0`)));
+}
 
 // Persist first, claim atomically, and never guess whether an unacknowledged POST succeeded.
 export async function deliverSlackBotMessage(db: D1Database, input: {
@@ -156,6 +177,21 @@ async function readConnection(db: D1Database, ownerId: string) {
 }
 
 async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjectId: string, test: boolean) {
+  if (kind === "daily_digest") {
+    const settings = await db.prepare(`SELECT s.summary_time, s.timezone, s.weekdays, c.channel_id
+      FROM slack_daily_settings s JOIN slack_daily_channels c ON c.owner_id = s.owner_id
+      WHERE s.owner_id = ? AND c.channel_id = ? AND s.enabled = 1 AND s.summary_enabled = 1
+        AND s.onboarding_completed_at IS NOT NULL AND s.install_status = 'connected'`).bind(ownerId, subjectId).first<Record<string, string>>();
+    if (!settings) return null;
+    const members = await db.prepare(`SELECT m.id FROM workspace_members m
+      JOIN slack_member_links l ON l.owner_id = m.workspace_id AND l.member_id = m.id
+      JOIN slack_connections c ON c.owner_id = l.owner_id AND c.team_id = l.team_id
+      LEFT JOIN slack_daily_preferences p ON p.owner_id = m.workspace_id AND p.member_id = m.id
+      WHERE m.workspace_id = ? AND m.status = 'active' AND COALESCE(p.enabled, 1) = 1 ORDER BY m.id`).bind(ownerId).all<{ id: string }>();
+    if (!members.results.length) return null;
+    const date = new Intl.DateTimeFormat("en-CA", { timeZone: settings.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+    return { channel: settings.channel_id, settings, members: members.results.map((member) => member.id), date };
+  }
   if (kind === "daily_manual") {
     const [runId, memberId] = subjectId.split("/");
     if (!runId || !memberId) return null;

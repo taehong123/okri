@@ -91,6 +91,7 @@ function harness(t) {
     "@/lib/slack-bot-delivery": api,
   });
   const daily = compile(dailySource, {
+    "@/lib/slack-daily-digest": { runDueDailyDigests: async () => ({ checked: 0 }) },
     "./language-preferences": preferences, "./server-language": serverLanguage,
     "cloudflare:workers": { env: { DB: raw } }, "drizzle-orm": {}, "@/db": {}, "@/db/schema": {},
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
