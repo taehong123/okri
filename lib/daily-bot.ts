@@ -351,6 +351,7 @@ export async function createExplicitDailyTask(
   const created = await createItem(authorization.ownerId, {
     title,
     kind: "task",
+    cycleId: allowed.cycleId,
     parentId: allowed.parentKind === "project" ? allowed.parentId : null,
     routineId: allowed.parentKind === "routine" ? allowed.parentId : null,
     status: "todo",
@@ -570,23 +571,23 @@ async function listRoutineTargets(ownerId: string, memberId: string) {
 
 async function validateCreateTarget(ownerId: string, memberId: string, kind: "project" | "routine" | "general", id: string | null) {
   if (kind === "project" && id) {
-    const row = await env.DB.prepare(`SELECT project.id FROM items AS project
+    const row = await env.DB.prepare(`SELECT project.id, project.cycle_id FROM items AS project
       INNER JOIN item_assignments AS assignment ON assignment.item_id = project.id AND assignment.owner_id = project.owner_id
       WHERE project.owner_id = ? AND project.id = ? AND project.kind = 'project' AND project.archived_at IS NULL
         AND project.status NOT IN ('done','development_done','archived')
         AND assignment.member_id = ? AND assignment.role IN ('project_dri','project_worker') LIMIT 1`)
-      .bind(ownerId, id, memberId).first<{ id: string }>();
-    if (row) return { parentKind: "project" as const, parentId: row.id };
+      .bind(ownerId, id, memberId).first<{ id: string; cycle_id: string | null }>();
+    if (row) return { parentKind: "project" as const, parentId: row.id, cycleId: row.cycle_id };
   }
   if (kind === "routine" && id) {
     const [row] = await getDb().select({ id: routines.id }).from(routines).where(and(
       eq(routines.ownerId, ownerId), eq(routines.id, id), eq(routines.assigneeMemberId, memberId), eq(routines.active, true),
     )).limit(1);
-    if (row) return { parentKind: "routine" as const, parentId: row.id };
+    if (row) return { parentKind: "routine" as const, parentId: row.id, cycleId: null };
   }
   if (kind === "general") {
     const [projects, routinesForMember] = await Promise.all([listDailyProjectTargets(ownerId, memberId), listRoutineTargets(ownerId, memberId)]);
-    if (projects.length === 0 && routinesForMember.length === 0) return { parentKind: "general" as const, parentId: null };
+    if (projects.length === 0 && routinesForMember.length === 0) return { parentKind: "general" as const, parentId: null, cycleId: null };
     throw new Error("책임 Project 또는 담당 Routine을 선택해 주세요.");
   }
   throw new Error("본인이 담당한 Project 또는 Routine만 선택할 수 있습니다.");

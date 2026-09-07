@@ -69,6 +69,7 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
   if (!next.taskFocused || !next.taskTargets?.some((target) => target.key === parentKey)) throw new Error("본인이 담당한 Project 또는 Routine만 선택할 수 있습니다.");
   if (action === "add") next.taskEntry = { parentKey, title: "", requestId: crypto.randomUUID() };
   if (action === "cancel") delete next.taskEntry;
+  if (action !== "create") delete next.createdTaskKey;
   if (action === "create") {
     if (!next.taskEntry || next.taskEntry.parentKey !== parentKey) throw new Error("Task 생성 요청을 다시 확인해 주세요.");
     if (!next.taskEntry.title.trim()) return dailyChecklistForm(next, metadata, t, t("새 Task 제목을 입력해 주세요."));
@@ -95,6 +96,7 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
       });
       next.work = orderDailyChecklist(next.work);
       next.choices[`task:${task.id}`] = "today";
+      next.createdTaskKey = `task:${task.id}`;
       next.noPlannedTasks = false;
       next.page = Math.floor(next.work.findIndex((entry) => entry.key === `task:${task.id}`) / DAILY_CHECKLIST_PAGE_SIZE);
       delete next.taskEntry;

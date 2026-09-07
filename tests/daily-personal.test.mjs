@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
+import { createRequire } from "node:module";
 import test from "node:test";
 import ts from "typescript";
 import { serverLanguage } from "./helpers/language-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+const require = createRequire(import.meta.url);
 function compile(source, deps = {}) {
   const loaded = { exports: {} };
   const output = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -23,6 +25,29 @@ const migration = await read("../drizzle/0045_daily_work_selection.sql");
 const yesterdayMigration = await read("../drizzle/0047_daily_yesterday_selection.sql");
 const checklistMigration = await read("../drizzle/0049_slack_daily_checklists.sql");
 const checklistSource = await read("../lib/slack-daily-checklist.ts");
+const paceSource = await read("../lib/pace-data.ts");
+const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
+const persistenceNames = new Set(["createItem", "validateParent", "defaultCycleIdForKind", "normalizeTaskStatus", "parentKind", "okrKinds", "completedStatuses"]);
+const persistenceSource = paceAst.statements.filter((node) =>
+  ts.isFunctionDeclaration(node) ? persistenceNames.has(node.name?.text)
+    : ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => persistenceNames.has(d.name.getText(paceAst))))
+  .map((node) => node.getText(paceAst)).join("\n");
+const realSchema = compile(await read("../db/schema.ts"), { "drizzle-orm": require("drizzle-orm"), "drizzle-orm/sqlite-core": require("drizzle-orm/sqlite-core") });
+
+function realTaskPersistence(d1) {
+  const { drizzle } = require("drizzle-orm/d1");
+  const { and, eq } = require("drizzle-orm");
+  const orm = drizzle(d1);
+  const deps = {
+    getDb: () => orm, items: realSchema.items,
+    ensureWorkspace: async () => {}, parsePropertyValue: JSON.parse,
+    getWorkspaceRules: async () => ({ defaultPriority: "medium", defaultCadence: "daily" }),
+    getItem: async (ownerId, id) => (await orm.select().from(realSchema.items).where(and(eq(realSchema.items.ownerId, ownerId), eq(realSchema.items.id, id))))[0],
+    getRoutine: async (ownerId, id) => d1.prepare("SELECT * FROM routines WHERE owner_id=? AND id=?").bind(ownerId, id).first(),
+    releaseProjectCreation: async () => {}, logActivity: async () => {}, dispatchSlackAutomationEvent: async () => {},
+  };
+  return compile(`const { ${Object.keys(deps).join(",")} } = require("persistence-deps");\n${persistenceSource}`, { "persistence-deps": deps });
+}
 const date = "2026-09-04";
 const authorization = { ownerId: "w", userId: "u", role: "owner", apiToken: false };
 function fixture(t, options = {}) {
@@ -43,7 +68,8 @@ function fixture(t, options = {}) {
   const raw = { prepare(sql) {
     const statement = db.prepare(sql); let args = [];
     return { bind(...values) { args = values; return this; }, async first() { return statement.get(...args) ?? null; },
-      async all() { return { results: statement.all(...args) }; }, async run() { return { meta: { changes: Number(statement.run(...args).changes) } }; } };
+      async all() { return { results: statement.all(...args) }; }, async raw() { return statement.all(...args).map((row) => Object.values(row)); },
+      async run() { return { meta: { changes: Number(statement.run(...args).changes) } }; } };
   }, async batch(statements) {
     db.exec("BEGIN");
     try { const results = []; for (const s of statements) results.push(await s.run()); db.exec("COMMIT"); return results; }
@@ -66,13 +92,13 @@ function fixture(t, options = {}) {
   const tableProxy = (table) => new Proxy({}, { get: (_, key) => key === "$table" ? table : key });
   const ormSchema = { workspaceMembers: tableProxy("workspace_members"), items: tableProxy("items"), routines: tableProxy("routines") };
   const api = compile(dailySource, {
-    "cloudflare:workers": { env: { DB: raw } }, "@/db/schema": ormSchema,
-    "drizzle-orm": { eq: (key, value) => ({ key, value }), and: (...args) => args },
-    "@/db": { getDb: () => ({ select: () => ({ from: (table) => ({ where: (conditions) => ({ limit: async () => {
+    "cloudflare:workers": { env: { DB: raw } }, "@/db/schema": options.realPersistence ? realSchema : ormSchema,
+    "drizzle-orm": options.realPersistence ? require("drizzle-orm") : { eq: (key, value) => ({ key, value }), and: (...args) => args },
+    "@/db": { getDb: options.realPersistence ? () => require("drizzle-orm/d1").drizzle(raw) : () => ({ select: () => ({ from: (table) => ({ where: (conditions) => ({ limit: async () => {
       const rows = db.prepare(`SELECT * FROM ${table.$table}`).all().map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, x) => x.toUpperCase()), v])));
       return rows.filter((row) => conditions.every(({ key, value }) => row[key] === value)).slice(0, 1);
     } }) }) }) }) },
-    "@/lib/daily-work": work, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: async (ownerId, input) => {
+    "@/lib/daily-work": work, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: options.realPersistence ? realTaskPersistence(raw).createItem : async (ownerId, input) => {
       if (!options.allowCreation) throw new Error("Must never invent tasks");
       await options.beforeCreate?.();
       const task = { id: crypto.randomUUID(), ownerId, priority: "medium", ...input };
@@ -272,6 +298,28 @@ test("untouched null checkbox state does not block adding a Task to an empty pro
   assert.ok(created.blocks.find((b) => b.label?.text === "First Task")?.element.initial_options.some((o) => o.value === "today"));
 });
 
+test("Slack Task creation uses real parent validation and D1 persistence for a Project in an OKR cycle", async (t) => {
+  const { db, raw, api, checklist } = fixture(t, { realPersistence: true });
+  db.exec(`INSERT INTO okr_cycles (id,owner_id,name,start_date,end_date) VALUES ('cycle-project','w','Quarter','2026-07-01','2026-09-30');
+    UPDATE items SET cycle_id='cycle-project' WHERE id='worker'`);
+  const opened = await checklist.createDailyChecklist("w", "me", { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
+    taskTargets: [{ key: "project:worker", title: "Worker project", hasTasks: false }] }, (key) => key);
+  const add = await checklist.editDailyChecklistTask(authorization, opened.private_metadata, {}, "add", "project:worker", (key) => key);
+  const state = { daily_new_task: { title: { value: "First real Task" } } };
+  const created = await checklist.editDailyChecklistTask(authorization, add.private_metadata, state, "create", "project:worker", (key) => key);
+  await checklist.editDailyChecklistTask(authorization, add.private_metadata, state, "create", "project:worker", (key) => key);
+  const rows = db.prepare("SELECT * FROM items WHERE source='daily'").all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].cycle_id, "cycle-project");
+  assert.equal(rows[0].parent_id, "worker");
+  assert.equal(rows[0].title, "First real Task");
+  assert.equal(created.blocks.find((b) => b.block_id === `daily_choice_task:${rows[0].id}`).element.initial_options[0].value, "today");
+  const taskIndex = created.blocks.findIndex((b) => b.block_id === `daily_choice_task:${rows[0].id}`);
+  assert.equal(created.blocks[taskIndex + 1].elements[0].text, "Task를 추가하고 오늘 할 일에 선택했습니다.");
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.selectedTaskIds, [rows[0].id]);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+});
+
 test("Slack participant adds a Task inside the checklist, preserves choices and notes, and replay creates once", async (t) => {
   const { db, raw, api, checklist } = fixture(t, { allowCreation: true });
   const dashboard = await api.getDailyDashboard(authorization, date);
@@ -296,6 +344,42 @@ test("Slack participant adds a Task inside the checklist, preserves choices and 
   assert.equal(submission.submission.tasks.length, 2);
   assert.equal(submission.submission.work.length, 0);
   assert.equal(submission.submission.todayNote, "Keep this note");
+});
+
+test("actual Daily persistence keeps legacy Projects and independent Routines cycle-free", async (t) => {
+  const { db, api } = fixture(t, { realPersistence: true });
+  for (const [parentKind, parentId] of [["project", "worker"], ["routine", "routine"]]) {
+    const input = { date, parentKind, parentId, title: `${parentKind} Task`, requestId: parentId };
+    const created = await api.createExplicitDailyTask(authorization, input);
+    assert.equal(created.cycleId, null);
+    assert.equal((await api.createExplicitDailyTask(authorization, input)).id, created.id);
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM items WHERE source='daily'").get().n, 2);
+});
+
+test("real parent validation still rejects a mismatched cycle before inserting a Task", async (t) => {
+  const { db, raw } = fixture(t);
+  db.exec(`INSERT INTO okr_cycles (id,owner_id,name,start_date,end_date) VALUES ('cycle-project','w','Quarter','2026-07-01','2026-09-30');
+    UPDATE items SET cycle_id='cycle-project' WHERE id='worker'`);
+  await assert.rejects(realTaskPersistence(raw).createItem("w", { kind: "task", title: "Rejected", parentId: "worker", cycleId: null }), /same OKR cycle/);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM items").get().n, 6);
+});
+
+test("Slack creation errors stay beside the editor and successes are translated beside the new Task", async () => {
+  const project = { id: "p", key: "project:p", kind: "project", title: "My Project" };
+  const task = { id: "t", key: "task:t", kind: "task", title: "My Task", parentId: "p", parentKind: "project", parentTitle: "My Project" };
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const translate = await serverLanguage.serverTranslator(language);
+    const input = { ...checklistInput([project, task]), taskFocused: true, taskEntry: { parentKey: "project:p", title: "Keep this", requestId: "request" } };
+    const message = translate("데일리를 저장하지 못했습니다.");
+    const errorView = form.dailyChecklistForm(input, "{}", translate, message);
+    const editorIndex = errorView.blocks.findIndex((b) => b.block_id === "daily_new_task");
+    assert.equal(errorView.blocks[editorIndex + 2].text.text, message);
+    assert.equal(errorView.blocks.filter((b) => b.text?.text === message).length, 1);
+    const successView = form.dailyChecklistForm({ ...input, taskEntry: undefined, createdTaskKey: task.key, choices: { [task.key]: "today" } }, "{}", translate);
+    const taskIndex = successView.blocks.findIndex((b) => b.block_id === "daily_choice_task:t");
+    assert.equal(successView.blocks[taskIndex + 1].elements[0].text, translate("Task를 추가하고 오늘 할 일에 선택했습니다."));
+  }
 });
 
 test("Slack Task creation retains its title after a failure and rejects permission changes", async (t) => {

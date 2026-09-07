@@ -12,6 +12,7 @@ export type DailyChecklist = {
   taskFocused?: boolean;
   taskTargets?: Array<{ key: string; title: string; hasTasks?: boolean }>;
   taskEntry?: { parentKey: string; title: string; requestId: string; creating?: boolean };
+  createdTaskKey?: string;
 };
 export const DAILY_CHECKLIST_PAGE_SIZE = 20;
 
@@ -45,9 +46,11 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     { type: "section", text: { type: "plain_text", text: `${input.memberName} · ${input.date}\n${t("완료와 삭제는 제출할 때 반영됩니다. 삭제한 Task는 업무 목록에서 사라지며 휴지통에서 복구할 수 있습니다.")}` } },
     { type: "context", elements: [{ type: "plain_text", text: t("{page} / {pages} · 전체 {count}개", { page: input.page + 1, pages, count: input.work.length }) }] },
   ];
-  if (error) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
+  const pageWork = input.work.slice(input.page * DAILY_CHECKLIST_PAGE_SIZE, (input.page + 1) * DAILY_CHECKLIST_PAGE_SIZE);
+  const editingOnPage = input.taskEntry && pageWork.some((entry) => dailyWorkGroup(entry).key === input.taskEntry!.parentKey);
+  if (error && !editingOnPage) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
   let lastGroup = "";
-  input.work.slice(input.page * DAILY_CHECKLIST_PAGE_SIZE, (input.page + 1) * DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
+  pageWork.forEach((entry, offset) => {
     const group = dailyWorkGroup(entry);
     if (group.key !== lastGroup) {
       const target = input.taskTargets?.find((target) => target.key === group.key);
@@ -72,6 +75,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
             { type: "button", action_id: "daily_checklist_cancel_task", text: { type: "plain_text", text: t("취소") }, value: group.key },
           ] });
         }
+        if (error) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
       }
     }
     if (input.taskFocused && entry.kind === "project") return;
@@ -84,6 +88,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
       label: { type: "plain_text", text: entry.title.slice(0, 180) || t(names[entry.kind]) },
       hint: { type: "plain_text", text: `${t(names[entry.kind])}${due ? ` · ${due}` : ""}` },
       element: { type: "checkboxes", action_id: "choice", options, ...(initial.length ? { initial_options: initial } : {}) } });
+    if (entry.key === input.createdTaskKey) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("Task를 추가하고 오늘 할 일에 선택했습니다.") }] });
   });
   if (!input.work.length) blocks.push({ type: "section", text: { type: "plain_text", text: t("현재 배정된 미완료 업무가 없습니다.") } });
   if (input.yesterdayCompleted?.length) blocks.push({ type: "section", text: { type: "plain_text", text: `${t("완료한 일")}\n${input.yesterdayCompleted.slice(0, 20).map((entry) => `• ${entry.title}`).join("\n")}`.slice(0, 2900) } });
