@@ -51,11 +51,14 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     const group = dailyWorkGroup(entry);
     if (group.key !== lastGroup) {
       const target = input.taskTargets?.find((target) => target.key === group.key);
+      const emptyProject = input.taskFocused && entry.kind === "project" && !input.work.some((task) => task.kind === "task" && task.parentId === entry.id);
+      const addButton = target && !input.taskEntry ? { type: "button", action_id: "daily_checklist_add_task", text: { type: "plain_text", text: t("Task 추가") }, value: target.key } : null;
       blocks.push({ type: "section", text: { type: "plain_text", text: (group.key === "general" ? t("General") : group.title).slice(0, 2900) },
-        ...(target && !input.taskEntry ? { accessory: { type: "button", action_id: "daily_checklist_add_task", text: { type: "plain_text", text: t("Task 추가") }, value: target.key } } : {}) });
+        ...(!emptyProject && addButton ? { accessory: addButton } : {}) });
       lastGroup = group.key;
-      if (input.taskFocused && entry.kind === "project" && !input.work.some((task) => task.kind === "task" && task.parentId === entry.id)) {
+      if (emptyProject) {
         blocks.push({ type: "context", elements: [{ type: "plain_text", text: t(target?.hasTasks === false ? "아직 Task가 없습니다." : "내게 할당된 미완료 Task가 없습니다.") }] });
+        if (addButton) blocks.push({ type: "actions", block_id: `daily_add_${group.key}`, elements: [addButton] });
       }
       if (input.taskEntry?.parentKey === group.key) {
         if (input.taskEntry.creating) {

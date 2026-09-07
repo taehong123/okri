@@ -27,7 +27,7 @@ export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t:
     const block = dailyChoiceBlockId(input, entry, start + offset);
     const field = state[block]?.choice;
     if (!field) return;
-    const choices = field.selected_options;
+    const choices = field.selected_options ?? [];
     // Old open modals may still send "exclude"; never reinterpret it as deletion.
     if (!Array.isArray(choices) || choices.some((option) => !["today", "done", "delete", "exclude"].includes(option?.value)) || choices.length > 1) {
       errors[block] = t("업무마다 한 가지 상태만 선택해 주세요."); return;
@@ -64,7 +64,8 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
   if (stored.revision !== parsed.revision) return dailyChecklistForm(input, metadataFor(parsed.id, stored.revision), t, t("다른 요청에서 목록이 변경되었습니다. 현재 선택을 확인해 주세요."));
   if (input.taskEntry?.creating) return dailyChecklistForm(input, metadata, t, t("처리 중"));
   const { next, errors } = mergeDailyChecklist(input, state, t);
-  if (Object.keys(errors).length) return dailyChecklistForm(next, metadata, t, Object.values(errors).join("\n"));
+  // Opening/cancelling the editor must not validate unrelated, unfinished Task choices.
+  if (action === "create" && Object.keys(errors).length) return dailyChecklistForm(next, metadata, t, Object.values(errors).join("\n"));
   if (!next.taskFocused || !next.taskTargets?.some((target) => target.key === parentKey)) throw new Error("본인이 담당한 Project 또는 Routine만 선택할 수 있습니다.");
   if (action === "add") next.taskEntry = { parentKey, title: "", requestId: crypto.randomUUID() };
   if (action === "cancel") delete next.taskEntry;
