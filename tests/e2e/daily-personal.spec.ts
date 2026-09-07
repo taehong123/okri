@@ -2,11 +2,12 @@ import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { installApiMocks } from "./api-mocks";
 
-test("assigned projects group selectable tasks without completing the project", async ({ page }, testInfo) => {
+test("Project and Routine are peer groups with only child Tasks selectable", async ({ page }, testInfo) => {
   await installApiMocks(page, { teamWorkspace: true });
   const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
   const title = "고객 인터뷰와 서비스 개선을 위한 긴 프로젝트 이름";
   const work = [
+    { id: "routine-task-1", key: "task:routine-task-1", kind: "task", title: "Routine child Task", parentId: "routine-1", parentKind: "routine", parentTitle: "Store management", dueDate: null },
     { id: "project-1", key: "project:project-1", kind: "project", title, parentTitle: "서비스 품질 개선", dueDate: null },
     { id: "task-1", key: "task:task-1", kind: "task", title: "고객 인터뷰 진행", parentId: "project-1", parentKind: "project", parentTitle: title, dueDate: "2026-09-30" },
     { id: "routine-1", key: "routine:routine-1", kind: "routine", title: "고객 의견 점검", parentTitle: "Routine", dueDate: null },
@@ -27,11 +28,11 @@ test("assigned projects group selectable tasks without completing the project", 
     return route.fulfill({ json: { date: draft.date, draft, member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, candidates: { work, yesterdayWork, tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: false }, team: [], latestSubmission: null, legacyWorkspaceNote: null } });
   });
   await page.goto("/?view=scrum");
-  const picker = page.getByRole("group", { name: "오늘 할 일" });
+  const picker = page.locator(".daily-task-picker").nth(1);
   await expect(picker).toBeVisible();
-  await picker.getByRole("searchbox").fill("고객 의견 점검");
-  await expect(page.getByRole("checkbox", { name: "고객 의견 점검 선택", exact: true })).toBeVisible();
-  await expect(page.getByRole("checkbox", { name: title + " 선택", exact: true })).toBeHidden();
+  await picker.getByRole("searchbox").fill("Store management");
+  await expect(picker.getByRole("region", { name: "Store management", exact: true })).toBeVisible();
+  await expect(picker.getByRole("checkbox", { name: /Store management/ })).toHaveCount(0);
   await picker.getByRole("searchbox").fill("");
   const boxes = picker.locator('input[type="checkbox"]');
   for (const box of await boxes.all()) await expect(box).not.toBeChecked();
@@ -39,17 +40,16 @@ test("assigned projects group selectable tasks without completing the project", 
   await expect(picker.getByRole("checkbox", { name: title + " 선택", exact: true })).toHaveCount(0);
   await page.getByRole("checkbox", { name: "고객 인터뷰 진행 선택", exact: true }).focus();
   await page.keyboard.press("Space");
-  await page.getByRole("checkbox", { name: "고객 의견 점검 선택", exact: true }).check();
-  const yesterdayPicker = page.getByRole("group", { name: "완료한 일" });
+  await picker.getByRole("checkbox", { name: /Routine child Task/ }).check();
+  const yesterdayPicker = page.locator(".daily-task-picker").first();
   await yesterdayPicker.getByText("완료한 일", { exact: true }).click();
-  await page.getByRole("checkbox", { name: "어제 회고 마감 선택", exact: true }).check();
-  await expect(yesterdayPicker).toContainText("제출 시 완료 처리");
+  await expect(yesterdayPicker.getByRole("checkbox", { name: /어제 회고 마감/ })).toHaveCount(0);
   await expect(page.getByRole("textbox", { name: "새 Task 제목" })).toBeHidden();
   await page.getByRole("button", { name: "확정 및 공유", exact: true }).click();
   await expect.poll(() => writes.length).toBe(2);
-  expect(writes[0].body.selectedWorkIds).toEqual(["task:task-1", "routine:routine-1"]);
-  expect(writes[0].body.selectedYesterdayWorkIds).toEqual(["task:done-1", "routine:finish-1"]);
-  expect(writes[0].body.selectedTaskIds).toEqual(["task-1"]);
+  expect(writes[0].body.selectedWorkIds).toEqual(["task:task-1", "task:routine-task-1"]);
+  expect(writes[0].body.selectedYesterdayWorkIds).toEqual(["task:done-1"]);
+  expect(writes[0].body.selectedTaskIds).toEqual(["task-1", "routine-task-1"]);
   expect(writes[1].path).toBe("/api/daily-scrum/submit");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   await page.screenshot({ path: testInfo.outputPath("personal-daily.png"), fullPage: true });

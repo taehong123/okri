@@ -54,12 +54,15 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     const group = dailyWorkGroup(entry);
     if (group.key !== lastGroup) {
       const target = input.taskTargets?.find((target) => target.key === group.key);
-      const emptyProject = input.taskFocused && entry.kind === "project" && !input.work.some((task) => task.kind === "task" && task.parentId === entry.id);
+      const emptyContainer = input.taskFocused && (entry.kind === "project" || entry.kind === "routine")
+        && !input.work.some((task) => task.kind === "task" && task.parentKind === entry.kind && task.parentId === entry.id);
       const addButton = target && !input.taskEntry ? { type: "button", action_id: "daily_checklist_add_task", text: { type: "plain_text", text: t("Task 추가") }, value: target.key } : null;
-      blocks.push({ type: "section", text: { type: "plain_text", text: (group.key === "general" ? t("General") : group.title).slice(0, 2900) },
-        ...(!emptyProject && addButton ? { accessory: addButton } : {}) });
+      const containerKind = group.key.startsWith("project:") ? "project" : group.key.startsWith("routine:") ? "routine" : null;
+      const groupTitle = containerKind ? `${t(names[containerKind])} · ${group.title}` : group.key === "general" ? t("General") : group.title;
+      blocks.push({ type: "section", text: { type: "plain_text", text: groupTitle.slice(0, 2900) },
+        ...(!emptyContainer && addButton ? { accessory: addButton } : {}) });
       lastGroup = group.key;
-      if (emptyProject) {
+      if (emptyContainer) {
         blocks.push({ type: "context", elements: [{ type: "plain_text", text: t(target?.hasTasks === false ? "아직 Task가 없습니다." : "내게 할당된 미완료 Task가 없습니다.") }] });
         if (addButton) blocks.push({ type: "actions", block_id: `daily_add_${group.key}`, elements: [addButton] });
       }
@@ -78,7 +81,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
         if (error) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
       }
     }
-    if (input.taskFocused && entry.kind === "project") return;
+    if (input.taskFocused && entry.kind !== "task") return;
     if (entry.title.length > 180) blocks.push({ type: "section", text: { type: "plain_text", text: entry.title.slice(0, 2900) } });
     const options = [["today", "오늘 할 일"], ["done", "완료"], ...(entry.kind === "task" ? [["delete", "삭제"]] : [])]
       .map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));

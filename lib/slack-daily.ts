@@ -798,10 +798,10 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
         ...dashboard.draft, date: dashboard.date, work: dashboard.candidates.work, memberName: dashboard.member.displayName,
         taskFocused: true,
         taskTargets: [...dashboard.createTargets.projects.map((project) => ({ key: `project:${project.id}`, title: project.title, hasTasks: project.hasTasks })),
-          ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title }))],
-        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.filter((key) => !key.startsWith("project:")).map((key) => [key, "today" as const])),
-        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind !== "project" && entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
-        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind !== "project" && entry.completedYesterday), page: 0,
+          ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title, hasTasks: routine.hasTasks }))],
+        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.filter((key) => key.startsWith("task:")).map((key) => [key, "today" as const])),
+        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind === "task" && entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
+        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind === "task" && entry.completedYesterday), page: 0,
       }, t);
       await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash, view });
     } catch {
@@ -827,13 +827,13 @@ export async function externalTaskOptions(authorization: RequestAuthorization, q
   const normalized = query.trim().toLocaleLowerCase();
   if (workMode === "today" || workMode === "yesterday") {
     const dashboard = await getDailyDashboard(authorization, day);
-    const work = workMode === "yesterday" ? dashboard.candidates.yesterdayWork : dashboard.candidates.work;
+    const work = (workMode === "yesterday" ? dashboard.candidates.yesterdayWork : dashboard.candidates.work).filter((entry) => entry.kind === "task");
     return work.filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized))
       .slice(0, 100).map((entry) => dailyWorkOption(entry, t, workMode));
   }
   if (workMode === true) {
     const member = await currentDailyMember(authorization);
-    const work = await listDailyWork(env.DB, authorization.ownerId, member.id, day);
+    const work = (await listDailyWork(env.DB, authorization.ownerId, member.id, day)).filter((entry) => entry.kind === "task");
     return work.slice(60).filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized)).slice(0, 100).map((entry) => dailyWorkOption(entry, t));
   }
   const dashboard = await getDailyDashboard(authorization, day);

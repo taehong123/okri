@@ -563,10 +563,23 @@ async function listDailyProjectTargets(ownerId: string, memberId: string) {
 }
 
 async function listRoutineTargets(ownerId: string, memberId: string) {
-  const rows = await env.DB.prepare(`SELECT id, title FROM routines
-    WHERE owner_id = ? AND assignee_member_id = ? AND active = 1 AND system_key IS NULL ORDER BY sort_order, title`)
-    .bind(ownerId, memberId).all<{ id: string; title: string }>();
-  return rows.results;
+  const rows = await env.DB.prepare(`SELECT routine.id, routine.title,
+      EXISTS (
+        SELECT 1 FROM items AS task
+        WHERE task.owner_id = routine.owner_id AND task.routine_id = routine.id
+          AND task.kind = 'task' AND task.archived_at IS NULL
+      ) AS has_tasks,
+      NOT EXISTS (
+        SELECT 1 FROM items AS task
+        WHERE task.owner_id = routine.owner_id AND task.routine_id = routine.id
+          AND task.kind = 'task' AND task.archived_at IS NULL
+          AND task.status NOT IN ('done', 'development_done', 'archived')
+      ) AS needs_task
+    FROM routines AS routine
+    WHERE routine.owner_id = ? AND routine.assignee_member_id = ? AND routine.active = 1 AND routine.system_key IS NULL
+    ORDER BY routine.sort_order, routine.title`)
+    .bind(ownerId, memberId).all<{ id: string; title: string; needs_task: number; has_tasks: number }>();
+  return rows.results.map((row) => ({ id: row.id, title: row.title, needsTask: Boolean(row.needs_task), hasTasks: Boolean(row.has_tasks) }));
 }
 
 async function validateCreateTarget(ownerId: string, memberId: string, kind: "project" | "routine" | "general", id: string | null) {
