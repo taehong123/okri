@@ -39,6 +39,9 @@ OKRI-specific clarifications, not a replacement design system.
 - The OKR read surface is an unframed document, not a card inside another card.
   Child Projects use dividers, not nested boxes. Root titles have section-sized
   text, execution rows body-sized text, and metadata regular medium-weight text.
+- The OKR page header contains only its title and list action. Start the document
+  at the Objective, with a quiet edit icon for writers; keep file metadata in the
+  list/editor and Project/Task navigation in the hierarchy, not a duplicate banner.
 - Project item titles use regular weight (400) in cards, tables, boards, My Work
   and the OKR tree. Preserve their size, placement and the separate emphasis of
   page/section headings; do not make the entire item bold to distinguish its type.

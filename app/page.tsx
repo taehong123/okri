@@ -2374,7 +2374,7 @@ function WorkspaceApp() {
             onNotice={(message) => showNotice(message, "error")}
           />
           {activeView !== "home" && !selectedProject && <header className="page-header">
-            <div><h1>{viewTitles[activeView]}</h1><p>{activeView === "billing" ? `${currentWorkspace?.name ?? ""} · ${pageSubtitle(activeView)}` : pageSubtitle(activeView)}</p></div>
+            <div><h1>{viewTitles[activeView]}</h1>{activeView !== "okr" && <p>{activeView === "billing" ? `${currentWorkspace?.name ?? ""} · ${pageSubtitle(activeView)}` : pageSubtitle(activeView)}</p>}</div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />{t("목록보기")}</button>
             ) : activeView === "inbox" ? (
@@ -2492,7 +2492,6 @@ function WorkspaceApp() {
                     setWorkspaceDataAttempt((current) => current + 1);
                   }}
                   onCancelCreate={() => { setOkrCreating(false); setOkrEditorDirty(false); }}
-                  onNavigateProjects={() => navigateView("work")}
                   onOpenProject={openProjectPage}
                   onOpenTask={openTaskDetail}
                   onNotice={(message, tone) => showNotice(message, tone)}

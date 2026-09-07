@@ -512,7 +512,8 @@ test("ships atomic OKR file editing and safe Project recovery contracts", async 
   assert.match(surface, /projectResolutions/);
   assert.match(surface, /beforeunload/);
   assert.match(surface, /KR은 한 개 이상 필요/);
-  assert.match(surface, /Project 탭/);
+  assert.doesNotMatch(surface, /okr-file-read-header|onNavigateProjects/);
+  assert.match(surface, /okr-tree-open-detail/);
   assert.match(surface, /onOpenProject/);
   assert.match(surface, /onOpenTask/);
   assert.match(surface, /aria-expanded/);
@@ -644,7 +645,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(okrFileSurface, /okr-file-read-objective/);
   assert.match(okrFileSurface, /okr-file-read-initiative/);
   assert.match(okrFileSurface, /linkedProjects/);
-  assert.match(okrFileSurface, /Project 탭/);
+  assert.match(okrFileSurface, /onClick=\{\(\) => onOpenProject\(project.id\)\}/);
   const myWorkView = page.match(/function MyWorkView[\s\S]*?function MyWorkSection/)?.[0] ?? "";
   assert.doesNotMatch(myWorkView, /DeleteSelectCheckbox|onSelectItems|selectedItemIds/);
   assert.match(page, /items=\{executionItems\}/);

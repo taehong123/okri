@@ -36,7 +36,7 @@ for (const theme of THEMES) {
       const left = (selector: string) => document.querySelector(selector)!.getBoundingClientRect().left;
       const frame = document.querySelector(".page-body")!.getBoundingClientRect();
       return {
-        title: left(".page-header h1"), header: left(".okr-file-read-header"), objective: left(".okr-file-read-objective"),
+        title: left(".page-header h1"), objective: left(".okr-file-read-objective"),
         overflow: document.documentElement.scrollWidth > document.documentElement.clientWidth,
         escaped: [...document.querySelectorAll(".okr-tree-row, .okr-tree-task")].filter((row) => {
           const box = row.getBoundingClientRect();
@@ -52,8 +52,7 @@ for (const theme of THEMES) {
       };
     });
     const alignment = await inspectAlignment();
-    expect(alignment.title).toBeCloseTo(alignment.header);
-    expect(alignment.header).toBeCloseTo(alignment.objective);
+    expect(alignment.title).toBeCloseTo(alignment.objective);
     expect(alignment.overflow).toBe(false);
     expect(alignment.escaped).toBe(0);
     expect(alignment.collisions).toBe(0);
@@ -63,10 +62,20 @@ for (const theme of THEMES) {
     await page.locator(".okr-tree-copy strong").evaluateAll((titles) => {
       for (const title of titles) title.textContent = "고객 경험 개선을 위한 긴 업무 제목과 담당 범위 확인 ".repeat(4);
     });
+    await page.locator(".okr-file-read-objective h3").evaluate((title) => { title.textContent = "고객 경험 개선을 위한 긴 목표 제목 OKR 2026 ".repeat(4); });
     const longTitles = await inspectAlignment();
     expect(longTitles.overflow).toBe(false);
     expect(longTitles.escaped).toBe(0);
     expect(longTitles.collisions).toBe(0);
+    await page.addStyleTag({ content: "html { font-size: 200% !important; }" });
+    const objectiveLayout = await page.locator(".okr-file-read-objective").evaluate((row) => {
+      const title = row.querySelector("h3")!.getBoundingClientRect();
+      const edit = row.querySelector("button")!.getBoundingClientRect();
+      return { overlap: title.right > edit.left, overflow: row.scrollWidth > row.clientWidth, target: Math.min(edit.width, edit.height) };
+    });
+    expect(objectiveLayout.overlap).toBe(false);
+    expect(objectiveLayout.overflow).toBe(false);
+    expect(objectiveLayout.target).toBeGreaterThanOrEqual(44);
 
     await page.goto("/?view=work");
     await page.getByRole("tab", { name: "카드", exact: true }).click();

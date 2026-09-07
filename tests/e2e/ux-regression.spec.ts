@@ -615,6 +615,33 @@ test("모바일 Task 완료 체크는 작게 보이고 삭제 선택은 선택 �
   await expect(page.getByRole("checkbox", { name: /Task .* 삭제 선택/ })).toHaveCount(1);
 });
 
+test("OKR은 파일 배너 없이 Objective부터 보여주고 목록 선택과 계층 탐색을 유지한다", async ({ page }) => {
+  await installApiMocks(page);
+  await page.goto("/?view=okr");
+  const header = page.locator(".page-header");
+  const surface = page.locator(".okr-file-read-surface");
+  await expect(header.getByRole("heading")).toHaveText("OKR");
+  await expect(header.getByRole("button")).toHaveText("목록보기");
+  await expect(header.locator("p")).toHaveCount(0);
+  await expect(surface.getByRole("heading").first()).toHaveText("고객 경험 개선");
+  await expect(surface).not.toContainText("2026 하반기");
+  await expect(surface.getByRole("button", { name: "Project 탭", exact: true })).toHaveCount(0);
+  await header.getByRole("button", { name: "목록보기" }).click();
+  await page.getByRole("button", { name: "2026 하반기 열기" }).click();
+  await expect(page.getByRole("dialog", { name: "OKR 파일 목록" })).toHaveCount(0);
+  await expect(surface.getByRole("heading").first()).toHaveText("고객 경험 개선");
+  const kr = page.locator("button.okr-tree-kr-row").first();
+  await kr.focus();
+  await page.keyboard.press("Enter");
+  await page.locator("button.okr-tree-initiative-row").first().click();
+  await page.locator("button.okr-tree-project-main").first().click();
+  await page.getByRole("button", { name: /오버레이 동작 점검/ }).click();
+  await expect(page.getByRole("dialog")).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(surface.getByRole("heading").first()).toHaveText("고객 경험 개선");
+  await expect(kr).toHaveAttribute("aria-expanded", "true");
+});
+
 test("OKR 파일 정보와 O·KR·Initiative를 저장 한 번으로 수정한다", async ({ page }) => {
   await installApiMocks(page);
   let editRequests = 0;

@@ -214,7 +214,6 @@ export function OkrFileSurface({
   onSaved,
   onSplit,
   onCancelCreate,
-  onNavigateProjects,
   onOpenProject,
   onOpenTask,
   onNotice,
@@ -230,7 +229,6 @@ export function OkrFileSurface({
   onSaved: (file: OkrFile) => void;
   onSplit: (cycles: OkrFileCycleSummary[]) => void;
   onCancelCreate: () => void;
-  onNavigateProjects: () => void;
   onOpenProject: (id: string) => void;
   onOpenTask: (id: string) => void;
   onNotice: (message: string, tone?: "error") => void;
@@ -502,10 +500,15 @@ export function OkrFileSurface({
   if (readFile.needsSplit) return <section className="okr-file-repair"><AlertTriangle size={22} /><div><h2>{t("Objective별 파일 분리가 필요합니다")}</h2><p>{t("이 파일에는 Objective가 {count}개 있습니다. 데이터는 자동으로 바꾸지 않았습니다.", { count: readFile.objectiveCount })}</p></div>{!readOnly && <button onClick={() => void splitFile()} disabled={saving}>{saving ? <LoaderCircle className="spin" size={14} /> : <RotateCcw size={14} />}{t("Objective별 파일로 분리")}</button>}</section>;
 
   return <article className="okr-file-read-surface">
-    <header className="okr-file-read-header"><div><small>{t("OKR 파일 · v{version}", { version: readFile.cycle.version })}</small><h2>{readFile.cycle.name}</h2><p>{readFile.cycle.startDate} – {readFile.cycle.endDate} · {cycleStatuses.find((status) => status.value === readFile.cycle.status)?.label} · {readFile.cycle.department || t("부서 미지정")}</p></div><div>{!readOnly && <button className="primary" onClick={() => void beginEdit()} disabled={editLoading}>{editLoading ? <LoaderCircle className="spin" size={13} /> : <Pencil size={13} />}{editLoading ? t("편집 준비 중") : t("파일 수정")}</button>}<button onClick={onNavigateProjects}><Briefcase size={13} />{t("Project 탭")}</button></div></header>
     {error && <div className="okr-file-refresh-state error" role="status"><AlertTriangle size={12} />{error}</div>}
     {readFile.objective ? <section className="okr-file-read-tree">
-      <div id={`okr-search-${readFile.objective.id}`} tabIndex={-1} className={`okr-file-read-objective ${focusId === readFile.objective.id ? "search-target" : ""}`}><span className="type-icon type-objective">O</span><div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div></div>
+      <div id={`okr-search-${readFile.objective.id}`} tabIndex={-1} className={`okr-file-read-objective ${focusId === readFile.objective.id ? "search-target" : ""}`}>
+        <span className="type-icon type-objective">O</span>
+        <div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div>
+        {!readOnly && <button type="button" className="icon-button" onClick={() => void beginEdit()} disabled={editLoading} aria-busy={editLoading} aria-label={t("파일 수정")} title={editLoading ? t("편집 준비 중") : t("파일 수정")}>
+          {editLoading ? <LoaderCircle className="spin" size={16} /> : <Pencil size={16} />}
+        </button>}
+      </div>
       {readFile.objective.keyResults.map((keyResult, keyResultIndex) => <OkrReadKeyResult
         key={keyResult.id}
         keyResult={keyResult}

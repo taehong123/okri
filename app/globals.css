@@ -2490,23 +2490,20 @@ html, body, .app-shell, .app-loading-shell, .workspace { background: var(--paper
 .okr-file-read-surface { min-width: 0; background: transparent; }
 .okr-file-editor { overflow: hidden; border: 1px solid var(--line); border-radius: var(--radius-container); background: var(--raised); }
 .okr-file-editor { width: min(44rem, 100%); margin-inline: auto; }
-.okr-file-read-header, .okr-file-editor-toolbar, .okr-file-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--raised) 88%, var(--surface-muted)); }
-.okr-file-read-header { gap: var(--space-6); padding: 0 0 var(--space-4); background: transparent; }
-.okr-file-read-header > div:first-child, .okr-file-editor-toolbar > div:first-child { min-width: 0; }
-.okr-file-read-header small, .okr-file-editor-toolbar span { color: var(--muted); font-size: var(--type-meta); font-weight: 650; }
-.okr-file-read-header h2, .okr-file-editor-toolbar h2 { margin: var(--space-1) 0 0; font-size: var(--type-section); letter-spacing: 0; overflow-wrap: anywhere; }
-.okr-file-read-header p { margin: 5px 0 0; color: var(--muted); font-size: var(--type-meta); }
-.okr-file-read-header > div:last-child, .okr-file-editor-toolbar > div:last-child, .okr-file-editor-footer > div { display: flex; align-items: center; gap: 7px; }
-.okr-file-read-header button, .okr-file-editor button, .okr-file-repair button, .okr-file-empty button { min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: var(--type-label); font-weight: 620; cursor: pointer; }
-.okr-file-read-header button:hover, .okr-file-editor button:hover:not(:disabled), .okr-file-repair button:hover { background: var(--surface-hover); }
-.okr-file-read-header button.primary, .okr-file-editor button.primary { border-color: var(--button-primary-bg); background: var(--button-primary-bg); color: var(--button-primary-fg); }
-.okr-file-read-header button.primary:hover, .okr-file-editor button.primary:hover:not(:disabled) { background: var(--button-primary-hover-bg); color: var(--button-primary-hover-fg); }
-.okr-file-read-header button:disabled { cursor: default; }
+.okr-file-editor-toolbar, .okr-file-editor-footer { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 18px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--raised) 88%, var(--surface-muted)); }
+.okr-file-editor-toolbar > div:first-child { min-width: 0; }
+.okr-file-editor-toolbar span { color: var(--muted); font-size: var(--type-meta); font-weight: 650; }
+.okr-file-editor-toolbar h2 { margin: var(--space-1) 0 0; font-size: var(--type-section); letter-spacing: 0; overflow-wrap: anywhere; }
+.okr-file-editor-toolbar > div:last-child, .okr-file-editor-footer > div { display: flex; align-items: center; gap: 7px; }
+.okr-file-editor button, .okr-file-repair button, .okr-file-empty button { min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-control); background: var(--raised); color: var(--ink); font-size: var(--type-label); font-weight: 620; cursor: pointer; }
+.okr-file-editor button:hover:not(:disabled), .okr-file-repair button:hover { background: var(--surface-hover); }
+.okr-file-editor button.primary { border-color: var(--button-primary-bg); background: var(--button-primary-bg); color: var(--button-primary-fg); }
+.okr-file-editor button.primary:hover:not(:disabled) { background: var(--button-primary-hover-bg); color: var(--button-primary-hover-fg); }
 .okr-file-editor button:disabled { cursor: default; }
-.okr-file-read-tree { padding: var(--space-4) 0; }
-.okr-file-read-objective { min-width: 0; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr); align-items: start; gap: var(--space-3); padding: 0 0 var(--space-4); border-bottom: 1px solid var(--line); }
+.okr-file-read-tree { padding: 0 0 var(--space-4); }
+.okr-file-read-objective { min-width: 0; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding: 0 0 var(--space-4); border-bottom: 1px solid var(--line); }
 .okr-file-read-objective small, .okr-file-read-kr small, .okr-file-read-initiative small { display: block; margin-bottom: var(--space-1); color: var(--muted); font-size: var(--type-meta); font-weight: 500; }
-.okr-file-read-objective h3 { margin: 0; font-size: var(--type-section); font-weight: 600; line-height: 1.5; }
+.okr-file-read-objective h3 { margin: 0; font-size: var(--type-section); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
 .okr-file-read-kr { margin: var(--space-4) 0 0; border-left: 2px solid var(--kr-rail); background: transparent; }
 .okr-tree-row { width: 100%; min-width: 0; min-height: var(--row-height); display: grid; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink); font: inherit; text-align: left; }
 button.okr-tree-row { cursor: pointer; }
@@ -2724,15 +2721,12 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .kr-data-unconnected { align-items: stretch; flex-direction: column; }
   .kr-data-unconnected button { min-height: 44px; }
   .okr-file-manager { width: 100vw; }
-  .okr-file-read-header, .okr-file-editor-toolbar, .okr-file-editor-footer { align-items: stretch; flex-direction: column; padding: 13px; }
-  .okr-file-read-header { gap: var(--space-4); padding: 0 0 var(--space-4); }
-  .okr-file-read-header > div:last-child, .okr-file-editor-toolbar > div:last-child, .okr-file-editor-footer > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .okr-file-read-header button, .okr-file-editor-toolbar button, .okr-file-editor-footer button { min-height: var(--control-height); }
-  .okr-file-read-tree { padding: var(--space-4) 0; }
+  .okr-file-editor-toolbar, .okr-file-editor-footer { align-items: stretch; flex-direction: column; padding: 13px; }
+  .okr-file-editor-toolbar > div:last-child, .okr-file-editor-footer > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .okr-file-editor-toolbar button, .okr-file-editor-footer button { min-height: var(--control-height); }
   .okr-file-editor-body { padding: 12px; }
   .okr-file-metadata-editor { grid-template-columns: 1fr 1fr; }
   .okr-file-metadata-editor .wide { grid-column: 1 / -1; }
-  .okr-file-read-objective { grid-template-columns: 1.75rem minmax(0, 1fr); }
   .okr-file-read-kr { margin-left: 0; }
   .okr-tree-row { min-height: var(--row-height); gap: var(--space-2); padding: var(--space-3) var(--space-2); }
   .okr-tree-kr-row { grid-template-columns: 1rem 1.75rem minmax(0, 1fr) 3rem; }
@@ -3211,7 +3205,6 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .slack-automation-heading > button,
   .slack-form-actions button[type="submit"],
   .automation-recommendations button,
-  .okr-file-read-header button.primary,
   .okr-file-editor button.primary,
   .billing-plan-card > button,
   .billing-checkout > button,
