@@ -983,6 +983,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       slack_daily_setting.summary_enabled,
       slack_daily_setting.summary_time,
       slack_daily_setting.onboarding_completed_at
+      ,slack_daily_checklist.revision
       ,management_bot.report_time
       ,assistant_draft.updated_at
       ,account_registration.completed_at
@@ -996,6 +997,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
     LEFT JOIN daily_submissions AS daily_submission ON 1 = 0
     LEFT JOIN slack_daily_settings AS slack_daily_setting ON 1 = 0
+    LEFT JOIN slack_daily_checklists AS slack_daily_checklist ON 1 = 0
     LEFT JOIN workspace_management_bot_settings AS management_bot ON 1 = 0
     LEFT JOIN users AS app_user ON 1 = 0
     LEFT JOIN auth_identities AS auth_identity ON 1 = 0

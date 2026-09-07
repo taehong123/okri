@@ -57,6 +57,13 @@ test("Slack daily checklist repair migration is idempotent and restores its guar
   db.close();
 });
 
+test("runtime schema sentinel detects a missing Slack daily checklist table", async () => {
+  const source = await readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8");
+  const sentinel = source.slice(source.indexOf("async function schemaIsCurrent"), source.indexOf("async function addColumnIfMissing"));
+  assert.match(sentinel, /slack_daily_checklist\.revision/);
+  assert.match(sentinel, /LEFT JOIN slack_daily_checklists AS slack_daily_checklist ON 1 = 0/);
+});
+
 test("Slack work command migration is LF-only, idempotent by request, and disables legacy Task status rules", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`
