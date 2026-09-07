@@ -28,6 +28,35 @@ test("daily yesterday selection migration keeps JSON valid and submission reques
   db.close();
 });
 
+test("Slack daily checklist repair migration is idempotent and restores its guarded table", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    PRAGMA foreign_keys = ON;
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+    CREATE TABLE workspace_members (
+      id TEXT PRIMARY KEY,
+      workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+    INSERT INTO workspaces (id) VALUES ('workspace');
+    INSERT INTO workspace_members (id, workspace_id) VALUES ('member', 'workspace');
+  `);
+  const migration = await readFile(new URL("../drizzle/0053_slack_daily_checklist_repair.sql", import.meta.url), "utf8");
+  assert.ok(!migration.includes("\r"));
+  const sql = migration.replaceAll("--> statement-breakpoint", "");
+  db.exec(sql);
+  db.exec(sql);
+  db.exec(`INSERT INTO slack_daily_checklists
+    (id, owner_id, member_id, payload_json, expires_at)
+    VALUES ('checklist', 'workspace', 'member', '{}', '2099-01-01T00:00:00.000Z')`);
+  assert.equal(db.prepare("SELECT revision FROM slack_daily_checklists WHERE id = 'checklist'").get().revision, 0);
+  assert.throws(() => db.exec(`INSERT INTO slack_daily_checklists
+    (id, owner_id, member_id, payload_json, expires_at)
+    VALUES ('invalid', 'workspace', 'member', 'not-json', '2099-01-01T00:00:00.000Z')`), /CHECK constraint failed/);
+  assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_slack_daily_checklists_expiry'").get().name,
+    "idx_slack_daily_checklists_expiry");
+  db.close();
+});
+
 test("Slack work command migration is LF-only, idempotent by request, and disables legacy Task status rules", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

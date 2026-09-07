@@ -813,6 +813,13 @@ async function ensureSchema() {
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_member_links_owner_member ON slack_member_links(owner_id, member_id)"),
         d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_slack_member_links_team_user ON slack_member_links(team_id, slack_user_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_member_links_owner ON slack_member_links(owner_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_checklists (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+          payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+          revision INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_daily_checklists_expiry ON slack_daily_checklists(expires_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_settings (
           owner_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE, enabled INTEGER NOT NULL DEFAULT 0,
           weekdays TEXT NOT NULL DEFAULT '[1,2,3,4,5]', reminder_time TEXT NOT NULL DEFAULT '09:00',
