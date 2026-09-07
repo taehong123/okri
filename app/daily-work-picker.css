@@ -23,8 +23,9 @@
 .daily-submission-summary li small { min-width: 0; overflow-wrap: anywhere; }
 .daily-submission-summary li em { justify-self: start; }
 .daily-project-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.daily-project-heading h3 { min-width: 0; overflow-wrap: anywhere; }
+.daily-project-heading h3 { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; }
 .daily-project-heading h3 button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.daily-container-kind { flex: 0 0 auto; color: var(--muted); font-size: var(--type-meta); font-weight: 600; }
 .daily-project-heading .icon-button { flex-shrink: 0; }
 .daily-project-create { display: grid; gap: var(--space-2); padding: var(--space-3) 0; }
 .daily-project-create label { display: grid; min-width: 0; gap: var(--space-2); }

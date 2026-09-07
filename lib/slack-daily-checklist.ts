@@ -10,7 +10,11 @@ const metadataFor = (id: string, revision: number) => JSON.stringify({ id, revis
 
 export async function createDailyChecklist(ownerId: string, memberId: string, input: DailyChecklist, t: Translator) {
   const id = crypto.randomUUID();
-  const value = { ...input, work: orderDailyChecklist(input.work), page: 0 };
+  const choices = { ...input.choices };
+  if (input.taskFocused) {
+    for (const key of Object.keys(choices)) if (!key.startsWith("task:")) delete choices[key];
+  }
+  const value = { ...input, choices, work: orderDailyChecklist(input.work), page: 0 };
   const now = new Date().toISOString();
   await env.DB.prepare("DELETE FROM slack_daily_checklists WHERE expires_at <= ?").bind(now).run();
   await env.DB.prepare("INSERT INTO slack_daily_checklists (id, owner_id, member_id, payload_json, expires_at) VALUES (?, ?, ?, ?, ?)")
@@ -20,10 +24,13 @@ export async function createDailyChecklist(ownerId: string, memberId: string, in
 
 export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t: Translator) {
   const next: DailyChecklist = { ...input, choices: { ...input.choices } };
+  if (input.taskFocused) {
+    for (const key of Object.keys(next.choices)) if (!key.startsWith("task:")) delete next.choices[key];
+  }
   const errors: Record<string, string> = {};
   const start = input.page * DAILY_CHECKLIST_PAGE_SIZE;
   input.work.slice(start, start + DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
-    if (input.taskFocused && entry.kind === "project") { delete next.choices[entry.key]; return; }
+    if (input.taskFocused && entry.kind !== "task") { delete next.choices[entry.key]; return; }
     const block = dailyChoiceBlockId(input, entry, start + offset);
     const field = state[block]?.choice;
     if (!field) return;
@@ -132,7 +139,8 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   const problem = (errors: Record<string, string>) => ({ errors, view: dailyChecklistForm(next, metadata, t, [...new Set(Object.values(errors))].join("\n")) });
   if (Object.keys(errors).length) return problem(errors);
   const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
-  const selected = (choice: string) => Object.entries(next.choices).filter(([, value]) => value === choice).map(([key]) => key);
+  const selected = (choice: string) => Object.entries(next.choices)
+    .filter(([key, value]) => value === choice && (!next.taskFocused || key.startsWith("task:"))).map(([key]) => key);
   const today = selected("today"), done = selected("done"), deleted = selected("delete");
   if (today.length + done.length + deleted.length > 50) return problem({ no_planned: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
   if (previous || input.page + 1 < pages) {
@@ -153,7 +161,7 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
     .bind(authorization.ownerId, member.id, parsed.id).first();
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
-      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
+      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => key.startsWith("task:") && !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
       noPlannedTasks: next.noPlannedTasks || (!today.length && done.length + deleted.length > 0), skipReason, skipNote: next.skipNote, source: "slack" }, false);
   }
   return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done, deleted) };

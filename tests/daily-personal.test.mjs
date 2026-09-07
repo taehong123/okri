@@ -199,6 +199,7 @@ test("DRI and participants can add their own Task, including backlog projects, w
   const dashboard = await api.getDailyDashboard(auth, date);
   assert.deepEqual(dashboard.createTargets.projects.map((entry) => entry.id).sort(), ["project", "worker"]);
   assert.ok(dashboard.createTargets.projects.every((entry) => entry.hasTasks === false));
+  assert.equal(dashboard.createTargets.routines[0].hasTasks, false);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM items").get().n, 6);
   await api.saveDailyDraft(auth, { date, todayNote: "Keep notes", selectedWorkIds: ["task:task"] }, false);
   for (const parentId of ["worker", "project"]) {
@@ -231,19 +232,38 @@ test("Task creation rejects viewers, removed participants, foreign and closed pr
   assert.equal(db.prepare("SELECT COUNT(*) n FROM items").get().n, 6);
 });
 
-test("task-focused Slack checklist shows empty projects but only offers Task choices under them", () => {
+test("task-focused Slack checklist treats Project and Routine as peer containers with only Task choices", () => {
   const project = { id: "p", key: "project:p", kind: "project", title: "Project" };
   const empty = { id: "e", key: "project:e", kind: "project", title: "Empty Project" };
   const task = { id: "t", key: "task:t", kind: "task", title: "My Task", parentId: "p", parentKind: "project", parentTitle: "Project" };
-  const input = { ...checklistInput([project, task, empty]), taskFocused: true, taskTargets: [{ key: "project:p", title: "Project", hasTasks: true }, { key: "project:e", title: "Empty Project", hasTasks: false }] };
+  const routine = { id: "r", key: "routine:r", kind: "routine", title: "Store management" };
+  const emptyRoutine = { id: "er", key: "routine:er", kind: "routine", title: "Empty Routine" };
+  const routineTask = { id: "rt", key: "task:rt", kind: "task", title: "Routine Task", parentId: "r", parentKind: "routine", parentTitle: "Store management" };
+  const input = { ...checklistInput([project, task, empty, routine, routineTask, emptyRoutine]), taskFocused: true, taskTargets: [
+    { key: "project:p", title: "Project", hasTasks: true }, { key: "project:e", title: "Empty Project", hasTasks: false },
+    { key: "routine:r", title: "Store management", hasTasks: true }, { key: "routine:er", title: "Empty Routine", hasTasks: false },
+  ] };
   const modal = form.dailyChecklistForm(input, "{}");
-  assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text), ["My Task"]);
-  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 1);
-  const emptyHeading = modal.blocks.findIndex((block) => block.text?.text === "Empty Project");
+  assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text), ["My Task", "Routine Task"]);
+  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 2);
+  const emptyHeading = modal.blocks.findIndex((block) => block.text?.text === "Project · Empty Project");
   assert.equal(modal.blocks[emptyHeading + 1].elements[0].text, "아직 Task가 없습니다.");
   assert.equal(modal.blocks[emptyHeading + 2].elements[0].action_id, "daily_checklist_add_task");
   assert.equal(modal.blocks[emptyHeading + 2].elements[0].value, "project:e");
+  const routineHeading = modal.blocks.findIndex((block) => block.text?.text === "Routine · Store management");
+  assert.equal(modal.blocks[routineHeading + 1].block_id, "daily_choice_task:rt");
+  const emptyRoutineHeading = modal.blocks.findIndex((block) => block.text?.text === "Routine · Empty Routine");
+  assert.equal(modal.blocks[emptyRoutineHeading + 2].elements[0].value, "routine:er");
+  assert.doesNotMatch(JSON.stringify(modal), /daily_choice_routine:/);
   assert.match(JSON.stringify(modal), /아직 Task가 없습니다/);
+});
+
+test("task-focused Slack state discards stale parent choices", async (t) => {
+  const { raw, checklist } = fixture(t);
+  const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
+    choices: { "project:project": "today", "routine:routine": "done", "task:task": "today" } };
+  const merged = checklist.mergeDailyChecklist(input, {}, (key) => key).next;
+  assert.deepEqual(merged.choices, { "task:task": "today" });
 });
 
 test("empty-project buttons and their inline editor fit Slack limits in every language", async () => {
@@ -259,7 +279,7 @@ test("empty-project buttons and their inline editor fit Slack limits in every la
     }
     const opened = form.dailyChecklistForm({ ...input, taskEntry: { parentKey: "project:p-19", title: "", requestId: "request" } }, "{}", translate);
     const index = opened.blocks.findIndex((b) => b.block_id === "daily_new_task");
-    assert.equal(opened.blocks[index - 2].text.text, "Project 19");
+    assert.equal(opened.blocks[index - 2].text.text, `${translate("Project")} · Project 19`);
     assert.equal(opened.blocks[index].label.text, translate("새 Task 제목"));
     assert.equal(opened.blocks[index + 1].elements[0].text.text, translate("추가하고 오늘 할 일에 선택"));
     assert.equal(opened.blocks.filter((b) => b.element?.focus_on_load).length, 1);

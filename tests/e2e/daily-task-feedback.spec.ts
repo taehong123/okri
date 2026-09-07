@@ -39,6 +39,37 @@ test("retry after a lost response confirms the stored Task without duplicating i
   expect(requests[0]).toBe(requests[1]);
 });
 
+test("Routine is a peer container and creates a selectable child Task", async ({ page }) => {
+  await installApiMocks(page, { teamWorkspace: true });
+  const routine = { id: "routine-1", key: "routine:routine-1", kind: "routine", title: "Store management", status: "todo", priority: "medium", parentTitle: "Routine", dueDate: null };
+  const work: Array<Record<string, unknown>> = [routine];
+  const draft = { id: "draft", date: "2026-09-06", yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false, selectedTaskIds: [] as string[], selectedWorkIds: [] as string[], selectedYesterdayWorkIds: [] };
+  const requests: Array<Record<string, unknown>> = [];
+  await page.route(/\/api\/daily-scrum(?:\/|\?|$)/, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith("/tasks")) {
+      const body = route.request().postDataJSON();
+      requests.push(body);
+      const task = { id: "routine-task", key: "task:routine-task", kind: "task", title: body.title, status: "todo", priority: "medium", parentId: "routine-1", parentKind: "routine", parentTitle: "Store management", dueDate: null };
+      work.push(task); draft.selectedTaskIds.push(task.id); draft.selectedWorkIds.push(task.key);
+      return route.fulfill({ status: 201, json: { task } });
+    }
+    return route.fulfill({ json: { date: draft.date, draft, member: { id: "member-1", displayName: "Owner", role: "owner" }, candidates: { work, yesterdayWork: [], tasks: [], groups: [] }, createTargets: { projects: [], routines: [{ id: "routine-1", title: "Store management", hasTasks: work.length > 1 }], allowGeneral: false }, team: [], latestSubmission: null, legacyWorkspaceNote: null } });
+  });
+  await page.goto("/?view=scrum");
+  const picker = page.locator(".daily-task-picker").nth(1);
+  const group = picker.getByRole("region", { name: "Store management", exact: true });
+  await expect(group).toBeVisible();
+  await expect(group.locator('.daily-task-option input[type="checkbox"]')).toHaveCount(0);
+  await group.locator("header .icon-button").click();
+  await group.locator(".daily-project-create input").fill("Open store checklist");
+  await group.locator('.daily-project-create button[type="submit"]').click();
+  await expect(group.getByRole("checkbox", { name: /Open store checklist/ })).toBeChecked();
+  expect(requests).toHaveLength(1);
+  expect(requests[0].parentKind).toBe("routine");
+  expect(requests[0].parentId).toBe("routine-1");
+});
+
 for (const theme of ["white", "dark"]) {
   test(`daily Task creation shows pending, selected and persistent success (${theme})`, async ({ page, context }, testInfo) => {
     await installApiMocks(page, { teamWorkspace: true });

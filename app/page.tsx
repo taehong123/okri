@@ -257,7 +257,7 @@ type DailyDashboard = {
   draft: { id: string | null; date: string; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; selectedTaskIds: string[]; selectedWorkIds?: string[]; selectedYesterdayWorkIds?: string[]; source: string; updatedAt: string | null };
   latestSubmission: DailySubmission | null;
   candidates: { work?: DailyWork[]; yesterdayWork?: DailyWork[]; tasks: DailyTaskCandidate[]; groups: Array<{ key: string; kind: string; id: string | null; title: string; tasks: DailyTaskCandidate[] }> };
-  createTargets: { projects: Array<{ id: string; title: string; needsTask: boolean; hasTasks?: boolean }>; routines: Array<{ id: string; title: string }>; allowGeneral: boolean };
+  createTargets: { projects: Array<{ id: string; title: string; needsTask: boolean; hasTasks?: boolean }>; routines: Array<{ id: string; title: string; needsTask?: boolean; hasTasks?: boolean }>; allowGeneral: boolean };
   team: Array<{ memberId: string; displayName: string; email: string; role: TeamRole; status: "submitted" | "skipped" | "writing" | "missing"; slackConnected: boolean; submission: DailySubmission | null }>;
   legacyWorkspaceNote: { yesterdayNote: string; todayNote: string; blockersNote: string; updatedAt: string } | null;
 };
@@ -4299,6 +4299,8 @@ function MyWorkSection({ title, count, children }: { title: string; count: numbe
   return <section className="my-work-section"><header><b>{title}</b><span>{count}</span></header><div>{count ? children : <p className="my-work-empty">{t("담당된 {kind}가 없습니다.", { kind: title })}</p>}</div></section>;
 }
 
+function isDailyTaskKey(key: string) { return key.startsWith("task:"); }
+
 function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, onNotice }: { workspaceId: string; onOpenProject: (id: string) => void; onNavigate: (view: View) => void; onOpenTask: (id: string) => void; onNotice: (message: string) => void }) {
   const initialDate = localDate();
   const initialCacheKey = `daily:${workspaceId}:${initialDate}`;
@@ -4347,8 +4349,8 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
     setSaving("draft");
     try {
       const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...currentScrum.draft,
-        selectedWorkIds: currentScrum.draft.selectedWorkIds?.filter((key) => !key.startsWith("project:")),
-        selectedYesterdayWorkIds: currentScrum.draft.selectedYesterdayWorkIds?.filter((key) => !key.startsWith("project:")), date }) });
+        selectedWorkIds: currentScrum.draft.selectedWorkIds?.filter(isDailyTaskKey),
+        selectedYesterdayWorkIds: currentScrum.draft.selectedYesterdayWorkIds?.filter(isDailyTaskKey), date }) });
       const data = await response.json() as DailyDashboard & { error?: string };
       if (!response.ok) throw new Error(apiError(data, "데일리 초안을 저장하지 못했습니다."));
       const key = `daily:${workspaceId}:${date}`; dailyScrumMemoryCache.set(key, data); markViewCacheFresh(key); setScrum(data); setSavedNotes(scrumNotesSnapshot(data));
@@ -4363,8 +4365,8 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
   }
 
   async function submit() {
-    const hasProjectSelections = [...(currentScrum.draft.selectedWorkIds ?? []), ...(currentScrum.draft.selectedYesterdayWorkIds ?? [])].some((key) => key.startsWith("project:"));
-    if ((notesDirty || !currentScrum.draft.id || hasProjectSelections) && !await save(false)) return;
+    const hasContainerSelections = [...(currentScrum.draft.selectedWorkIds ?? []), ...(currentScrum.draft.selectedYesterdayWorkIds ?? [])].some((key) => !isDailyTaskKey(key));
+    if ((notesDirty || !currentScrum.draft.id || hasContainerSelections) && !await save(false)) return;
     setSaving("submit");
     try {
       const response = await fetch("/api/daily-scrum/submit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ date, requestId: submitRequestId.current }) });
@@ -4418,11 +4420,11 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
   }
   const isSkipped = Boolean(currentScrum.draft.skipReason);
   const skipNeedsNote = currentScrum.draft.skipReason === "other" && !currentScrum.draft.skipNote.trim();
-  const selectedWorkIds = (currentScrum.draft.selectedWorkIds ?? currentScrum.draft.selectedTaskIds.map((id) => `task:${id}`)).filter((key) => !key.startsWith("project:"));
-  const selectedYesterdayWorkIds = (currentScrum.draft.selectedYesterdayWorkIds ?? []).filter((key) => !key.startsWith("project:"));
+  const selectedWorkIds = (currentScrum.draft.selectedWorkIds ?? currentScrum.draft.selectedTaskIds.map((id) => `task:${id}`)).filter(isDailyTaskKey);
+  const selectedYesterdayWorkIds = (currentScrum.draft.selectedYesterdayWorkIds ?? []).filter(isDailyTaskKey);
   const conflictKeys = selectedYesterdayWorkIds.filter((key) => selectedWorkIds.includes(key));
   const work = currentScrum.candidates.work ?? currentScrum.candidates.tasks.map((task): DailyWork => ({ ...task, key: `task:${task.id}`, kind: "task", priority: "medium" }));
-  const yesterdayWork = (currentScrum.candidates.yesterdayWork ?? []).filter((entry) => entry.kind !== "project");
+  const yesterdayWork = (currentScrum.candidates.yesterdayWork ?? []).filter((entry) => entry.kind === "task");
   return <section className="daily-workspace">
     <div className="scrum-toolbar">
       <label><CalendarDays size={14} /><span className="sr-only">{t("데일리 날짜")}</span><input aria-label={t("데일리 날짜")} type="date" value={date} onChange={(event) => { const nextDate = event.target.value; const cached = dailyScrumMemoryCache.get(`daily:${workspaceId}:${nextDate}`) ?? null; submitRequestId.current = crypto.randomUUID(); setScrum(cached); setSavedNotes(cached ? scrumNotesSnapshot(cached) : ""); setLoadError(false); setDate(nextDate); }} /></label>
@@ -4430,7 +4432,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
     </div>
     <div className="daily-layout"><section className="daily-editor" aria-labelledby="my-daily-heading"><header><div><h2 id="my-daily-heading">{t("내 데일리")}</h2><p>{t("조회와 선택은 Task 상태·기한·담당자를 바꾸지 않습니다.")}</p></div>{currentScrum.latestSubmission && <small>{currentScrum.latestSubmission.skipReason ? t("스킵") : t("제출")} v{currentScrum.latestSubmission.version} · {formatDateTime(currentScrum.latestSubmission.submittedAt)}</small>}</header>
       <DailyWorkPicker label={t("완료한 일")} work={yesterdayWork} selected={selectedYesterdayWorkIds} disabled={isSkipped || Boolean(saving)} yesterday conflictKeys={conflictKeys} onChange={selectYesterdayWork} onOpen={openWork} />
-      <DailyWorkPicker key={`${workspaceId}:${date}`} label={t("오늘 할 일")} work={work} projects={currentScrum.createTargets.projects} selected={selectedWorkIds} disabled={isSkipped || Boolean(saving) || currentScrum.member.role === "viewer"} noPlanned={currentScrum.draft.noPlannedTasks} conflictKeys={conflictKeys} onChange={selectWork} onNoPlanned={(value) => updateDraft({ noPlannedTasks: value, selectedTaskIds: value ? [] : currentScrum.draft.selectedTaskIds, selectedWorkIds: value ? [] : selectedWorkIds })} onOpen={openWork} onCreate={(projectId, title, requestId) => createTaskForDaily(`project:${projectId}`, title, requestId)} />
+      <DailyWorkPicker key={`${workspaceId}:${date}`} label={t("오늘 할 일")} work={work} containers={[...currentScrum.createTargets.projects.map((project) => ({ ...project, kind: "project" as const })), ...currentScrum.createTargets.routines.map((routine) => ({ ...routine, kind: "routine" as const }))]} selected={selectedWorkIds} disabled={isSkipped || Boolean(saving) || currentScrum.member.role === "viewer"} noPlanned={currentScrum.draft.noPlannedTasks} conflictKeys={conflictKeys} onChange={selectWork} onNoPlanned={(value) => updateDraft({ noPlannedTasks: value, selectedTaskIds: value ? [] : currentScrum.draft.selectedTaskIds, selectedWorkIds: value ? [] : selectedWorkIds })} onOpen={openWork} onCreate={(parentKey, title, requestId) => createTaskForDaily(parentKey, title, requestId)} />
       <fieldset className={`daily-skip-panel ${isSkipped ? "active" : ""}`}>
         <legend className="sr-only">{t("오늘 데일리 스킵")}</legend>
         <label className="daily-skip-toggle" htmlFor="daily-skip-toggle"><input id="daily-skip-toggle" type="checkbox" aria-label={t("오늘은 데일리를 스킵합니다")} aria-controls={isSkipped ? "daily-skip-fields" : undefined} checked={isSkipped} onChange={(event) => toggleSkip(event.target.checked)} /><span><b>{t("오늘은 데일리를 스킵합니다")}</b><small>{t("확정하면 선택한 사유가 팀과 Slack 채널에 공유됩니다.")}</small></span></label>
