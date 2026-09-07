@@ -436,7 +436,8 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     authorization.ownerId, member.id, date, authorization.ownerId, member.id] : [];
   const channels = await d1.prepare("SELECT channel_id FROM slack_daily_channels WHERE owner_id = ? ORDER BY channel_name")
     .bind(authorization.ownerId).all<{ channel_id: string }>();
-  await d1.batch([
+  try {
+    await d1.batch([
     d1.prepare(`INSERT INTO daily_submissions
       (id, owner_id, member_id, member_name, member_email, scrum_date, version, yesterday_note, today_note,
        blockers_note, no_planned_tasks, skip_reason, skip_note, source, submitted_at, work_snapshot_json,
@@ -479,7 +480,11 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
       (id, owner_id, member_id, submission_id, scrum_date, channel_id, status, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
       .bind(crypto.randomUUID(), authorization.ownerId, member.id, submissionId, date, channel.channel_id, submittedAt)),
-  ]);
+    ]);
+  } catch (error) {
+    if (error instanceof Error) Object.assign(error, { dailyStage: "submission_batch", dailyCounts: { today: selected.length, done: newlyCompleted.length, deleted: deletedTasks.length, channels: channels.results.length } });
+    throw error;
+  }
   const snapshots = await snapshotsForSubmissions([submissionId]);
   const submission = await d1.prepare("SELECT * FROM daily_submissions WHERE id = ?").bind(submissionId).first<SubmissionRow>();
   if (!submission) throw new Error("데일리 제출 결과를 확인할 수 없습니다.");

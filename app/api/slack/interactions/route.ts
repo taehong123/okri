@@ -171,8 +171,33 @@ function logDailyInteractionFailure(payload: SlackInteraction, stage: string, er
   const code = /^[a-z0-9_]{1,80}$/.test(explicitCode) ? explicitCode : classifyDailyInteractionFailure(error);
   console.error("slack_daily_interaction_failed", {
     stage, action: payload.actions?.[0]?.action_id ?? payload.type, viewId: payload.view?.id,
-    code,
+    code, ...dailyDatabaseDiagnostic(error),
+    ...(error instanceof Error && "dailyStage" in error && error.dailyStage === "submission_batch"
+      ? { dailyStage: error.dailyStage, counts: "dailyCounts" in error ? error.dailyCounts : undefined } : {}),
   });
+}
+
+function dailyDatabaseDiagnostic(error: unknown) {
+  const reasons = new Set<string>();
+  const codes = new Set<string>();
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    const message = current.message;
+    for (const code of message.match(/\b(?:D1|SQLITE)_[A-Z_]+\b/g) ?? []) codes.add(code);
+    for (const [pattern, reason] of [
+      [/no such table/i, "missing_table"], [/no such column|has no column/i, "missing_column"],
+      [/constraint failed/i, "constraint"], [/foreign key mismatch/i, "foreign_key_mismatch"],
+      [/too many sql variables/i, "bind_limit"], [/too many.*(?:queries|statements)|batch.*limit/i, "query_limit"],
+      [/too many.*trigger|trigger.*recurs/i, "trigger_recursion"], [/syntax error|incomplete input/i, "sql_syntax"],
+      [/malformed json/i, "invalid_json"], [/bind|unsupported type|type.*not supported/i, "bind_type"],
+      [/not authorized|authorization denied/i, "db_authorization"], [/database.*locked|busy/i, "db_busy"],
+      [/too (?:big|large)|size.*limit|length.*limit/i, "size_limit"], [/time.*out|exceeded.*time/i, "timeout"],
+      [/internal error/i, "internal"], [/too many.*subrequest/i, "subrequest_limit"],
+    ] as const) if (pattern.test(message)) reasons.add(reason);
+    current = current.cause;
+  }
+  const frame = error instanceof Error ? error.stack?.split("\n").find((line) => /^\s+at\s/.test(line))?.trim().slice(0, 240) : undefined;
+  return { dbReasons: [...reasons], dbCodes: [...codes], frame };
 }
 
 function classifyDailyInteractionFailure(error: unknown) {

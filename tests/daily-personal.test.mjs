@@ -114,6 +114,43 @@ function fixture(t, options = {}) {
   return { db, raw, api, checklist };
 }
 
+test("D1 submits a mixed daily with production backup and task-change triggers", async (t) => {
+  const { Miniflare, convertV4MiniflareOptions } = await import("miniflare");
+  const options = { modules: true, script: "export default { fetch() { return new Response('local test'); } }", d1Databases: ["DB"] };
+  const mf = new Miniflare(convertV4MiniflareOptions ? convertV4MiniflareOptions(options) : options);
+  t.after(() => mf.dispose());
+  const d1 = await mf.getD1Database("DB");
+  const { db, raw, api } = fixture(t, { realPersistence: true });
+  db.exec(`INSERT INTO items (id,owner_id,kind,title,status,parent_id) VALUES
+    ('complete','w','task','Complete this','in_progress','project'),
+    ('delete','w','task','Delete this','todo','project');
+    INSERT INTO item_assignments (id,owner_id,item_id,member_id,role) VALUES
+    ('ac','w','complete','me','task_assignee'),('ad','w','delete','me','task_assignee');`);
+  const tables = db.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+  const statements = [d1.prepare("PRAGMA defer_foreign_keys=ON")];
+  for (const table of tables) statements.push(d1.prepare(table.sql));
+  for (const table of tables) {
+    for (const row of db.prepare(`SELECT * FROM ${table.name}`).all()) {
+      statements.push(d1.prepare(`INSERT INTO ${table.name} (${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`).bind(...Object.values(row)));
+    }
+  }
+  await d1.batch(statements);
+  const triggers = (await read("../drizzle/0036_workspace_backups.sql")).split("--> statement-breakpoint").filter((sql) => /CREATE TRIGGER/.test(sql));
+  for (const sql of triggers) await d1.prepare(sql.trim()).run();
+  for (const sql of (await read("../drizzle/0050_slack_manual_and_task_changes.sql")).split("--> statement-breakpoint")) {
+    if (sql.trim()) await d1.prepare(sql.trim()).run();
+  }
+  raw.prepare = d1.prepare.bind(d1);
+  raw.batch = d1.batch.bind(d1);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: ["task:task"] }, false);
+  const submitted = await api.submitDailyDraft(authorization, date, "slack", "local-d1", ["task:complete"], ["task:delete"]);
+  assert.equal(submitted.tasks.length, 1);
+  assert.equal(await d1.prepare("SELECT status FROM items WHERE id='complete'").first("status"), "done");
+  assert.equal(await d1.prepare("SELECT status FROM items WHERE id='delete'").first("status"), "archived");
+  const retry = await api.submitDailyDraft(authorization, date, "slack", "local-d1", ["task:complete"], ["task:delete"]);
+  assert.equal(retry.id, submitted.id);
+});
+
 test("personal daily includes assigned DRI/worker projects, tasks and routines only", async (t) => {
   const { raw, db } = fixture(t);
   assert.deepEqual((await work.listDailyWork(raw, "w", "me", date)).map((w) => w.key).sort(),
@@ -831,6 +868,18 @@ test("failed Slack view recovery is logged without payload data and displays a m
   assert.doesNotMatch(JSON.stringify(logs), /private title|xoxb-secret/);
   assert.equal(updates.length, 3);
   assert.equal(updates[2][3].blocks.length, 1);
+});
+
+test("Daily diagnostics inspect wrapped D1 causes without logging bound data", async () => {
+  const source = await read("../app/api/slack/interactions/route.ts");
+  const ast = ts.createSourceFile("route.ts", source, ts.ScriptTarget.Latest, true);
+  const fn = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "dailyDatabaseDiagnostic");
+  const { dailyDatabaseDiagnostic } = compile(`export ${fn.getText(ast)}`);
+  const error = new Error("D1_ERROR: private title xoxb-secret", { cause: new Error("no such column: private_column: SQLITE_ERROR") });
+  const detail = dailyDatabaseDiagnostic(error);
+  assert.deepEqual(detail.dbReasons, ["missing_column"]);
+  assert.deepEqual(detail.dbCodes, ["D1_ERROR", "SQLITE_ERROR"]);
+  assert.doesNotMatch(JSON.stringify(detail), /private title|xoxb-secret|private_column/);
 });
 
 test("Slack Daily failure logs classify database errors without exposing their message", async (t) => {
