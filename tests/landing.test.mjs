@@ -60,7 +60,7 @@ test("server rendering puts the stories before an independent Google sign-in", (
   assert.ok(html.indexOf("landing-story") < html.indexOf("landing-auth"));
   assert.match(html, /class="landing-brand-home" aria-label="홈으로 이동"/);
   assert.match(html, /href="https:\/\/www\.whatmatters\.com\/faqs\/okr-examples-and-how-to-write-them"/);
-  assert.match(html, /<summary>사례와 근거/);
+  assert.match(html, /<summary>예시 출처/);
   assert.match(html, /Healthcare\.gov의 Objective와 Key Result는 공개 사례를 번역했고/);
   assert.match(html, /aria-current="step"/);
   assert.doesNotMatch(html, /<img|<picture|landing-step/);

@@ -48,7 +48,7 @@ const messages = {
   "데일리 요약 공유 설정을 확인해 주세요.": "请检查每日摘要分享设置。",
   "목표부터 오늘 할 일까지.": "从目标到今天的工作。",
   "검증된 OKR로 목표를 세우고, 모든 업무와 성과의 연결을 확인하세요.": "用经过验证的 OKR 设定目标，并查看每项工作如何连接到成果。",
-  "사례와 근거": "案例与来源",
+  "예시 출처": "示例来源",
   "Healthcare.gov의 Objective와 Key Result는 공개 사례를 번역했고, Initiative 이하는 OKRI 구조에 맞춰 구성했습니다.": "Objective 和 Key Result 翻译自 Healthcare.gov 的公开案例，Initiative 及以下工作按 OKRI 的结构编排。",
   "대다수 사람이 Healthcare.gov에서 보험 가입을 완료할 수 있게 한다.": "让绝大多数人都能在 Healthcare.gov 完成医保投保。",
   "보험 가입 완료율을 70%까지 높인다.": "将医保投保完成率提高到 70%。",

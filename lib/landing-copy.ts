@@ -38,7 +38,7 @@ export function getLandingCopy(translate: (key: string) => string, language: Lan
     loginNote: translate("기존 계정은 로그인, 처음이면 가입합니다."),
     loginError: translate("Google 로그인을 완료하지 못했습니다. 다시 시도해 주세요."),
     unavailable: translate("Google 로그인 설정을 완료하는 중입니다."),
-    sourceLabel: translate("사례와 근거"),
+    sourceLabel: translate("예시 출처"),
     exampleSource: translate("Healthcare.gov의 Objective와 Key Result는 공개 사례를 번역했고, Initiative 이하는 OKRI 구조에 맞춰 구성했습니다."),
     google: translate("Google의 OKR 이야기"), intel: translate("Intel의 OKR 사례"),
     mcp: translate("MCP로 사용 중인 AI에서도 이어가세요."),

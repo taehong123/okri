@@ -48,7 +48,7 @@ const messages = {
   "데일리 요약 공유 설정을 확인해 주세요.": "Revisa la configuración del resumen diario.",
   "목표부터 오늘 할 일까지.": "De los objetivos al trabajo de hoy.",
   "검증된 OKR로 목표를 세우고, 모든 업무와 성과의 연결을 확인하세요.": "Define objetivos con el método OKR, ampliamente probado, y comprueba cómo cada trabajo se conecta con los resultados.",
-  "사례와 근거": "Caso y fuentes",
+  "예시 출처": "Fuentes del ejemplo",
   "Healthcare.gov의 Objective와 Key Result는 공개 사례를 번역했고, Initiative 이하는 OKRI 구조에 맞춰 구성했습니다.": "El Objective y el Key Result traducen el caso público de Healthcare.gov. El Initiative y el trabajo inferior siguen la estructura de OKRI.",
   "대다수 사람이 Healthcare.gov에서 보험 가입을 완료할 수 있게 한다.": "Permitir que la gran mayoría de las personas complete la inscripción al seguro médico en Healthcare.gov.",
   "보험 가입 완료율을 70%까지 높인다.": "Elevar al 70 % la tasa de finalización de la inscripción al seguro médico.",
