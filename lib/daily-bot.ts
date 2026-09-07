@@ -436,7 +436,8 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     authorization.ownerId, member.id, date, authorization.ownerId, member.id] : [];
   const channels = await d1.prepare("SELECT channel_id FROM slack_daily_channels WHERE owner_id = ? ORDER BY channel_name")
     .bind(authorization.ownerId).all<{ channel_id: string }>();
-  await d1.batch([
+  try {
+    await d1.batch([
     d1.prepare(`INSERT INTO daily_submissions
       (id, owner_id, member_id, member_name, member_email, scrum_date, version, yesterday_note, today_note,
        blockers_note, no_planned_tasks, skip_reason, skip_note, source, submitted_at, work_snapshot_json,
@@ -479,7 +480,11 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
       (id, owner_id, member_id, submission_id, scrum_date, channel_id, status, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)`)
       .bind(crypto.randomUUID(), authorization.ownerId, member.id, submissionId, date, channel.channel_id, submittedAt)),
-  ]);
+    ]);
+  } catch (error) {
+    if (error instanceof Error) Object.assign(error, { dailyStage: "submission_batch", dailyCounts: { today: selected.length, done: newlyCompleted.length, deleted: deletedTasks.length, channels: channels.results.length } });
+    throw error;
+  }
   const snapshots = await snapshotsForSubmissions([submissionId]);
   const submission = await d1.prepare("SELECT * FROM daily_submissions WHERE id = ?").bind(submissionId).first<SubmissionRow>();
   if (!submission) throw new Error("데일리 제출 결과를 확인할 수 없습니다.");
@@ -643,6 +648,7 @@ async function selectTaskInDraft(authorization: RequestAuthorization, member: Wo
 }
 
 async function selectedTaskRows(ownerId: string, memberId: string, draftId: string, date: string) {
+  // A UUID-based Daily prefix exceeds D1's 50-byte LIKE pattern limit.
   const rows = await env.DB.prepare(`SELECT task.id, task.title, task.status,
       CASE WHEN project.id IS NOT NULL THEN 'project'
            WHEN routine.system_key = 'general' OR routine.id IS NULL THEN 'general' ELSE 'routine' END AS parent_kind,
@@ -650,7 +656,7 @@ async function selectedTaskRows(ownerId: string, memberId: string, draftId: stri
            WHEN routine.system_key = 'general' THEN NULL ELSE routine.id END AS parent_id,
       CASE WHEN project.id IS NOT NULL THEN project.title
            WHEN routine.system_key = 'general' OR routine.id IS NULL THEN 'General' ELSE routine.title END AS parent_title,
-      CASE WHEN task.source = 'daily' AND task.source_ref LIKE ? THEN 1 ELSE 0 END AS is_new
+      CASE WHEN task.source = 'daily' AND instr(task.source_ref, ?) = 1 THEN 1 ELSE 0 END AS is_new
     FROM daily_scrum_task_selections AS selection
     INNER JOIN items AS task ON task.id = selection.task_id AND task.owner_id = selection.owner_id
     INNER JOIN item_assignments AS assignment ON assignment.owner_id = task.owner_id AND assignment.item_id = task.id
@@ -660,7 +666,7 @@ async function selectedTaskRows(ownerId: string, memberId: string, draftId: stri
     WHERE selection.owner_id = ? AND selection.daily_scrum_id = ? AND selection.member_id = ?
       AND task.archived_at IS NULL AND task.status NOT IN ('done', 'development_done', 'archived')
     ORDER BY selection.created_at`)
-    .bind(`daily:${memberId}:${date}:%`, memberId, ownerId, draftId, memberId).all<{
+    .bind(`daily:${memberId}:${date}:`, memberId, ownerId, draftId, memberId).all<{
       id: string; title: string; status: string; parent_kind: string; parent_id: string | null; parent_title: string; is_new: number;
     }>();
   return rows.results;

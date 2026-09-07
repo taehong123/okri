@@ -53,6 +53,16 @@ const authorization = { ownerId: "w", userId: "u", role: "owner", apiToken: fals
 function fixture(t, options = {}) {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
+  if (options.d1LikeLimit) {
+    const native = new DatabaseSync(":memory:");
+    t.after(() => native.close());
+    const like = native.prepare("SELECT ? LIKE ? AS matched");
+    // Local SQLite/Miniflare do not enforce hosted D1's 50-byte pattern limit.
+    db.function("like", (pattern, value) => {
+      if (Buffer.byteLength(pattern ?? "", "utf8") > 50) throw new Error("D1_ERROR: LIKE or GLOB pattern too complex: SQLITE_ERROR");
+      return like.get(value, pattern).matched;
+    });
+  }
   db.exec("PRAGMA foreign_keys=ON");
   for (const table of Object.values(schema.tables)) {
     const columns = Object.values(table.columns).map((c) => `${c.name} ${c.type}${c.primaryKey ? " PRIMARY KEY" : ""}${c.notNull ? " NOT NULL" : ""}${c.default !== undefined ? ` DEFAULT ${c.default}` : ""}`);
@@ -113,6 +123,65 @@ function fixture(t, options = {}) {
   const checklist = compile(checklistSource, { "cloudflare:workers": { env: { DB: raw } }, "@/lib/daily-bot": api, "@/lib/slack-daily-form": form });
   return { db, raw, api, checklist };
 }
+
+test("D1 submits a mixed daily with production backup and task-change triggers", async (t) => {
+  const { Miniflare, convertV4MiniflareOptions } = await import("miniflare");
+  const options = { modules: true, script: "export default { fetch() { return new Response('local test'); } }", d1Databases: ["DB"] };
+  const mf = new Miniflare(convertV4MiniflareOptions ? convertV4MiniflareOptions(options) : options);
+  t.after(() => mf.dispose());
+  const d1 = await mf.getD1Database("DB");
+  const { db, raw, api } = fixture(t, { realPersistence: true });
+  db.prepare("UPDATE items SET source='daily', source_ref=? WHERE id='task'").run(`daily:me:${date}:local-request`);
+  db.exec(`INSERT INTO items (id,owner_id,kind,title,status,parent_id) VALUES
+    ('complete','w','task','Complete this','in_progress','project'),
+    ('delete','w','task','Delete this','todo','project');
+    INSERT INTO item_assignments (id,owner_id,item_id,member_id,role) VALUES
+    ('ac','w','complete','me','task_assignee'),('ad','w','delete','me','task_assignee');`);
+  const tables = db.prepare("SELECT name,sql FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'").all();
+  const statements = [d1.prepare("PRAGMA defer_foreign_keys=ON")];
+  for (const table of tables) statements.push(d1.prepare(table.sql));
+  for (const table of tables) {
+    for (const row of db.prepare(`SELECT * FROM ${table.name}`).all()) {
+      statements.push(d1.prepare(`INSERT INTO ${table.name} (${Object.keys(row).join(',')}) VALUES (${Object.keys(row).map(() => '?').join(',')})`).bind(...Object.values(row)));
+    }
+  }
+  await d1.batch(statements);
+  const triggers = (await read("../drizzle/0036_workspace_backups.sql")).split("--> statement-breakpoint").filter((sql) => /CREATE TRIGGER/.test(sql));
+  for (const sql of triggers) await d1.prepare(sql.trim()).run();
+  for (const sql of (await read("../drizzle/0050_slack_manual_and_task_changes.sql")).split("--> statement-breakpoint")) {
+    if (sql.trim()) await d1.prepare(sql.trim()).run();
+  }
+  raw.prepare = d1.prepare.bind(d1);
+  raw.batch = d1.batch.bind(d1);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: ["task:task"] }, false);
+  const submitted = await api.submitDailyDraft(authorization, date, "slack", "local-d1", ["task:complete"], ["task:delete"]);
+  assert.equal(submitted.tasks.length, 1);
+  assert.equal(submitted.tasks[0].isNew, true);
+  assert.equal(await d1.prepare("SELECT status FROM items WHERE id='complete'").first("status"), "done");
+  assert.equal(await d1.prepare("SELECT status FROM items WHERE id='delete'").first("status"), "archived");
+  const retry = await api.submitDailyDraft(authorization, date, "slack", "local-d1", ["task:complete"], ["task:delete"]);
+  assert.equal(retry.id, submitted.id);
+});
+
+test("UUID members submit Daily-created Tasks within hosted D1's LIKE limit", async (t) => {
+  const { db, api } = fixture(t, { d1LikeLimit: true });
+  const memberId = "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb";
+  db.exec("UPDATE workspace_members SET user_id='former-user' WHERE id='me'");
+  db.prepare("INSERT INTO workspace_members (id,workspace_id,user_id,email,role,status) VALUES (?,'w','u','uuid@example.test','owner','active')").run(memberId);
+  db.prepare("UPDATE item_assignments SET member_id=? WHERE member_id='me'").run(memberId);
+  db.prepare("UPDATE items SET source='daily',source_ref=? WHERE id='task'").run(`daily:${memberId}:${date}:request`);
+  assert.equal(Buffer.byteLength(`daily:${memberId}:${date}:%`), 55);
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"] }, false);
+  const submission = await api.submitDailyDraft(authorization, date, "slack", "uuid-daily");
+  assert.equal(submission.tasks.length, 1);
+  assert.equal(submission.tasks[0].isNew, true);
+  assert.equal((await api.submitDailyDraft(authorization, date, "slack", "uuid-daily")).id, submission.id);
+  for (const ref of [null, `daily:${memberId}:2026-09-03:request`, `daily:other-member:${date}:request`, `not-daily:${memberId}:${date}:request`]) {
+    db.prepare("UPDATE items SET source_ref=? WHERE id='task'").run(ref);
+    const revised = await api.submitDailyDraft(authorization, date);
+    assert.equal(revised.tasks[0].isNew, false);
+  }
+});
 
 test("personal daily includes assigned DRI/worker projects, tasks and routines only", async (t) => {
   const { raw, db } = fixture(t);
@@ -832,6 +901,44 @@ test("failed Slack view recovery is logged without payload data and displays a m
   assert.doesNotMatch(JSON.stringify(logs), /private title|xoxb-secret/);
   assert.equal(updates.length, 3);
   assert.equal(updates[2][3].blocks.length, 1);
+});
+
+test("Daily diagnostics inspect wrapped D1 causes without logging bound data", async () => {
+  const source = await read("../app/api/slack/interactions/route.ts");
+  const ast = ts.createSourceFile("route.ts", source, ts.ScriptTarget.Latest, true);
+  const fn = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "dailyDatabaseDiagnostic");
+  const { dailyDatabaseDiagnostic } = compile(`export ${fn.getText(ast)}`);
+  const error = new Error("D1_ERROR: private title xoxb-secret", { cause: new Error("no such column: private_column: SQLITE_ERROR") });
+  const detail = dailyDatabaseDiagnostic(error);
+  assert.deepEqual(detail.dbReasons, ["missing_column"]);
+  assert.deepEqual(detail.dbCodes, ["D1_ERROR", "SQLITE_ERROR"]);
+  assert.doesNotMatch(JSON.stringify(detail), /private title|xoxb-secret|private_column/);
+});
+
+test("Slack Daily failure logs classify database errors without exposing their message", async (t) => {
+  const pending = [], logs = [];
+  t.mock.method(console, "error", (...args) => logs.push(args));
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), updateDailyChecklistView: async () => undefined },
+    "@/lib/slack-daily-checklist": {
+      handleDailyChecklist: async () => { throw new Error("D1_ERROR: no such table: private_table"); },
+      retryDailyChecklist: async () => ({ type: "modal", blocks: [] }),
+    },
+    "@/lib/slack-management-actions": {}, "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+    type: "view_submission", team: { id: "T" }, user: { id: "U" },
+    view: { id: "V", callback_id: "daily_checklist_submit", private_metadata: "metadata", state: { values: {} } },
+  }) }) }));
+  assert.equal(response.status, 200);
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.equal(logs[0][1].code, "db_missing_table");
+  assert.doesNotMatch(JSON.stringify(logs), /private_table/);
 });
 
 test("paged checklists preserve notes and choices, reject foreign/viewer access, and expire", async (t) => {

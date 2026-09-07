@@ -167,11 +167,52 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
 }
 
 function logDailyInteractionFailure(payload: SlackInteraction, stage: string, error: unknown) {
-  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+  const explicitCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+  const code = /^[a-z0-9_]{1,80}$/.test(explicitCode) ? explicitCode : classifyDailyInteractionFailure(error);
   console.error("slack_daily_interaction_failed", {
     stage, action: payload.actions?.[0]?.action_id ?? payload.type, viewId: payload.view?.id,
-    code: /^[a-z0-9_]{1,80}$/.test(code) ? code : "unknown",
+    code, ...dailyDatabaseDiagnostic(error),
+    ...(error instanceof Error && "dailyStage" in error && error.dailyStage === "submission_batch"
+      ? { dailyStage: error.dailyStage, counts: "dailyCounts" in error ? error.dailyCounts : undefined } : {}),
   });
+}
+
+function dailyDatabaseDiagnostic(error: unknown) {
+  const reasons = new Set<string>();
+  const codes = new Set<string>();
+  let current = error;
+  for (let depth = 0; depth < 4 && current instanceof Error; depth += 1) {
+    const message = current.message;
+    for (const code of message.match(/\b(?:D1|SQLITE)_[A-Z_]+\b/g) ?? []) codes.add(code);
+    for (const [pattern, reason] of [
+      [/no such table/i, "missing_table"], [/no such column|has no column/i, "missing_column"],
+      [/constraint failed/i, "constraint"], [/foreign key mismatch/i, "foreign_key_mismatch"],
+      [/too many sql variables/i, "bind_limit"], [/too many.*(?:queries|statements)|batch.*limit/i, "query_limit"],
+      [/too many.*trigger|trigger.*recurs/i, "trigger_recursion"], [/syntax error|incomplete input/i, "sql_syntax"],
+      [/malformed json/i, "invalid_json"], [/bind|unsupported type|type.*not supported/i, "bind_type"],
+      [/not authorized|authorization denied/i, "db_authorization"], [/database.*locked|busy/i, "db_busy"],
+      [/too (?:big|large)|size.*limit|length.*limit/i, "size_limit"], [/time.*out|exceeded.*time/i, "timeout"],
+      [/internal error/i, "internal"], [/too many.*subrequest/i, "subrequest_limit"],
+    ] as const) if (pattern.test(message)) reasons.add(reason);
+    current = current.cause;
+  }
+  const frames = error instanceof Error ? error.stack?.split("\n").filter((line) => /^\s+at\s/.test(line)).slice(0, 7).map((line) => line.trim().slice(0, 240)) : undefined;
+  // D1's leading reason excludes the subsequent SQL, column name and bound values.
+  const reason = error instanceof Error && /\bSQLITE_[A-Z_]+\b/.test(error.message)
+    ? error.message.match(/D1_ERROR:\s*([^:\n]+)/)?.[1]
+      ?.replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "[value]").replace(/[^a-zA-Z ()\[\]._-]/g, "").slice(0, 160) : undefined;
+  return { dbReasons: [...reasons], dbCodes: [...codes], reason, frames };
+}
+
+function classifyDailyInteractionFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/no such table/i.test(message)) return "db_missing_table";
+  if (/constraint failed/i.test(message)) return "db_constraint";
+  if (/too many sql variables|too many.*statements|batch.*limit/i.test(message)) return "db_batch_limit";
+  if (/d1_error|database|sql/i.test(message)) return "db_query_failed";
+  if (/cannot read|undefined|null is not/i.test(message)) return "invalid_checklist_state";
+  if (/invalid_arguments|invalid_blocks|views\.update/i.test(message)) return "slack_view_update_failed";
+  return "unknown";
 }
 
 async function submitFromModal(payload: SlackInteraction, authorization: Awaited<ReturnType<typeof dailyMemberBySlack>> extends infer T ? T extends { authorization: infer A } ? A : never : never, t: Translator) {

@@ -232,6 +232,16 @@ async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
     schemaReady = (async () => {
+      // Slack checklist storage must exist even when all older schema sentinels pass.
+      await d1.batch([
+        d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_checklists (
+          id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          member_id TEXT NOT NULL REFERENCES workspace_members(id) ON DELETE CASCADE,
+          payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+          revision INTEGER NOT NULL DEFAULT 0, expires_at TEXT NOT NULL
+        )`),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_daily_checklists_expiry ON slack_daily_checklists(expires_at)"),
+      ]);
       if (await schemaIsCurrent(d1)) {
         return;
       }
@@ -976,6 +986,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       slack_daily_setting.summary_enabled,
       slack_daily_setting.summary_time,
       slack_daily_setting.onboarding_completed_at
+      ,slack_daily_checklist.revision
       ,management_bot.report_time
       ,assistant_draft.updated_at
       ,account_registration.completed_at
@@ -989,6 +1000,7 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
     LEFT JOIN daily_submissions AS daily_submission ON 1 = 0
     LEFT JOIN slack_daily_settings AS slack_daily_setting ON 1 = 0
+    LEFT JOIN slack_daily_checklists AS slack_daily_checklist ON 1 = 0
     LEFT JOIN workspace_management_bot_settings AS management_bot ON 1 = 0
     LEFT JOIN users AS app_user ON 1 = 0
     LEFT JOIN auth_identities AS auth_identity ON 1 = 0
