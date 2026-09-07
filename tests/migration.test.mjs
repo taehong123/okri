@@ -59,6 +59,8 @@ test("Slack daily checklist repair migration is idempotent and restores its guar
 
 test("runtime schema sentinel detects a missing Slack daily checklist table", async () => {
   const source = await readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8");
+  const ensureSchema = source.slice(source.indexOf("async function ensureSchema"), source.indexOf("async function ensureAssistantDraftSchema"));
+  assert.ok(ensureSchema.indexOf("CREATE TABLE IF NOT EXISTS slack_daily_checklists") < ensureSchema.indexOf("if (await schemaIsCurrent(d1))"));
   const sentinel = source.slice(source.indexOf("async function schemaIsCurrent"), source.indexOf("async function addColumnIfMissing"));
   assert.match(sentinel, /slack_daily_checklist\.revision/);
   assert.match(sentinel, /LEFT JOIN slack_daily_checklists AS slack_daily_checklist ON 1 = 0/);
