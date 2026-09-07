@@ -21,6 +21,7 @@ import {
   Briefcase,
   CalendarCheck,
   CalendarDays,
+  ChartGantt,
   Check,
   CheckCircle2,
   ChevronDown,
@@ -77,6 +78,7 @@ import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView from "./billing-view";
+import GanttView from "./gantt-view";
 import { ChatAiUsage } from "./ai-usage-meter";
 import { aiUsageLimitMessage } from "@/lib/ai-usage";
 import { invalidateAiUsage, type AiUsageScope } from "@/lib/ai-usage-client";
@@ -111,8 +113,8 @@ function localizedWeekdayLabel(day: number) {
     .format(new Date(Date.UTC(2026, 7, 2 + day)));
 }
 
-type View = "home" | "my_work" | "inbox" | "work" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
-const urlViews = new Set<View>(["my_work", "inbox", "work", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
+type View = "home" | "my_work" | "inbox" | "work" | "gantt" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
+const urlViews = new Set<View>(["my_work", "inbox", "work", "gantt", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
 type NoticeTone = "success" | "error" | "info";
 type AppNotice = { id: number; message: string; tone: NoticeTone };
 
@@ -828,6 +830,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "my_work", get label() { return t("내 업무"); }, icon: Briefcase },
   { id: "okr", label: "OKR", icon: Target },
   { id: "work", get label() { return t("Project"); }, icon: Table2 },
+  { id: "gantt", get label() { return t("간트"); }, icon: ChartGantt },
   { id: "inbox", get label() { return t("Task"); }, icon: Inbox },
   { id: "routines", get label() { return t("Routine"); }, icon: Repeat2 },
   { id: "data", get label() { return t("데이터"); }, icon: Database },
@@ -839,6 +842,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
 
 const mobileNavItems = (["home", "okr", "my_work", "work", "inbox"] satisfies View[])
   .map((id) => navItems.find((entry) => entry.id === id)!);
+const mobileMoreItems = navItems.filter((entry) => !mobileNavItems.some((mobileEntry) => mobileEntry.id === entry.id));
 
 const cadenceLabels: Record<Cadence, string> = { get daily() { return t("일간"); }, get weekly() { return t("주간"); }, get monthly() { return t("월간"); }, get quarterly() { return t("분기"); } };
 const viewTitles: Record<View, string> = {
@@ -846,6 +850,7 @@ const viewTitles: Record<View, string> = {
   get inbox() { return t("Task"); },
   get my_work() { return t("내 업무"); },
   get work() { return t("Project"); },
+  get gantt() { return t("간트"); },
   get routines() { return t("Routine"); },
   okr: "OKR",
   get data() { return t("데이터"); },
@@ -2333,7 +2338,7 @@ function WorkspaceApp() {
             <header><div><b>{currentWorkspace?.name || t("개인 워크스페이스")}</b><small>{currentWorkspace?.personal ? t("개인 워크스페이스") : t("팀 워크스페이스")}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label={t("워크스페이스 설정")}><Settings size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></span></header>
             <div className="mobile-menu-list">
               <AppInstallButton />
-              {navItems.slice(5).map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
+              {mobileMoreItems.map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>{t("AI 연결")}</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("integrations"); }}><Plug size={16} /><span>{t("개인 앱 연동")}</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("billing"); }}><CreditCard size={16} /><span>{t("요금제 및 결제")}</span><ChevronRight size={14} /></button>
@@ -2472,6 +2477,7 @@ function WorkspaceApp() {
               />
             </section>
           )}
+          {activeView === "gantt" && <GanttView items={activeItems} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} />}
           {activeView === "routines" && <RoutineView key={`${currentWorkspace?.id}:${searchNavigationId}`} focusId={searchFocusId} onDirtyChange={setRoutineEditorDirty} workspaceId={currentWorkspace?.id ?? ""} readOnly={!canWriteWorkspace} canManageProperties={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
           {activeView === "data" && <ClientDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} items={activeItems} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
           {activeView === "okr" && (
@@ -7404,6 +7410,6 @@ function formatDateTime(value: string) {
   return date.toLocaleString(getClientLocale(), { dateStyle: "medium", timeStyle: "short" });
 }
 function localDate() { const now = new Date(); const offset = now.getTimezoneOffset() * 60_000; return new Date(now.getTime() - offset).toISOString().slice(0, 10); }
-function pageSubtitle(view: View) { return t({ home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내게 배정된 업무와 오늘의 진행 계획", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]); }
+function pageSubtitle(view: View) { return t({ home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", gantt: "Project 마감과 하위 Task 일정을 한눈에 확인", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내게 배정된 업무와 오늘의 진행 계획", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]); }
 function routineCadenceLabel(cadence: RoutineCadence) { return t({ daily: "매일", weekly: "매주", monthly: "매월" }[cadence]); }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

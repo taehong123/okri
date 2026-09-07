@@ -191,6 +191,19 @@ References: [VS Code role-based theme colors](https://code.visualstudio.com/api/
   keyboard/history/draft behavior, all five languages, six real themes, actual
   fonts, 320–3840px layouts and short phones with 200% user text.
 
+## Gantt schedule
+
+- `?view=gantt` is a workspace-level read view for Projects and their direct
+  Tasks. Project rows expose status, responsible member, progress and due date;
+  expanded Task rows expose their own due-date milestones.
+- Scheduling remains due-date only. A Project bar represents the interval from
+  today to its due date, or from an overdue due date to today. It must never imply
+  that creation time, task completion or an inferred date is a planned start.
+- The Project label column stays visible while the date region scrolls. Mobile
+  and larger text keep 44px controls and scroll only the timeline, never the page.
+- Overdue, complete and current-day states use semantic labels plus theme roles;
+  color alone is not sufficient. All five languages and six themes remain usable.
+
 ## Global language typography
 
 ### Slack management forms

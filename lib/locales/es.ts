@@ -2141,5 +2141,17 @@ const messages = {
 "저장 결과를 확인하지 못했습니다. 입력값을 유지했으니 다시 저장해 주세요.": "No se pudo confirmar el guardado. Se conservó tu entrada; guarda de nuevo para comprobar la misma solicitud.",
 "입력창을 열지 못했습니다. 권한을 확인하고 다시 시도해 주세요.": "No se pudo abrir el formulario. Comprueba tus permisos e inténtalo de nuevo.",
 "저장 중입니다.": "Guardando.",
+"간트": "Gantt",
+"Project 마감과 하위 Task 일정을 한눈에 확인": "Consulta de un vistazo los plazos de Project y sus Task",
+"Project 일정": "Calendario de Project",
+"일정 범위": "Intervalo del calendario",
+"일정 요약": "Resumen del calendario",
+"Project {count}개": { one: "{count} Project", other: "{count} Projects" },
+"2주": "2 semanas",
+"간트에 표시할 Project가 없습니다.": "No hay Projects para mostrar en el Gantt.",
+"Project를 만들면 마감 일정과 하위 Task가 여기에 표시됩니다.": "Crea un Project para ver aquí su fecha límite y sus Task.",
+"Project와 Task 일정표": "Calendario de Projects y Tasks",
+"오늘과 마감일 기준": "Desde hoy hasta la fecha límite",
+"{count}일 남음": { one: "Queda {count} día", other: "Quedan {count} días" },
 } satisfies Catalog;
 export default messages;

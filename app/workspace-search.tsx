@@ -13,6 +13,7 @@ const menuEntries: Menu[] = [
   { label: "내 업무", keywords: "my work assigned tasks", destination: { view: "my_work" } },
   { label: "OKR", keywords: "목표 objective key result initiative 파일", destination: { view: "okr" } },
   { label: "Project", keywords: "프로젝트 project", destination: { view: "work" } },
+  { label: "간트", keywords: "일정 타임라인 gantt timeline project schedule", destination: { view: "gantt" } },
   { label: "Task", keywords: "태스크 할일 task", destination: { view: "inbox" } },
   { label: "Routine", keywords: "루틴 반복 routine", destination: { view: "routines" } },
   { label: "데일리 스크럼", keywords: "daily scrum 데일리", destination: { view: "scrum" } },

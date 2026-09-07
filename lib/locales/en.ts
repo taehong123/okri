@@ -2140,6 +2140,18 @@ const messages = {
 "저장 결과를 확인하지 못했습니다. 입력값을 유지했으니 다시 저장해 주세요.": "The save result could not be confirmed. Your input is preserved; save again to check the same request.",
 "입력창을 열지 못했습니다. 권한을 확인하고 다시 시도해 주세요.": "Could not open the form. Check your permissions and try again.",
 "저장 중입니다.": "Saving.",
+"간트": "Gantt",
+"Project 마감과 하위 Task 일정을 한눈에 확인": "See Project deadlines and child Task schedules at a glance",
+"Project 일정": "Project schedule",
+"일정 범위": "Timeline range",
+"일정 요약": "Schedule summary",
+"Project {count}개": { one: "{count} Project", other: "{count} Projects" },
+"2주": "2 weeks",
+"간트에 표시할 Project가 없습니다.": "No Projects to show on the Gantt.",
+"Project를 만들면 마감 일정과 하위 Task가 여기에 표시됩니다.": "Create a Project to see its deadline and child Tasks here.",
+"Project와 Task 일정표": "Project and Task schedule",
+"오늘과 마감일 기준": "Today to due date",
+"{count}일 남음": { one: "{count} day remaining", other: "{count} days remaining" },
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

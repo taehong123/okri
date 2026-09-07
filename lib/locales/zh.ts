@@ -2141,5 +2141,17 @@ const messages = {
 "저장 결과를 확인하지 못했습니다. 입력값을 유지했으니 다시 저장해 주세요.": "无法确认保存结果。已保留输入，请再次保存以确认同一请求的结果。",
 "입력창을 열지 못했습니다. 권한을 확인하고 다시 시도해 주세요.": "无法打开表单。请检查权限后重试。",
 "저장 중입니다.": "正在保存。",
+"간트": "甘特图",
+"Project 마감과 하위 Task 일정을 한눈에 확인": "一览 Project 截止日期与下级 Task 日程",
+"Project 일정": "Project 日程",
+"일정 범위": "日程范围",
+"일정 요약": "日程摘要",
+"Project {count}개": "{count} 个 Project",
+"2주": "两周",
+"간트에 표시할 Project가 없습니다.": "没有可在甘特图中显示的 Project。",
+"Project를 만들면 마감 일정과 하위 Task가 여기에 표시됩니다.": "创建 Project 后，其截止日期和下级 Task 将显示在这里。",
+"Project와 Task 일정표": "Project 与 Task 日程表",
+"오늘과 마감일 기준": "从今天到截止日期",
+"{count}일 남음": "剩余 {count} 天",
 } satisfies Catalog;
 export default messages;
