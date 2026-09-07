@@ -19,6 +19,7 @@ type SlackInteraction = {
   container?: { channel_id?: string; message_ts?: string };
   channel?: { id?: string };
   message?: { ts?: string };
+  state?: { values?: Record<string, Record<string, Record<string, unknown>>> };
   actions?: Array<{ action_id?: string; value?: string }>;
   view?: {
     id?: string;
@@ -42,6 +43,17 @@ export async function POST(request: Request) {
     && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open"].includes(payload.actions[0].action_id ?? "")) {
     return new Response(null, { status: 200 });
   }
+  const checklistButton = payload.type === "block_actions" && payload.view?.callback_id === "daily_checklist_submit"
+    && payload.actions?.some((action) => ["daily_checklist_previous", "daily_checklist_add_task", "daily_checklist_create_task", "daily_checklist_cancel_task"].includes(action.action_id ?? ""));
+  if (checklistButton) {
+    // Slack's acknowledgement deadline includes identity and language lookups, not just writes.
+    waitUntil(processInteraction(payload, request).catch((error) => logDailyInteractionFailure(payload, "resolve", error)));
+    return new Response(null, { status: 200 });
+  }
+  return processInteraction(payload, request);
+}
+
+async function processInteraction(payload: SlackInteraction, request: Request) {
   const teamId = payload.team?.id ?? "";
   const slackUserId = payload.user?.id ?? "";
   const connection = teamId ? await getSlackConnectionByTeam(teamId) : null;
@@ -101,7 +113,8 @@ export async function POST(request: Request) {
   const taskAction = payload.type === "block_actions" ? payload.actions?.find((action) => ["daily_checklist_add_task", "daily_checklist_create_task", "daily_checklist_cancel_task"].includes(action.action_id ?? "")) : undefined;
   if (payload.view?.callback_id === "daily_checklist_submit" && (payload.type === "view_submission" || previousPage || taskAction)) {
     if (linked.authorization.role === "viewer") return Response.json({ response_action: "errors", errors: { no_planned: t("읽기 전용 멤버는 데일리를 제출할 수 없습니다.") } });
-    const { id: viewId, hash, private_metadata: metadata = "", state } = payload.view;
+    const { id: viewId, hash, private_metadata: metadata = "" } = payload.view;
+    const state = payload.type === "block_actions" ? payload.state ?? payload.view.state : payload.view.state;
     if (!viewId) return new Response(null, { status: 400 });
     const statusView = (text: string) => ({ type: "modal", title: { type: "plain_text", text: t("데일리") },
       close: { type: "plain_text", text: t("닫기") }, blocks: [{ type: "section", text: { type: "plain_text", text } }] });
@@ -119,11 +132,21 @@ export async function POST(request: Request) {
         await updateDailyChecklistView(linked.authorization.ownerId, viewId, previousPage ? hash : undefined, result.view ?? statusView(t("제출 완료")));
         if (result.submission) await Promise.allSettled([publishDailySubmission(linked.authorization.ownerId, result.submission.id), reconcileDailyReminders(linked.authorization.ownerId)]);
       } catch (error) {
+        logDailyInteractionFailure(payload, "edit_or_update", error);
         const rawMessage = error instanceof Error ? error.message : "";
         const translated = t(rawMessage);
         const message = translated !== rawMessage || /^[가-힣\s·]+[가-힣\s·‘’]*[.?!]?$/.test(rawMessage) ? translated : t("데일리를 저장하지 못했습니다.");
-        const retry = await retryDailyChecklist(linked.authorization, metadata, state?.values ?? {}, message, t).catch(() => null);
-        await updateDailyChecklistView(linked.authorization.ownerId, viewId, undefined, retry ?? statusView(t("데일리를 다시 열어 주세요."))).catch(() => undefined);
+        const retry = await retryDailyChecklist(linked.authorization, metadata, state?.values ?? {}, message, t).catch((error) => {
+          logDailyInteractionFailure(payload, "recover", error); return null;
+        });
+        try {
+          await updateDailyChecklistView(linked.authorization.ownerId, viewId, undefined, retry ?? statusView(t("데일리를 다시 열어 주세요.")));
+        } catch (error) {
+          logDailyInteractionFailure(payload, "recover_view", error);
+          // A malformed full view must not leave a successful HTTP response and a dead button.
+          await updateDailyChecklistView(linked.authorization.ownerId, viewId, undefined, statusView(t("데일리를 다시 열어 주세요.")))
+            .catch((error) => logDailyInteractionFailure(payload, "error_view", error));
+        }
       }
     })());
     return previousPage || taskAction ? new Response(null, { status: 200 }) : Response.json({ response_action: "update", view: statusView(t("처리 중")) });
@@ -140,6 +163,14 @@ export async function POST(request: Request) {
     }
   }
   return new Response(null, { status: 200 });
+}
+
+function logDailyInteractionFailure(payload: SlackInteraction, stage: string, error: unknown) {
+  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+  console.error("slack_daily_interaction_failed", {
+    stage, action: payload.actions?.[0]?.action_id ?? payload.type, viewId: payload.view?.id,
+    code: /^[a-z0-9_]{1,80}$/.test(code) ? code : "unknown",
+  });
 }
 
 async function submitFromModal(payload: SlackInteraction, authorization: Awaited<ReturnType<typeof dailyMemberBySlack>> extends infer T ? T extends { authorization: infer A } ? A : never : never, t: Translator) {

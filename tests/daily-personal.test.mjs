@@ -212,8 +212,64 @@ test("task-focused Slack checklist shows empty projects but only offers Task cho
   const input = { ...checklistInput([project, task, empty]), taskFocused: true, taskTargets: [{ key: "project:p", title: "Project", hasTasks: true }, { key: "project:e", title: "Empty Project", hasTasks: false }] };
   const modal = form.dailyChecklistForm(input, "{}");
   assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text), ["My Task"]);
-  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 2);
+  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 1);
+  const emptyHeading = modal.blocks.findIndex((block) => block.text?.text === "Empty Project");
+  assert.equal(modal.blocks[emptyHeading + 1].elements[0].text, "아직 Task가 없습니다.");
+  assert.equal(modal.blocks[emptyHeading + 2].elements[0].action_id, "daily_checklist_add_task");
+  assert.equal(modal.blocks[emptyHeading + 2].elements[0].value, "project:e");
   assert.match(JSON.stringify(modal), /아직 Task가 없습니다/);
+});
+
+test("empty-project buttons and their inline editor fit Slack limits in every language", async () => {
+  const projects = Array.from({ length: 20 }, (_, i) => ({ id: `p-${i}`, key: `project:p-${i}`, kind: "project", title: `Project ${i}` }));
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const translate = await serverLanguage.serverTranslator(language);
+    const input = { ...checklistInput(projects), taskFocused: true, taskTargets: projects.map((p) => ({ key: p.key, title: p.title, hasTasks: false })) };
+    const initial = form.dailyChecklistForm(input, "{}", translate);
+    assert.equal(initial.blocks.filter((b) => b.block_id?.startsWith("daily_add_")).length, 20);
+    for (const block of initial.blocks.filter((b) => b.block_id?.startsWith("daily_add_"))) {
+      assert.equal(block.elements[0].text.text, translate("Task 추가"));
+      assert.ok(block.elements[0].text.text.length <= 75);
+    }
+    const opened = form.dailyChecklistForm({ ...input, taskEntry: { parentKey: "project:p-19", title: "", requestId: "request" } }, "{}", translate);
+    const index = opened.blocks.findIndex((b) => b.block_id === "daily_new_task");
+    assert.equal(opened.blocks[index - 2].text.text, "Project 19");
+    assert.equal(opened.blocks[index].label.text, translate("새 Task 제목"));
+    assert.equal(opened.blocks[index + 1].elements[0].text.text, translate("추가하고 오늘 할 일에 선택"));
+    assert.equal(opened.blocks.filter((b) => b.element?.focus_on_load).length, 1);
+    assert.ok(initial.blocks.length <= 100 && opened.blocks.length <= 100);
+  }
+});
+
+test("empty-project editor opens and cancels even with unfinished choices elsewhere", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
+    taskTargets: [{ key: "project:worker", title: "Worker project", hasTasks: false }] };
+  const opened = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  const state = { "daily_choice_task:task": { choice: { selected_options: [{ value: "today" }, { value: "done" }] } },
+    today_note: { value: { value: "Unsubmitted note" } } };
+  const added = await checklist.editDailyChecklistTask(authorization, opened.private_metadata, state, "add", "project:worker", (key) => key);
+  assert.equal(added.blocks.find((b) => b.block_id === "daily_new_task").element.focus_on_load, true);
+  assert.equal(added.blocks.find((b) => b.block_id === "today_note").element.initial_value, "Unsubmitted note");
+  const cancelled = await checklist.editDailyChecklistTask(authorization, added.private_metadata, state, "cancel", "project:worker", (key) => key);
+  assert.equal(cancelled.blocks.some((b) => b.block_id === "daily_new_task"), false);
+  // Opening a field must not create a Task or commit incomplete checkbox choices.
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM items").get().n, 6);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+  const invalid = await checklist.handleDailyChecklist(authorization, cancelled.private_metadata, state, false, (key) => key);
+  assert.ok(invalid.errors["daily_choice_task:task"]);
+});
+
+test("untouched null checkbox state does not block adding a Task to an empty project", async (t) => {
+  const { raw, checklist } = fixture(t, { allowCreation: true });
+  const opened = await checklist.createDailyChecklist("w", "me", { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
+    taskTargets: [{ key: "project:worker", title: "Worker project", hasTasks: false }] }, (key) => key);
+  const state = { "daily_choice_task:task": { choice: { selected_options: null } } };
+  const added = await checklist.editDailyChecklistTask(authorization, opened.private_metadata, state, "add", "project:worker", (key) => key);
+  assert.ok(added.blocks.find((b) => b.block_id === "daily_new_task"));
+  const created = await checklist.editDailyChecklistTask(authorization, added.private_metadata,
+    { ...state, daily_new_task: { title: { value: "First Task" } } }, "create", "project:worker", (key) => key);
+  assert.ok(created.blocks.find((b) => b.label?.text === "First Task")?.element.initial_options.some((o) => o.value === "today"));
 });
 
 test("Slack participant adds a Task inside the checklist, preserves choices and notes, and replay creates once", async (t) => {
@@ -598,7 +654,7 @@ test("signed Task actions acknowledge first and update the same Slack modal with
     const response = await route.POST(request(action));
     assert.equal(response.status, 200);
     assert.equal(await response.text(), "");
-    await Promise.all(pending);
+    while (pending.length) await Promise.all(pending.splice(0));
     const call = calls.at(-1);
     assert.equal(call[0].ownerId, "w"); assert.equal(call[1], "metadata");
     assert.equal(call[2].today_note.value.value, "Keep notes");
@@ -608,6 +664,66 @@ test("signed Task actions acknowledge first and update the same Slack modal with
   signature = false;
   assert.equal((await route.POST(request("create"))).status, 401);
   assert.equal(calls.length, 3);
+});
+
+test("Task buttons acknowledge before slow identity lookups and use block_actions state", async () => {
+  const pending = [], edits = [], updates = [];
+  let release;
+  const lookup = new Promise((resolve) => { release = resolve; });
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => lookup },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), updateDailyChecklistView: async (...args) => updates.push(args) },
+    "@/lib/slack-daily-checklist": { editDailyChecklistTask: async (...args) => { edits.push(args); return { type: "modal", blocks: [] }; } },
+    "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await Promise.race([
+    route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+      type: "block_actions", team: { id: "T" }, user: { id: "U" }, actions: [{ action_id: "daily_checklist_create_task", value: "project:worker" }],
+      state: { values: { daily_new_task: { title: { value: "Typed title" } } } },
+      view: { id: "V", hash: "hash", callback_id: "daily_checklist_submit", private_metadata: "metadata", state: { values: {} } },
+    }) }) })),
+    new Promise((resolve) => { const timer = setTimeout(() => resolve(null), 1000); timer.unref(); }),
+  ]);
+  release({ ownerId: "w" });
+  assert.ok(response, "Slack must receive an acknowledgement while the database lookup is pending");
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "");
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.equal(edits[0][2].daily_new_task.title.value, "Typed title");
+  assert.equal(updates.length, 1);
+});
+
+test("failed Slack view recovery is logged without payload data and displays a minimal error", async (t) => {
+  const pending = [], updates = [], logs = [];
+  t.mock.method(console, "error", (...args) => logs.push(args));
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), updateDailyChecklistView: async (...args) => {
+      updates.push(args);
+      if (updates.length < 3) throw Object.assign(new Error("private title and xoxb-secret"), { code: "invalid_arguments" });
+    } },
+    "@/lib/slack-daily-checklist": { editDailyChecklistTask: async () => ({ type: "modal", blocks: [] }), retryDailyChecklist: async () => ({ type: "modal", blocks: [] }) },
+    "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+    type: "block_actions", team: { id: "T" }, user: { id: "U" }, actions: [{ action_id: "daily_checklist_add_task", value: "project:worker" }],
+    view: { id: "V", hash: "hash", callback_id: "daily_checklist_submit", private_metadata: "metadata" },
+  }) }) }));
+  assert.equal(response.status, 200);
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.deepEqual(logs.map((row) => row[1].stage), ["edit_or_update", "recover_view"]);
+  assert.ok(logs.every((row) => row[1].code === "invalid_arguments"));
+  assert.doesNotMatch(JSON.stringify(logs), /private title|xoxb-secret/);
+  assert.equal(updates.length, 3);
+  assert.equal(updates[2][3].blocks.length, 1);
 });
 
 test("paged checklists preserve notes and choices, reject foreign/viewer access, and expire", async (t) => {
