@@ -53,6 +53,16 @@ const authorization = { ownerId: "w", userId: "u", role: "owner", apiToken: fals
 function fixture(t, options = {}) {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
+  if (options.d1LikeLimit) {
+    const native = new DatabaseSync(":memory:");
+    t.after(() => native.close());
+    const like = native.prepare("SELECT ? LIKE ? AS matched");
+    // Local SQLite/Miniflare do not enforce hosted D1's 50-byte pattern limit.
+    db.function("like", (pattern, value) => {
+      if (Buffer.byteLength(pattern ?? "", "utf8") > 50) throw new Error("D1_ERROR: LIKE or GLOB pattern too complex: SQLITE_ERROR");
+      return like.get(value, pattern).matched;
+    });
+  }
   db.exec("PRAGMA foreign_keys=ON");
   for (const table of Object.values(schema.tables)) {
     const columns = Object.values(table.columns).map((c) => `${c.name} ${c.type}${c.primaryKey ? " PRIMARY KEY" : ""}${c.notNull ? " NOT NULL" : ""}${c.default !== undefined ? ` DEFAULT ${c.default}` : ""}`);
@@ -121,6 +131,7 @@ test("D1 submits a mixed daily with production backup and task-change triggers",
   t.after(() => mf.dispose());
   const d1 = await mf.getD1Database("DB");
   const { db, raw, api } = fixture(t, { realPersistence: true });
+  db.prepare("UPDATE items SET source='daily', source_ref=? WHERE id='task'").run(`daily:me:${date}:local-request`);
   db.exec(`INSERT INTO items (id,owner_id,kind,title,status,parent_id) VALUES
     ('complete','w','task','Complete this','in_progress','project'),
     ('delete','w','task','Delete this','todo','project');
@@ -145,10 +156,31 @@ test("D1 submits a mixed daily with production backup and task-change triggers",
   await api.saveDailyDraft(authorization, { date, selectedWorkIds: ["task:task"] }, false);
   const submitted = await api.submitDailyDraft(authorization, date, "slack", "local-d1", ["task:complete"], ["task:delete"]);
   assert.equal(submitted.tasks.length, 1);
+  assert.equal(submitted.tasks[0].isNew, true);
   assert.equal(await d1.prepare("SELECT status FROM items WHERE id='complete'").first("status"), "done");
   assert.equal(await d1.prepare("SELECT status FROM items WHERE id='delete'").first("status"), "archived");
   const retry = await api.submitDailyDraft(authorization, date, "slack", "local-d1", ["task:complete"], ["task:delete"]);
   assert.equal(retry.id, submitted.id);
+});
+
+test("UUID members submit Daily-created Tasks within hosted D1's LIKE limit", async (t) => {
+  const { db, api } = fixture(t, { d1LikeLimit: true });
+  const memberId = "aaaaaaaa-1111-2222-3333-bbbbbbbbbbbb";
+  db.exec("UPDATE workspace_members SET user_id='former-user' WHERE id='me'");
+  db.prepare("INSERT INTO workspace_members (id,workspace_id,user_id,email,role,status) VALUES (?,'w','u','uuid@example.test','owner','active')").run(memberId);
+  db.prepare("UPDATE item_assignments SET member_id=? WHERE member_id='me'").run(memberId);
+  db.prepare("UPDATE items SET source='daily',source_ref=? WHERE id='task'").run(`daily:${memberId}:${date}:request`);
+  assert.equal(Buffer.byteLength(`daily:${memberId}:${date}:%`), 55);
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"] }, false);
+  const submission = await api.submitDailyDraft(authorization, date, "slack", "uuid-daily");
+  assert.equal(submission.tasks.length, 1);
+  assert.equal(submission.tasks[0].isNew, true);
+  assert.equal((await api.submitDailyDraft(authorization, date, "slack", "uuid-daily")).id, submission.id);
+  for (const ref of [null, `daily:${memberId}:2026-09-03:request`, `daily:other-member:${date}:request`, `not-daily:${memberId}:${date}:request`]) {
+    db.prepare("UPDATE items SET source_ref=? WHERE id='task'").run(ref);
+    const revised = await api.submitDailyDraft(authorization, date);
+    assert.equal(revised.tasks[0].isNew, false);
+  }
 });
 
 test("personal daily includes assigned DRI/worker projects, tasks and routines only", async (t) => {
