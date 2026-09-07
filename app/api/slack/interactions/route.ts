@@ -167,11 +167,23 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
 }
 
 function logDailyInteractionFailure(payload: SlackInteraction, stage: string, error: unknown) {
-  const code = error && typeof error === "object" && "code" in error ? String(error.code) : "unknown";
+  const explicitCode = error && typeof error === "object" && "code" in error ? String(error.code) : "";
+  const code = /^[a-z0-9_]{1,80}$/.test(explicitCode) ? explicitCode : classifyDailyInteractionFailure(error);
   console.error("slack_daily_interaction_failed", {
     stage, action: payload.actions?.[0]?.action_id ?? payload.type, viewId: payload.view?.id,
-    code: /^[a-z0-9_]{1,80}$/.test(code) ? code : "unknown",
+    code,
   });
+}
+
+function classifyDailyInteractionFailure(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  if (/no such table/i.test(message)) return "db_missing_table";
+  if (/constraint failed/i.test(message)) return "db_constraint";
+  if (/too many sql variables|too many.*statements|batch.*limit/i.test(message)) return "db_batch_limit";
+  if (/d1_error|database|sql/i.test(message)) return "db_query_failed";
+  if (/cannot read|undefined|null is not/i.test(message)) return "invalid_checklist_state";
+  if (/invalid_arguments|invalid_blocks|views\.update/i.test(message)) return "slack_view_update_failed";
+  return "unknown";
 }
 
 async function submitFromModal(payload: SlackInteraction, authorization: Awaited<ReturnType<typeof dailyMemberBySlack>> extends infer T ? T extends { authorization: infer A } ? A : never : never, t: Translator) {

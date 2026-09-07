@@ -833,6 +833,32 @@ test("failed Slack view recovery is logged without payload data and displays a m
   assert.equal(updates[2][3].blocks.length, 1);
 });
 
+test("Slack Daily failure logs classify database errors without exposing their message", async (t) => {
+  const pending = [], logs = [];
+  t.mock.method(console, "error", (...args) => logs.push(args));
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ ownerId: "w" }) },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), updateDailyChecklistView: async () => undefined },
+    "@/lib/slack-daily-checklist": {
+      handleDailyChecklist: async () => { throw new Error("D1_ERROR: no such table: private_table"); },
+      retryDailyChecklist: async () => ({ type: "modal", blocks: [] }),
+    },
+    "@/lib/slack-management-actions": {}, "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+    type: "view_submission", team: { id: "T" }, user: { id: "U" },
+    view: { id: "V", callback_id: "daily_checklist_submit", private_metadata: "metadata", state: { values: {} } },
+  }) }) }));
+  assert.equal(response.status, 200);
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.equal(logs[0][1].code, "db_missing_table");
+  assert.doesNotMatch(JSON.stringify(logs), /private_table/);
+});
+
 test("paged checklists preserve notes and choices, reject foreign/viewer access, and expire", async (t) => {
   const { raw, db, checklist } = fixture(t);
   const entries = await work.listDailyWork(raw, "w", "me", date);
