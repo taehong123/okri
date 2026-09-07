@@ -4456,10 +4456,10 @@ function DailySubmissionSummary({ submission, onOpenTask, onOpenWork }: { submis
     : `${entry.kind === "project" ? t("Project") : t("Routine")} · ${entry.parentTitle}`;
   return <div className="daily-submission-summary">
     <b>{t("완료한 일")}</b>
-    <ul aria-label={t("완료한 일")}>{completedWork.length ? completedWork.map((entry) => <li key={entry.key}><button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{workContext(entry)}</small></li>) : <li>{t("선택한 업무 없음")}</li>}</ul>
+    <ul aria-label={t("완료한 일")}>{completedWork.length ? completedWork.map((entry) => <li className="daily-submission-work" key={entry.key}><small>{workContext(entry)}</small><span className="daily-submission-task"><button onClick={() => onOpenWork(entry)}>{entry.title}</button></span></li>) : <li>{t("선택한 업무 없음")}</li>}</ul>
     {submission.yesterdayNote && <p><b>{t("완료 메모")}</b>{submission.yesterdayNote}</p>}
     <b>{t("오늘 할 일")}</b>
-    <ul aria-label={t("오늘 할 일")}>{submission.tasks.map((task) => <li key={task.id}>{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button><small>{parentContext(task.parentKind, task.parentTitle)}</small></li>)}{plannedWork.map((entry) => <li key={entry.key}><button onClick={() => onOpenWork(entry)}>{entry.title}</button><small>{workContext(entry)}</small></li>)}{!submission.tasks.length && !plannedWork.length && <li>{t("오늘 예정 없음")}</li>}</ul>
+    <ul aria-label={t("오늘 할 일")}>{submission.tasks.map((task) => <li className="daily-submission-work" key={task.id}><small>{parentContext(task.parentKind, task.parentTitle)}</small><span className="daily-submission-task">{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button></span></li>)}{plannedWork.map((entry) => <li className="daily-submission-work" key={entry.key}><small>{workContext(entry)}</small><span className="daily-submission-task"><button onClick={() => onOpenWork(entry)}>{entry.title}</button></span></li>)}{!submission.tasks.length && !plannedWork.length && <li>{t("오늘 예정 없음")}</li>}</ul>
     {submission.todayNote && <p><b>{t("오늘 메모")}</b>{submission.todayNote}</p>}
     {submission.blockersNote && <p className="blocker"><b>{t("블로커")}</b>{submission.blockersNote}</p>}
   </div>;

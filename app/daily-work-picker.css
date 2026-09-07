@@ -9,11 +9,11 @@
 .daily-picker-search { min-height: 44px; display: flex; align-items: center; gap: var(--space-2); padding: var(--space-2) 0; }
 .daily-picker-search input { width: 100%; min-width: 0; height: 40px; border: 0; background: transparent; color: var(--ink); font-size: var(--type-body); }
 .daily-picker-search input:focus { outline: 0; }
-.daily-task-option[data-kind="project"] b { font-weight: 400; }
+.daily-task-option b { font-weight: 400; }
 .daily-task-option.conflict { background: var(--danger-bg); }
 .daily-task-option label > span { grid-template-columns: minmax(0, 1fr); }
 .daily-task-option small { overflow-wrap: anywhere; }
-.daily-task-option { grid-template-columns: minmax(0, 1fr) var(--control-height); }
+.daily-task-option { grid-template-columns: minmax(0, 1fr) var(--control-height); margin-inline-start: var(--space-4); padding-inline-start: var(--space-3); border-inline-start: 1px solid var(--border-default); }
 .daily-task-option > button { width: var(--control-height); height: var(--control-height); }
 .daily-picker-error { margin: 0 0 var(--space-3); color: var(--red); font-size: var(--type-meta); }
 .daily-submission-summary > b { display: block; margin: var(--space-3) 0 var(--space-2); font-size: var(--type-label); font-weight: 600; }
@@ -22,12 +22,17 @@
 .daily-submission-summary li button { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 .daily-submission-summary li small { min-width: 0; overflow-wrap: anywhere; }
 .daily-submission-summary li em { justify-self: start; }
+.daily-submission-summary li.daily-submission-work { gap: var(--space-1); }
+.daily-submission-work > small { color: var(--text-secondary); font-weight: 600; }
+.daily-submission-task { min-width: 0; display: flex; align-items: flex-start; gap: var(--space-2); margin-inline-start: var(--space-3); padding-inline-start: var(--space-3); border-inline-start: 1px solid var(--border-default); }
+.daily-submission-task > button { flex: 1; font-weight: 400; }
 .daily-project-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.daily-project-heading h3 { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; }
+.daily-project-heading h3 { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; font-weight: 600; }
 .daily-project-heading h3 button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
 .daily-container-kind { flex: 0 0 auto; color: var(--muted); font-size: var(--type-meta); font-weight: 600; }
 .daily-project-heading .icon-button { flex-shrink: 0; }
-.daily-project-create { display: grid; gap: var(--space-2); padding: var(--space-3) 0; }
+.daily-task-groups > section > :is(.daily-empty, .daily-project-create, .daily-create-feedback) { margin-inline-start: var(--space-4); }
+.daily-project-create { display: grid; gap: var(--space-2); padding: var(--space-3) 0 var(--space-3) var(--space-3); border-inline-start: 1px solid var(--border-default); }
 .daily-project-create label { display: grid; min-width: 0; gap: var(--space-2); }
 .daily-project-create input { width: 100%; min-width: 0; min-height: var(--field-height); font: inherit; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); }
 .daily-project-create > div { display: flex; gap: var(--space-2); align-items: center; }

@@ -5,8 +5,10 @@ import ts from "typescript";
 import { serverLanguage } from "./helpers/language-fixture.mjs";
 
 const source = ts.createSourceFile("slack-daily.ts", await readFile(new URL("../lib/slack-daily.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+const formSource = ts.createSourceFile("slack-daily-form.ts", await readFile(new URL("../lib/slack-daily-form.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
+const helper = formSource.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name?.text === "dailyWorkContainerLabel").map((node) => node.getFullText(formSource).replace(/\bexport\s+function/, "function")).join("\n");
 const functions = source.statements.filter((node) => ts.isFunctionDeclaration(node) && ["dailyCard", "escapeSlack"].includes(node.name?.text)).map((node) => node.getFullText(source)).join("\n");
-const code = ts.transpileModule(functions, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+const code = ts.transpileModule(`${helper}\n${functions}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
 const dailyCard = new Function("env", "dailySkipReasonLabel", code + "\nreturn dailyCard;")({}, () => "휴가");
 const work = (id, completedToday = false, kind = "task") => ({ id, key: `${kind}:${id}`, title: id, kind, parentId: "project", parentKind: "project", parentTitle: "Parent", status: completedToday ? "done" : "todo", completedToday });
 const submission = (overrides = {}) => ({ memberName: "Member", date: "2026-09-05", tasks: [], work: [], yesterdayWork: [], yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, ...overrides });

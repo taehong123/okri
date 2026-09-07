@@ -33,6 +33,17 @@ test("Project and Routine are peer groups with only child Tasks selectable", asy
   await picker.getByRole("searchbox").fill("Store management");
   await expect(picker.getByRole("region", { name: "Store management", exact: true })).toBeVisible();
   await expect(picker.getByRole("checkbox", { name: /Store management/ })).toHaveCount(0);
+  const routineHeading = picker.locator(".daily-project-heading h3").filter({ hasText: "Store management" });
+  const routineTask = picker.locator(".daily-task-option").filter({ hasText: "Routine child Task" });
+  const [headingBox, taskBox] = await Promise.all([routineHeading.boundingBox(), routineTask.locator("b").boundingBox()]);
+  expect(taskBox!.x - headingBox!.x).toBeGreaterThanOrEqual(12);
+  const hierarchy = await routineTask.evaluate((row) => ({
+    border: getComputedStyle(row).borderInlineStartWidth,
+    parentWeight: getComputedStyle(row.closest("section")!.querySelector("h3")!).fontWeight,
+    taskWeight: getComputedStyle(row.querySelector("b")!).fontWeight,
+  }));
+  expect(hierarchy.border).toBe("1px");
+  expect(Number(hierarchy.parentWeight)).toBeGreaterThan(Number(hierarchy.taskWeight));
   await picker.getByRole("searchbox").fill("");
   const boxes = picker.locator('input[type="checkbox"]');
   for (const box of await boxes.all()) await expect(box).not.toBeChecked();
@@ -74,6 +85,10 @@ test("submitted completed Tasks show their Project or Routine context", async ({
   const card = page.locator(".daily-member-card").filter({ hasText: "완료한 구성원" });
   await expect(card.getByText("Project · 서비스 개선", { exact: true })).toBeVisible();
   await expect(card.getByText("Routine · 주간 운영", { exact: true })).toBeVisible();
+  const projectRow = card.locator(".daily-submission-work").filter({ hasText: "Project · 서비스 개선" });
+  const [parentBox, childBox] = await Promise.all([projectRow.locator("small").boundingBox(), projectRow.locator(".daily-submission-task").boundingBox()]);
+  expect(childBox!.x - parentBox!.x).toBeGreaterThanOrEqual(8);
+  await expect(projectRow.locator(".daily-submission-task")).toHaveCSS("border-inline-start-width", "1px");
 });
 
 test("participant adds a personal Task within a Project and preserves the daily draft on retry", async ({ page }, testInfo) => {
