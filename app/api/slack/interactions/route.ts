@@ -196,8 +196,12 @@ function dailyDatabaseDiagnostic(error: unknown) {
     ] as const) if (pattern.test(message)) reasons.add(reason);
     current = current.cause;
   }
-  const frame = error instanceof Error ? error.stack?.split("\n").find((line) => /^\s+at\s/.test(line))?.trim().slice(0, 240) : undefined;
-  return { dbReasons: [...reasons], dbCodes: [...codes], frame };
+  const frames = error instanceof Error ? error.stack?.split("\n").filter((line) => /^\s+at\s/.test(line)).slice(0, 7).map((line) => line.trim().slice(0, 240)) : undefined;
+  // D1's leading reason excludes the subsequent SQL, column name and bound values.
+  const reason = error instanceof Error && /\bSQLITE_[A-Z_]+\b/.test(error.message)
+    ? error.message.match(/D1_ERROR:\s*([^:\n]+)/)?.[1]
+      ?.replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "[value]").replace(/[^a-zA-Z ()\[\]._-]/g, "").slice(0, 160) : undefined;
+  return { dbReasons: [...reasons], dbCodes: [...codes], reason, frames };
 }
 
 function classifyDailyInteractionFailure(error: unknown) {
