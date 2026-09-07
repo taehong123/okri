@@ -114,7 +114,8 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
   if (payload.view?.callback_id === "daily_checklist_submit" && (payload.type === "view_submission" || previousPage || taskAction)) {
     if (linked.authorization.role === "viewer") return Response.json({ response_action: "errors", errors: { no_planned: t("읽기 전용 멤버는 데일리를 제출할 수 없습니다.") } });
     const { id: viewId, hash, private_metadata: metadata = "" } = payload.view;
-    const state = payload.type === "block_actions" ? payload.state ?? payload.view.state : payload.view.state;
+    const state = payload.type === "block_actions"
+      ? { values: { ...payload.view.state?.values, ...payload.state?.values } } : payload.view.state;
     if (!viewId) return new Response(null, { status: 400 });
     const statusView = (text: string) => ({ type: "modal", title: { type: "plain_text", text: t("데일리") },
       close: { type: "plain_text", text: t("닫기") }, blocks: [{ type: "section", text: { type: "plain_text", text } }] });

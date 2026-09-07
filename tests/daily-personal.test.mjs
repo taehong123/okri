@@ -648,6 +648,7 @@ test("signed Task actions acknowledge first and update the same Slack modal with
   });
   const request = (action) => new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
     type: "block_actions", team: { id: "T" }, user: { id: "U" }, actions: [{ action_id: `daily_checklist_${action}_task`, value: "project:worker" }],
+    state: { values: {} },
     view: { id: "V", hash: "view-hash", callback_id: "daily_checklist_submit", private_metadata: "metadata", state: { values: { today_note: { value: { value: "Keep notes" } } } } },
   }) }) });
   for (const action of ["add", "create", "cancel"]) {
