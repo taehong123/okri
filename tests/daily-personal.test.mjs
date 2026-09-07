@@ -678,6 +678,7 @@ test("Task buttons acknowledge before slow identity lookups and use block_action
     "@/lib/server-language": serverLanguage,
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), updateDailyChecklistView: async (...args) => updates.push(args) },
     "@/lib/slack-daily-checklist": { editDailyChecklistTask: async (...args) => { edits.push(args); return { type: "modal", blocks: [] }; } },
+    "@/lib/slack-management-actions": {},
     "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
   });
   const response = await Promise.race([
@@ -711,6 +712,7 @@ test("failed Slack view recovery is logged without payload data and displays a m
       if (updates.length < 3) throw Object.assign(new Error("private title and xoxb-secret"), { code: "invalid_arguments" });
     } },
     "@/lib/slack-daily-checklist": { editDailyChecklistTask: async () => ({ type: "modal", blocks: [] }), retryDailyChecklist: async () => ({ type: "modal", blocks: [] }) },
+    "@/lib/slack-management-actions": {},
     "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
   });
   const response = await route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
