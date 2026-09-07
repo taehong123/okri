@@ -191,6 +191,25 @@
   .app-shell :is(.daily-editor, .daily-rollup) { padding: var(--space-6) 0; }
 }
 @media (max-width: 640px) {
+  .app-shell .page-header p { font-size: var(--type-label); line-height: 1.5; }
+  .app-shell .mobile-navigation .nav-item span { font-size: var(--type-meta); line-height: 1.2; }
+  .app-shell .scrum-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: var(--space-2); padding: var(--space-3) 0; }
+  .app-shell .scrum-toolbar > label { width: 100%; min-height: var(--control-height); display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: var(--space-2); }
+  .app-shell .scrum-toolbar input { width: 100%; max-width: none; min-height: var(--control-height); }
+  .app-shell .scrum-toolbar > div { width: 100%; display: grid; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); gap: var(--space-2); }
+  .app-shell .scrum-toolbar > div > button { width: 100%; min-height: var(--control-height); display: inline-flex; align-items: center; justify-content: center; padding-inline: var(--space-2); }
+  .app-shell :is(.daily-editor, .daily-rollup) { padding-block: var(--space-4); }
+  .app-shell :is(.daily-editor, .daily-rollup) > header { margin-bottom: var(--space-4); }
+  .app-shell :is(.daily-task-picker, .daily-new-task) { margin-top: var(--space-4); }
+  .app-shell :is(.daily-editor > header p, .daily-rollup > header p, .daily-skip-toggle small,
+    .daily-task-picker > summary small, .daily-task-option small, .daily-member-card p,
+    .daily-member-card > header small, .daily-empty, .daily-dri-alert p) { font-size: var(--type-meta); line-height: 1.5; }
+  .app-shell .daily-project-heading { align-items: flex-start; }
+  .app-shell .daily-project-heading h3 { align-items: flex-start; line-height: 1.45; }
+  .app-shell .daily-container-kind { padding-top: 1px; line-height: 1.5; }
+  .app-shell .daily-task-option { margin-inline-start: var(--space-3); padding-inline-start: var(--space-2); }
+  .app-shell .daily-task-groups > section > :is(.daily-empty, .daily-project-create, .daily-create-feedback) { margin-inline-start: var(--space-3); }
+  .app-shell .daily-project-create { padding-inline-start: var(--space-2); }
   .property-panel > header,
   .workspace-settings-header,
   .integration-modal > header,

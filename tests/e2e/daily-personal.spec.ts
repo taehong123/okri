@@ -63,6 +63,23 @@ test("Project and Routine are peer groups with only child Tasks selectable", asy
   expect(writes[0].body.selectedTaskIds).toEqual(["task-1", "routine-task-1"]);
   expect(writes[1].path).toBe("/api/daily-scrum/submit");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  if (testInfo.project.name.startsWith("mobile-")) {
+    const toolbar = page.locator(".scrum-toolbar");
+    const [dateBox, actionsBox] = await Promise.all([toolbar.locator("label").boundingBox(), toolbar.locator(":scope > div").boundingBox()]);
+    expect(Math.abs(dateBox!.x - actionsBox!.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(dateBox!.width - actionsBox!.width)).toBeLessThanOrEqual(1);
+    expect(actionsBox!.y).toBeGreaterThanOrEqual(dateBox!.y + dateBox!.height);
+    const typography = await page.evaluate(() => ({
+      pageDescription: getComputedStyle(document.querySelector(".page-header p")!).fontSize,
+      taskTitle: getComputedStyle(document.querySelector(".daily-task-option b")!).fontSize,
+      taskMeta: getComputedStyle(document.querySelector(".daily-task-option small")!).fontSize,
+      navigation: getComputedStyle(document.querySelector(".mobile-navigation .nav-item span")!).fontSize,
+    }));
+    expect(parseFloat(typography.pageDescription)).toBeLessThan(parseFloat(typography.taskTitle));
+    expect(parseFloat(typography.taskMeta)).toBeLessThan(parseFloat(typography.taskTitle));
+    expect(parseFloat(typography.navigation)).toBeLessThan(parseFloat(typography.taskTitle));
+    for (const button of await toolbar.locator("button").all()) expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  }
   await page.screenshot({ path: testInfo.outputPath("personal-daily.png"), fullPage: true });
 });
 
