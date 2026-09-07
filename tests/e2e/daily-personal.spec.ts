@@ -55,6 +55,27 @@ test("Project and Routine are peer groups with only child Tasks selectable", asy
   await page.screenshot({ path: testInfo.outputPath("personal-daily.png"), fullPage: true });
 });
 
+test("submitted completed Tasks show their Project or Routine context", async ({ page }) => {
+  await installApiMocks(page, { teamWorkspace: true });
+  const submission = {
+    id: "submission", memberId: "member-2", memberName: "완료한 구성원", memberEmail: "member@example.test", date: "2026-09-06", version: 1,
+    yesterdayNote: "", todayNote: "", blockersNote: "", noPlannedTasks: false, skipReason: null, skipNote: "", source: "web", submittedAt: "2026-09-06T01:00:00.000Z", tasks: [], work: [],
+    yesterdayWork: [
+      { id: "project-task", key: "task:project-task", kind: "task", title: "고객 인터뷰 정리", parentKind: "project", parentId: "project", parentTitle: "서비스 개선", status: "done", priority: "medium", dueDate: null },
+      { id: "routine-task", key: "task:routine-task", kind: "task", title: "주간 지표 입력", parentKind: "routine", parentId: "routine", parentTitle: "주간 운영", status: "done", priority: "medium", dueDate: null },
+    ],
+  };
+  await page.route(/\/api\/daily-scrum(?:\?|$)/, (route) => route.fulfill({ json: {
+    date: "2026-09-06", draft: { id: null, date: "2026-09-06", yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false, selectedTaskIds: [], selectedWorkIds: [], selectedYesterdayWorkIds: [] },
+    member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, candidates: { work: [], yesterdayWork: [], tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: true },
+    team: [{ memberId: "member-2", displayName: "완료한 구성원", email: "member@example.test", role: "member", status: "submitted", slackConnected: true, submission }], latestSubmission: null, legacyWorkspaceNote: null,
+  } }));
+  await page.goto("/?view=scrum");
+  const card = page.locator(".daily-member-card").filter({ hasText: "완료한 구성원" });
+  await expect(card.getByText("Project · 서비스 개선", { exact: true })).toBeVisible();
+  await expect(card.getByText("Routine · 주간 운영", { exact: true })).toBeVisible();
+});
+
 test("participant adds a personal Task within a Project and preserves the daily draft on retry", async ({ page }, testInfo) => {
   await installApiMocks(page, { teamWorkspace: true, workspaceRole: "member" });
   const projectTitle = "참여하는 프로젝트의 아주 긴 이름과 CustomerExperienceImprovement2026";

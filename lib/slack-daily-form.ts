@@ -114,10 +114,16 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     close: { type: "plain_text", text: t("취소") }, blocks };
 }
 
+export function dailyWorkContainerLabel(work: Pick<DailyWork, "parentKind" | "parentTitle">, t: Translator = identityTranslator) {
+  const kind = work.parentKind === "project" ? t("Project") : work.parentKind === "routine" ? t("Routine") : "";
+  return kind ? `${kind} · ${work.parentTitle}` : work.parentTitle;
+}
+
 export function dailyWorkOption(work: DailyWork, t: Translator = identityTranslator, mode: "today" | "yesterday" = "today") {
+  const parent = dailyWorkContainerLabel(work, t);
   const detail = mode === "yesterday" && work.willCompleteOnSubmit
-    ? `${work.parentTitle} · ${t("제출 시 완료 처리")}`
-    : `${work.parentTitle}${work.dueDate ? ` · ${work.dueDate}` : ""}`;
+    ? `${parent} · ${t("제출 시 완료 처리")}`
+    : `${parent}${work.dueDate ? ` · ${work.dueDate}` : ""}`;
   return { text: { type: "plain_text", text: `${t(names[work.kind])} · ${work.title}`.slice(0, 75) }, value: work.key,
     description: { type: "plain_text", text: detail.slice(0, 75) } };
 }

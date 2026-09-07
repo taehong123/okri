@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import { currentDailyMember, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
 import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
-import { dailyWorkOption } from "@/lib/slack-daily-form";
+import { dailyWorkContainerLabel, dailyWorkOption } from "@/lib/slack-daily-form";
 import { createDailyChecklist } from "@/lib/slack-daily-checklist";
 import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
 import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
@@ -962,15 +962,15 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
     ] };
   }
-  type CardWork = { taskTitle: string; parentTitle: string; groupKey: string; completedToday: boolean };
-  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
+  type CardWork = { taskTitle: string; parentTitle: string; parentKind?: string; groupKey: string; completedToday: boolean };
+  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
   const completedSnapshots = [...new Map([...(submission.yesterdayWork ?? []), ...(submission.work ?? []).filter((work) => work.completedToday)].map((work) => [work.key, work])).values()];
-  const completedWork = completedSnapshots.map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: true }));
+  const completedWork = completedSnapshots.map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: true }));
   const plannedWork = allWork.filter((work) => !work.completedToday);
   const groupedLines = (work: CardWork[], emptyText = t("오늘 예정 없음")) => {
     const groups = new Map<string, { title: string; lines: string[] }>();
     for (const task of work.slice(0, 20)) {
-      const group = groups.get(task.groupKey) ?? { title: task.parentTitle, lines: [] };
+      const group = groups.get(task.groupKey) ?? { title: dailyWorkContainerLabel(task, t), lines: [] };
       group.lines.push(`• ${escapeSlack(task.taskTitle)}`);
       groups.set(task.groupKey, group);
     }

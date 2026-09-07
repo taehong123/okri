@@ -177,7 +177,7 @@ test("failed selection writes roll back both notes and previous selections", asy
 });
 
 test("Slack v2 modal uses searchable completed and today multi-selects", () => {
-  const entries = Array.from({ length: 75 }, (_, i) => ({ key: `task:${i}`, id: String(i), title: "Long title ".repeat(20), kind: "task", parentTitle: "Project", dueDate: null }));
+  const entries = Array.from({ length: 75 }, (_, i) => ({ key: `task:${i}`, id: String(i), title: "Long title ".repeat(20), kind: "task", parentKind: "project", parentTitle: "Project", dueDate: null }));
   const yesterday = entries.map((entry, index) => ({ ...entry, completedYesterday: index === 0, willCompleteOnSubmit: index !== 0 }));
   const modal = form.dailyForm({ work: entries, yesterdayWork: yesterday, memberName: "Me", date, selected: ["task:72"], selectedYesterday: ["task:0", "task:2"], yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", metadata: "{}", noPlannedTasks: false });
   const inputs = modal.blocks.filter((b) => b.type === "input");
@@ -185,6 +185,7 @@ test("Slack v2 modal uses searchable completed and today multi-selects", () => {
   assert.equal(inputs[0].label.text, "완료한 일");
   assert.equal(inputs[0].element.type, "multi_external_select");
   assert.equal(inputs[0].element.initial_options.length, 2);
+  assert.match(inputs[0].element.initial_options[0].description.text, /Project · Project/);
   assert.match(inputs[0].element.initial_options[1].description.text, /제출 시 완료 처리/);
   assert.equal(inputs[2].block_id, "today_work");
   assert.equal(inputs[2].element.initial_options[0].value, "task:72");

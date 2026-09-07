@@ -45,7 +45,8 @@ function harness(t) {
     CREATE TABLE slack_daily_channels(owner_id TEXT, channel_id TEXT);
     CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, member_name TEXT, member_email TEXT,
       yesterday_note TEXT DEFAULT '', today_note TEXT DEFAULT '', blockers_note TEXT DEFAULT '', no_planned_tasks INTEGER DEFAULT 1,
-      skip_reason TEXT, skip_note TEXT DEFAULT '', source TEXT DEFAULT 'web', submitted_at TEXT, work_snapshot_json TEXT DEFAULT '[]');
+      skip_reason TEXT, skip_note TEXT DEFAULT '', source TEXT DEFAULT 'web', submitted_at TEXT,
+      work_snapshot_json TEXT DEFAULT '[]', yesterday_work_snapshot_json TEXT DEFAULT '[]');
     CREATE TABLE daily_task_snapshots(id TEXT, submission_id TEXT, sort_order INTEGER);
     CREATE TABLE slack_daily_publications(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, submission_id TEXT, scrum_date TEXT, channel_id TEXT,
       slack_message_ts TEXT, status TEXT DEFAULT 'pending', error TEXT DEFAULT '', attempts INTEGER DEFAULT 0, updated_at TEXT);`);
@@ -101,7 +102,9 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": api,
     "@/lib/daily-bot": { normalizeDailySkipReason: () => null },
-    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") }, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
+    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") },
+    "@/lib/slack-daily-form": { dailyWorkContainerLabel: (work, translate) => work.parentKind === "project" ? `${translate("Project")} · ${work.parentTitle}` : work.parentKind === "routine" ? `${translate("Routine")} · ${work.parentTitle}` : work.parentTitle },
+    "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
   });
   t.after(() => { globalThis.fetch = originalFetch; db.close(); });
   const input = (team = "a", overrides = {}) => ({ ownerId: team, botKind: "automation", subjectId: `delivery-${team}`, eventKey: "same-event",
@@ -352,6 +355,19 @@ test("daily sharing claims concurrent submissions once and edits the existing me
   assert.equal(calls[1].method, "chat.update");
   assert.equal(calls[1].payload.ts, "1.000001");
   assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "sent");
+});
+
+test("daily sharing labels completed Tasks with their Project or Routine", async (t) => {
+  const { daily, publication, calls, db } = harness(t);
+  const first = publication("a");
+  db.prepare("UPDATE daily_submissions SET yesterday_work_snapshot_json=? WHERE id=?").run(JSON.stringify([
+    { id: "project-task", key: "task:project-task", kind: "task", title: "고객 인터뷰 정리", parentKind: "project", parentId: "project", parentTitle: "서비스 개선" },
+    { id: "routine-task", key: "task:routine-task", kind: "task", title: "주간 지표 입력", parentKind: "routine", parentId: "routine", parentTitle: "주간 운영" },
+  ]), first.submissionId);
+  await daily.publishDailySubmission("a", first.submissionId);
+  const completed = calls[0].payload.blocks.find((block) => block.type === "section" && block.text.text.includes("완료한 일")).text.text;
+  assert.match(completed, /\*Project · 서비스 개선\*\n• 고객 인터뷰 정리/);
+  assert.match(completed, /\*Routine · 주간 운영\*\n• 주간 지표 입력/);
 });
 
 test("uncertain daily sharing cannot be retried or create a second message through a newer submission", async (t) => {
