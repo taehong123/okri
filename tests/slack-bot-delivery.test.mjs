@@ -80,7 +80,7 @@ function harness(t) {
       throw error;
     }
   } };
-  const calls = [], behavior = { code: {}, loseResponse: false, beforeDecrypt: null };
+  const calls = [], behavior = { code: {}, updateCode: null, loseResponse: false, beforeDecrypt: null };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, request) => {
     assert.ok(["https://slack.com/api/chat.postMessage", "https://slack.com/api/chat.update"].includes(url));
@@ -88,7 +88,7 @@ function harness(t) {
     const payload = JSON.parse(request.body), token = request.headers.Authorization;
     calls.push({ payload, token, method: url.split("/").at(-1) });
     if (behavior.loseResponse) throw new Error("lost response after send");
-    const code = behavior.code[token];
+    const code = url.endsWith("chat.update") && behavior.updateCode ? behavior.updateCode : behavior.code[token];
     if (code === "ratelimited") return new Response("rate limited", { status: 429, headers: { "Retry-After": "180" } });
     if (code) return Response.json({ ok: false, error: code });
     return Response.json({ ok: true, ts: payload.ts || `${calls.length}.000001` });
@@ -388,6 +388,24 @@ test("daily sharing claims concurrent submissions once and edits the existing me
   assert.equal(calls[1].method, "chat.update");
   assert.equal(calls[1].payload.ts, "1.000001");
   assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "sent");
+});
+
+test("daily sharing recreates a card deleted from Slack and updates that replacement next time", async (t) => {
+  const { daily, publication, calls, behavior, db } = harness(t);
+  const first = publication("a");
+  await daily.publishDailySubmission("a", first.submissionId);
+  behavior.updateCode = "message_not_found";
+  const second = publication("a", 2);
+  await daily.publishDailySubmission("a", second.submissionId);
+  assert.deepEqual(calls.map((call) => call.method), ["chat.postMessage", "chat.update", "chat.postMessage"]);
+  assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "sent");
+  assert.equal(db.prepare("SELECT slack_message_ts FROM slack_daily_publications WHERE id=?").get(second.id).slack_message_ts, "3.000001");
+
+  behavior.updateCode = null;
+  const third = publication("a", 3);
+  await daily.publishDailySubmission("a", third.submissionId);
+  assert.equal(calls.at(-1).method, "chat.update");
+  assert.equal(calls.at(-1).payload.ts, "3.000001");
 });
 
 test("daily sharing labels completed Tasks with their Project or Routine", async (t) => {

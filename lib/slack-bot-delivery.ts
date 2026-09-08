@@ -178,12 +178,14 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
       const previous = await db.prepare(`SELECT old.slack_message_ts FROM slack_daily_publications old
         JOIN slack_daily_publications current ON current.owner_id = old.owner_id AND current.member_id = old.member_id
           AND current.scrum_date = old.scrum_date AND current.channel_id = old.channel_id
-        WHERE current.owner_id = ? AND current.id = ? AND old.slack_message_ts IS NOT NULL ORDER BY old.updated_at DESC LIMIT 1`)
+        JOIN daily_submissions old_submission ON old_submission.id = old.submission_id AND old_submission.owner_id = old.owner_id
+        WHERE current.owner_id = ? AND current.id = ? AND old.slack_message_ts IS NOT NULL
+        ORDER BY old_submission.version DESC, old.updated_at DESC, old.id DESC LIMIT 1`)
         .bind(row.owner_id, row.subject_id).first<{ slack_message_ts: string }>();
       const receipt = await db.prepare(`SELECT message_ts FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication'
         AND json_extract(payload, '$.streamKey') = ? AND message_ts IS NOT NULL ORDER BY updated_at DESC LIMIT 1`)
         .bind(row.owner_id, payload.streamKey).first<{ message_ts: string }>();
-      previousTimestamp = receipt?.message_ts || previous?.slack_message_ts;
+      previousTimestamp = previous?.slack_message_ts || receipt?.message_ts;
       if (!previousTimestamp) {
         const uncertain = await db.prepare(`SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication'
           AND id != ? AND json_extract(payload, '$.streamKey') = ? AND status IN ('sending', 'uncertain') LIMIT 1`)
@@ -197,7 +199,17 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
       .bind(id, stamp).run();
     if (!marked.meta.changes) throw new CancelledDelivery("다른 작업에서 발송 상태를 변경했습니다.");
     requestStarted = true;
-    const receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id, messageTs: previousTimestamp });
+    let receipt;
+    try {
+      receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id, messageTs: previousTimestamp });
+    } catch (failure) {
+      // A deleted Daily card is a confirmed update rejection, so posting its
+      // replacement cannot duplicate the missing message. Other failures keep
+      // the normal no-duplicate safeguards.
+      if (row.bot_kind !== "daily_publication" || !previousTimestamp || !(failure instanceof SlackMessageError)
+        || failure.outcome !== "rejected" || failure.code !== "message_not_found") throw failure;
+      receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id });
+    }
     status = "sent"; messageTs = receipt.timestamp;
   } catch (failure) {
     error = (failure instanceof Error ? failure.message : "Slack 전송 실패").slice(0, 500);
