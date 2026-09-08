@@ -11,6 +11,10 @@
 - This policy change: native v1 transport, current-member mapping, release status,
   isolated preview, runtime fingerprint and store/optional-signed-OTA release lanes.
 - Re-run physical iOS/Android validation. Previous APK predates these changes.
+- Integrated web/Slack work status (916d46c): v1 preserves remote status and
+  translates skip to the existing skipReason contract; selecting work can resume
+  without discarding Tasks. Native office/remote controls are explicitly deferred
+  to the next native UI release and are not claimed in this candidate.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

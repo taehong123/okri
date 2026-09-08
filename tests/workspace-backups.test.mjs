@@ -14,6 +14,7 @@ const linksMigration = await readFile(new URL("../drizzle/0037_restore_links.sql
 const routineMigration = await readFile(new URL("../drizzle/0042_routine_properties.sql", import.meta.url), "utf8");
 const dailyWorkMigration = await readFile(new URL("../drizzle/0045_daily_work_selection.sql", import.meta.url), "utf8");
 const dailyYesterdayMigration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
+const dailyWorkStatusMigration = await readFile(new URL("../drizzle/0055_daily_work_status.sql", import.meta.url), "utf8");
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -30,6 +31,7 @@ function fixture() {
   sqlite.exec(routineMigration);
   sqlite.exec(dailyWorkMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(dailyYesterdayMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(dailyWorkStatusMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -267,8 +269,14 @@ test("revision triggers cover all restored tables and business changes do not al
   for (const name of backups.BACKUP_TABLES) {
     assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=?").get(name).n, 3, name);
     const expectedColumns = Object.keys(currentSchema.tables[name].columns);
-    if (name === "daily_scrums") expectedColumns.push("yesterday_work_selection_json");
-    if (name === "daily_submissions") expectedColumns.push("yesterday_work_snapshot_json", "request_id");
+    if (name === "daily_scrums") {
+      expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");
+      expectedColumns.push("yesterday_work_selection_json");
+    }
+    if (name === "daily_submissions") {
+      expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");
+      expectedColumns.push("yesterday_work_snapshot_json", "request_id");
+    }
     assert.deepEqual(backups.BACKUP_COLUMNS[name], expectedColumns);
   }
   const before = f.sqlite.prepare("SELECT revision FROM workspace_backup_state WHERE owner_id='other'").get().revision;

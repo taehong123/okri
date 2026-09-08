@@ -64,6 +64,7 @@ export async function PATCH(request: Request) {
       weekdays: Array.isArray(payload.weekdays) ? payload.weekdays.map(Number) : undefined,
       reminderTime: typeof payload.reminderTime === "string" ? payload.reminderTime : undefined,
       timezone: typeof payload.timezone === "string" ? payload.timezone : undefined,
+      workStatuses: Array.isArray(payload.workStatuses) ? payload.workStatuses.filter((value): value is string => typeof value === "string") : undefined,
       channelIds: Array.isArray(payload.channelIds) ? payload.channelIds.filter((value): value is string => typeof value === "string") : undefined,
     }));
   } catch (error) { return routeError(error); }

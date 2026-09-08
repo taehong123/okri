@@ -77,6 +77,16 @@ test("missing critical read fields fail instead of silently showing an empty tas
   const response = await mobileV1("bootstrap", async () => Response.json(payload))(request("bootstrap"));
   assert.equal(response.status, 503);
 });
+test("new work status remains readable by v1 and a skipped day is not silently exposed as a working day", async () => {
+  for (const status of ["office", "remote", "skip"]) {
+    const payload = structuredClone(fixture.daily); payload.draft.workStatus = status;
+    const response = await mobileV1("daily-scrum", async () => Response.json(payload))(request("daily-scrum"));
+    assert.equal(response.status, 200);
+    const data = await response.json();
+    assert.equal(data.draft.skipReason, status === "skip" ? "other" : null);
+    assert.equal("workStatus" in data.draft, false);
+  }
+});
 test("successful committed commands acknowledge even when web response shape evolves; no extra invocation", async () => {
   let calls = 0;
   for (const key of contracts.acknowledgementsV1) {

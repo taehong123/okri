@@ -1,1 +1,9 @@
-{}
+{
+  "drizzle/0055_daily_work_status.sql": {
+    "sha256": "98f08987e7e7e6b15f88e8535c6cbe87a68cfc66d0160747332eba8e1c3b5cf8",
+    "v1Compatibility": "The three added NOT NULL columns have defaults, so existing v1 inserts remain valid. Legacy skip cancellation and remote-status preservation are covered by regression tests.",
+    "rollbackPlan": "Keep the added columns and their data when rolling back application code. Older code ignores them; do not drop columns or rewrite existing migration history.",
+    "dataPreservation": "ADD COLUMN with defaults preserves record IDs, assignments, drafts and submission history. The migration contains no deletes or destructive table replacement.",
+    "reviewedBy": "Codex native compatibility integration review, 2026-09-08"
+  }
+}

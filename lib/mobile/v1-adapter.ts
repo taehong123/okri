@@ -57,6 +57,12 @@ export function mobileV1(endpoint: string, handler: Handler): Handler {
     // serializer changes. Return acknowledgement and let the client refresh.
     if (acknowledgementsV1.has(key)) return Response.json({ ok: true }, { headers: resultHeaders });
     const data = record(await response.json().catch(() => null));
+    const draft = record(data?.draft);
+    if (key === "GET daily-scrum" && draft?.workStatus === "skip" && draft.skipReason === null) {
+      // Old clients express a skipped day through skipReason and clear that
+      // field when selecting work again. Do not make a new skip invisible.
+      draft.skipReason = "other";
+    }
     const user = record(data?.user), team = record(data?.team);
     if (key === "GET bootstrap" && typeof user?.id === "string" && Array.isArray(team?.members)) {
       // The web member serializer exposes isCurrent, not other people's user IDs.
