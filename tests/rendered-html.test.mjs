@@ -1060,7 +1060,7 @@ test("implements a workspace management bot for data quality and urgency reporti
   assert.match(page, /function WorkspaceManagementSummary/);
   assert.match(page, /function WorkspaceManagementBot/);
   assert.match(page, /<WorkspaceManagementBot\b[^>]*active=\{openBot === "management"\}/);
-  assert.match(page, /title=\{t\("업무 관리 봇"\)\}/);
+  assert.match(page, /title=\{t\("업무 생성 관리 봇"\)\}/);
   assert.match(page, /title=\{t\("Task 변동 알림 봇"\)\}/);
   assert.match(page, /워크스페이스 관리 봇 사용/);
   assert.doesNotMatch(page, /LIVE PREVIEW/);

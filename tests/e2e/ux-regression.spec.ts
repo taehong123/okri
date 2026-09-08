@@ -130,7 +130,7 @@ test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => 
     const settingsDialog = page.getByRole("dialog", { name: "워크스페이스 설정" });
     const daily = settingsDialog.getByRole("button", { name: /^데일리 봇/ });
     const management = settingsDialog.getByRole("button", { name: /^관리 봇/ });
-    const work = settingsDialog.getByRole("button", { name: /^업무 관리 봇/ });
+    const work = settingsDialog.getByRole("button", { name: /^업무 생성 관리 봇/ });
     const automation = settingsDialog.getByRole("button", { name: /^Task 변동 알림 봇/ });
     await expect(daily).toHaveAttribute("aria-expanded", "false");
     await expect(management).toHaveAttribute("aria-expanded", "false");

@@ -75,7 +75,7 @@ test("Slack bot types, settings, states and safe errors are localized in every s
     "데일리 봇",
     "관리 봇",
     "자동화 봇",
-    "업무 관리 봇",
+    "업무 생성 관리 봇",
     "Task 변동 알림 봇",
     "시간과 대상 멤버를 설정합니다",
     "시간과 발송 채널을 설정합니다",

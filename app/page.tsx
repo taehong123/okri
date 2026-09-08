@@ -6627,17 +6627,18 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
 type WorkspaceBotId = "daily" | "management" | "work" | "automation";
 
 const slackWorkCommands = [
+  { label: "생성", commands: ["!업무생성", "@OKRI 만들 일 입력"] },
   { label: "공통", commands: ["!도움말", "!내업무"] },
   { label: "Project", commands: ["!프로젝트생성", "!프로젝트조회", "!프로젝트수정", "!프로젝트상태"] },
   { label: "Task", commands: ["!테스크생성", "!테스크조회", "!테스크수정", "!테스크완료", "!테스크재열기"] },
 ] as const;
 
 function SlackWorkManagementBot({ connected, needsReauthorization }: { connected: boolean; needsReauthorization: boolean }) {
-  if (!connected || needsReauthorization) return <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t(needsReauthorization ? "Slack 권한 업데이트가 필요합니다" : "Slack 연결 후 업무 관리 봇을 사용할 수 있습니다")}</b><p>{t("DM과 봇이 참여한 채널에서 명령을 처리하려면 메시지 권한을 승인해 주세요.")}</p></div></div>;
+  if (!connected || needsReauthorization) return <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t(needsReauthorization ? "Slack 권한 업데이트가 필요합니다" : "Slack 연결 후 업무 생성 관리 봇을 사용할 수 있습니다")}</b><p>{t("DM과 봇이 참여한 채널에서 명령을 처리하려면 메시지 권한을 승인해 주세요.")}</p></div></div>;
   return <div className="slack-work-command-panel">
-    <div className="slack-bot-note"><LockKeyhole size={15} /><p>{t("명령 결과와 입력 화면은 명령한 사용자에게만 표시됩니다. 일반 대화와 봇 메시지는 저장하지 않습니다.")}</p></div>
+    <div className="slack-bot-note"><LockKeyhole size={15} /><p>{t("해당 Slack 스레드 내용을 AI 생성 초안에 사용하며, 결과와 입력 화면은 요청자에게만 표시됩니다.")}</p></div>
     <div className="slack-work-command-groups">{slackWorkCommands.map((group) => <section key={group.label}><b>{t(group.label)}</b><div>{group.commands.map((command) => <code key={command}>{command}</code>)}</div></section>)}</div>
-    <p className="slack-channel-help">{t("명령 뒤에 제목이나 검색어를 붙일 수 있습니다. 예: !테스크완료 명함")}</p>
+    <p className="slack-channel-help">{t("스레드에서 @OKRI와 만들 일을 적거나 !업무생성을 입력하세요. AI 사용량에 포함되며 최종 생성 전 내용을 확인합니다.")}</p>
   </div>;
 }
 
@@ -6667,7 +6668,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
   const slackConnected = Boolean(slack?.connected && slackState !== "service_unavailable" && slackState !== "error");
   const connectedSlackName = slack?.connectedTeam?.name || slack?.teamName || "Slack";
   const slackAction = slackState === "connected" ? "연결 완료" : slackState === "setup_required" ? "초기 설정 필요" : slackState === "reauthorization_required" ? "권한 업데이트 필요" : slackState === "workspace_disconnected" ? "연결 필요" : "잠시 사용 불가";
-  const displayedBotSummaries = slackConnected ? { ...botSummaries, work: { status: "사용 가능", summary: "DM과 참여 채널에서 명령을 사용할 수 있습니다" } } : {
+  const displayedBotSummaries = slackConnected ? { ...botSummaries, work: { status: "사용 가능", summary: "Slack 스레드에서 생성 초안을 준비합니다" } } : {
     daily: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
     management: { status: "연결 필요", summary: "Slack 연결 후 설정할 수 있습니다" },
     work: { status: "연결 필요", summary: "Slack 연결 후 사용할 수 있습니다" },
@@ -6738,7 +6739,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
       <div className="bot-accordion" aria-label={t("워크스페이스 봇 목록")}>
         <BotAccordionRow id="daily" icon={Bot} title={t("데일리 봇")} description={t("멤버별 데일리 DM과 공유 채널")} status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel key={`daily-${botRefreshAttempt}`} active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="management" icon={Activity} title={t("관리 봇")} description={t("누락 정보와 긴급 업무 리포트")} status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot key={`management-${botRefreshAttempt}`} active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
-        <BotAccordionRow id="work" icon={ListChecks} title={t("업무 관리 봇")} description={t("Slack에서 Project와 Task 생성·조회·수정")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} /></BotAccordionRow>
+        <BotAccordionRow id="work" icon={ListChecks} title={t("업무 생성 관리 봇")} description={t("Slack 스레드에서 Project와 Task 생성")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} /></BotAccordionRow>
         <BotAccordionRow id="automation" icon={Zap} title={t("Task 변동 알림 봇")} description={t("Task의 모든 변경사항 알림")} status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager key={`automation-${botRefreshAttempt}`} active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
       </div>
     </div>

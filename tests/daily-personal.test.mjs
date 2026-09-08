@@ -1227,25 +1227,29 @@ test("signed Slack submission passes every personal checklist and rejects other-
   state.signature = false; assert.equal((await route.POST(request())).status, 401);
 });
 
-test("Slack slash commands use the linked member language and preserve authored Task titles", async () => {
-  const created = [];
+test("Slack slash commands use the linked member language and preserve authored work in a review draft", async () => {
+  const pending = [];
+  let handled;
   const route = compile(await read("../app/api/slack/commands/route.ts"), {
-    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} } },
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
     "@/lib/pace-data": {
       ensureWorkspace: async () => {}, getSlackConnectionByTeam: async () => ({ ownerId: "w", userId: "creator" }),
-      createItem: async (_ownerId, input) => { created.push(input); return { title: input.title }; }, serializeItem: (item) => item,
     },
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), reconcileDailyReminders: async () => {} },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
     "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "ko" },
     "@/lib/server-language": serverLanguage,
+    "@/lib/slack-work-command": { handleSlackWorkCommandEvent: async (...args) => { handled = args; } },
   });
   const request = (text) => new Request("https://example.test/api/slack/commands", { method: "POST", body: new URLSearchParams({
     team_id: "T", user_id: "U", user_name: "Me", channel_id: "C", channel_name: "general", text,
   }) });
   const help = await (await route.POST(request("help"))).json();
-  assert.match(help.text, /How to use/);
+  assert.match(help.text, /Usage/);
   const task = await (await route.POST(request("고객 인터뷰 정리"))).json();
-  assert.equal(task.text, "Saved as a Task: 고객 인터뷰 정리");
-  assert.equal(created[0].title, "고객 인터뷰 정리");
+  assert.match(task.text, /Preparing a work creation draft/);
+  await Promise.all(pending);
+  assert.equal(handled[2].text, "고객 인터뷰 정리");
+  assert.deepEqual(handled[3], { command: "work_create", query: "고객 인터뷰 정리" });
+  assert.deepEqual(handled[4], { preparingNotice: false });
 });
