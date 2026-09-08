@@ -51,5 +51,6 @@
   "drizzle/0051_paypal_billing.sql": "640e7e71bacd065d179d927401484fbe555a0d5385098e9eaefc2fc4d7626ca3",
   "drizzle/0052_daily_team_digest.sql": "a910113fa757dd70d6600cdbaedc847ffd9d15031a6b9dfc1018fb1e2f4db543",
   "drizzle/0053_slack_daily_checklist_repair.sql": "d96c7db9c6a1b4cc894dd932cfbdec2e1c59ee741edf6f3f0b2f4842ce59c335",
-  "drizzle/0054_native_sessions.sql": "083a17ea5d115017663c7a7a4ae79a430b44bb8e77e44c23f8010e87c7425c82"
+  "drizzle/0054_native_sessions.sql": "083a17ea5d115017663c7a7a4ae79a430b44bb8e77e44c23f8010e87c7425c82",
+  "drizzle/0055_daily_work_status.sql": "98f08987e7e7e6b15f88e8535c6cbe87a68cfc66d0160747332eba8e1c3b5cf8"
 }
