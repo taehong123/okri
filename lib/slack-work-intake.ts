@@ -190,23 +190,35 @@ export async function prepareSlackWorkDraft(input: {
   if (!reservationId) throw new SlackWorkIntakeError("AI 업무 생성 요청이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요.", "ai_rate_limited");
   let finalized = false;
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        reasoning: { effort: "low" },
-        input: [
-          { role: "system", content: systemInstruction() },
-          { role: "user", content: JSON.stringify(requestPayload) },
-        ],
-        text: { format: { type: "json_schema", name: "slack_work_creation", strict: true, schema: draftSchema } },
-        max_output_tokens: maxOutputTokens,
-      }),
-      signal: AbortSignal.timeout(25_000),
-    });
-    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-    if (!response.ok) throw new SlackWorkIntakeError("AI 생성 초안을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.", response.status === 429 ? "openai_rate_limited" : "openai_error");
+    let attempt = await requestOpenAiDraft(apiKey, model, requestPayload, true);
+    if (!attempt.response.ok) {
+      logOpenAiFailure("structured", attempt.response.status, attempt.data);
+      if ([400, 422].includes(attempt.response.status)) {
+        attempt = await requestOpenAiDraft(apiKey, model, requestPayload, false);
+      } else if (attempt.response.status === 429) {
+        await waitForRetry(attempt.response.headers.get("retry-after"));
+        attempt = await requestOpenAiDraft(apiKey, model, requestPayload, true);
+      }
+    }
+    let { response, data } = attempt;
+    if (!response.ok) {
+      logOpenAiFailure("retry", response.status, data);
+      throw new SlackWorkIntakeError("AI 생성 초안을 만들지 못했습니다. 잠시 후 다시 시도해 주세요.", response.status === 429 ? "openai_rate_limited" : "openai_error");
+    }
+
+    let output = responseText(data);
+    let proposed = parseModelDraft(output);
+    if (!proposed) {
+      const compatibility = await requestOpenAiDraft(apiKey, model, requestPayload, false);
+      response = compatibility.response;
+      data = compatibility.data;
+      if (!response.ok) {
+        logOpenAiFailure("invalid-output-retry", response.status, data);
+        throw new SlackWorkIntakeError("AI가 생성 초안을 완성하지 못했습니다. 다시 요청해 주세요.", "invalid_openai_response");
+      }
+      output = responseText(data);
+      proposed = parseModelDraft(output);
+    }
 
     const measured = responseUsage(data, inputChars);
     await finalizeAiUsageEvent(reservationId, {
@@ -220,17 +232,81 @@ export async function prepareSlackWorkDraft(input: {
       estimatedCostWonMicros: estimateCostWonMicros(runtime, measured.inputTokens, measured.outputTokens),
     });
     finalized = true;
-    const output = responseText(data);
     if (!output) throw new SlackWorkIntakeError("AI가 생성 초안을 완성하지 못했습니다. 다시 요청해 주세요.", "empty_openai_response");
-    let proposed: ModelDraft;
-    try { proposed = JSON.parse(output) as ModelDraft; }
-    catch { throw new SlackWorkIntakeError("AI가 생성 초안을 완성하지 못했습니다. 다시 요청해 주세요.", "invalid_openai_response"); }
+    if (!proposed) throw new SlackWorkIntakeError("AI가 생성 초안을 완성하지 못했습니다. 다시 요청해 주세요.", "invalid_openai_response");
     if (proposed.kind === "none") throw new SlackWorkIntakeError("생성할 업무를 확인하지 못했습니다. 만들고 싶은 결과를 한 문장으로 적어 주세요.", "no_work_detected");
     return normalizeSlackWorkDraft(proposed, context, input.memberId, thread.truncated, rules.defaultPriority,
       thread.imageFiles.length, thread.imagesTruncated);
   } finally {
     if (!finalized) await releaseAiUsageReservation(reservationId);
   }
+}
+
+async function requestOpenAiDraft(apiKey: string, model: string, requestPayload: Record<string, unknown>, structured: boolean) {
+  const response = await fetch("https://api.openai.com/v1/responses", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      ...(structured ? { reasoning: { effort: "low" } } : {}),
+      input: [
+        { role: "system", content: `${systemInstruction()} Return only one JSON object.` },
+        { role: "user", content: JSON.stringify(requestPayload) },
+      ],
+      text: structured
+        ? { format: { type: "json_schema", name: "slack_work_creation", strict: true, schema: draftSchema } }
+        : { format: { type: "json_object" } },
+      max_output_tokens: maxOutputTokens,
+    }),
+    signal: AbortSignal.timeout(25_000),
+  });
+  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+  return { response, data };
+}
+
+function parseModelDraft(value: string) {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>;
+    const kind = String(parsed.kind ?? "");
+    if (!["none", "project", "task"].includes(kind)) return null;
+    const parentKind = String(parsed.parentKind ?? "");
+    const priority = String(parsed.priority ?? "medium");
+    return {
+      kind: kind as ModelDraft["kind"],
+      title: typeof parsed.title === "string" ? parsed.title : "",
+      description: typeof parsed.description === "string" ? parsed.description : "",
+      parentKind: ["initiative", "project", "routine"].includes(parentKind) ? parentKind as ModelDraft["parentKind"] : "",
+      parentId: typeof parsed.parentId === "string" ? parsed.parentId : "",
+      parentReason: typeof parsed.parentReason === "string" ? parsed.parentReason : "",
+      responsibleMemberId: typeof parsed.responsibleMemberId === "string" ? parsed.responsibleMemberId : "",
+      participantMemberIds: Array.isArray(parsed.participantMemberIds)
+        ? parsed.participantMemberIds.filter((id): id is string => typeof id === "string").slice(0, 20)
+        : [],
+      dueDate: typeof parsed.dueDate === "string" ? parsed.dueDate : "",
+      priority: ["low", "medium", "high", "urgent"].includes(priority) ? priority as ModelDraft["priority"] : "medium",
+      typeReason: typeof parsed.typeReason === "string" ? parsed.typeReason : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function logOpenAiFailure(attempt: string, status: number, data: Record<string, unknown>) {
+  const error = data.error && typeof data.error === "object" ? data.error as Record<string, unknown> : {};
+  console.error("Slack work OpenAI request failed", {
+    attempt,
+    status,
+    type: typeof error.type === "string" ? error.type : "",
+    code: typeof error.code === "string" ? error.code : "",
+    param: typeof error.param === "string" ? error.param : "",
+  });
+}
+
+async function waitForRetry(value: string | null) {
+  const seconds = Number(value);
+  const milliseconds = Number.isFinite(seconds) && seconds > 0 ? Math.min(2_000, Math.round(seconds * 1_000)) : 500;
+  await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
 export async function readSlackThread(token: string, event: SlackWorkIntakeEvent) {
