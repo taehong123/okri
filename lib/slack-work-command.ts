@@ -73,6 +73,7 @@ export async function handleSlackWorkCommandEvent(
 ) {
   const linked = await dailyMemberBySlack(connection.teamId, event.user);
   const token = await slackTokenForConnection(connection);
+  await ensureSlackWorkChannel(token, event);
   const t = linked
     ? await memberTranslator(linked.authorization)
     : await serverTranslator(await workspaceMessageLanguage(env.DB, connection.ownerId));
@@ -107,10 +108,9 @@ export async function handleSlackWorkCommandEvent(
         query: parsed.query,
       });
     } catch (error) {
-      console.error("Slack work draft preparation stopped", {
-        name: error instanceof Error ? error.name : "unknown",
-        code: error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "",
-      });
+      const name = error instanceof Error ? error.name : "unknown";
+      const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "";
+      console.error(`Slack work draft preparation stopped name=${name} code=${code}`);
       const message = error instanceof SlackWorkIntakeError
         ? t(error.message)
         : t("생성 초안을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.");
@@ -494,11 +494,33 @@ async function memberTranslator(authorization: RequestAuthorization) {
 }
 async function postPrivate(token: string, event: WorkMessageEvent, text: string, blocks?: unknown[]) {
   const method = event.channelType === "im" ? "chat.postMessage" : "chat.postEphemeral";
-  await slackApi(token, method, {
-    channel: event.channel, text, blocks,
-    ...(method === "chat.postEphemeral" ? { user: event.user } : {}),
-    ...(event.threadTs || event.ts ? { thread_ts: event.threadTs || event.ts } : {}),
-  });
+  try {
+    await slackApi(token, method, {
+      channel: event.channel, text, blocks,
+      ...(method === "chat.postEphemeral" ? { user: event.user } : {}),
+      ...(event.threadTs || event.ts ? { thread_ts: event.threadTs || event.ts } : {}),
+    });
+  } catch (error) {
+    if (event.channelType === "im") throw error;
+    const direct = await slackApi<{ ok?: boolean; channel?: { id?: string } }>(token, "conversations.open", { users: event.user });
+    if (!direct.channel?.id) throw error;
+    await slackApi(token, "chat.postMessage", {
+      channel: direct.channel.id,
+      text,
+      ...(blocks?.length ? { blocks } : {}),
+    });
+  }
+}
+
+async function ensureSlackWorkChannel(token: string, event: WorkMessageEvent) {
+  if (event.channelType !== "channel") return;
+  try {
+    await slackApi(token, "conversations.join", { channel: event.channel });
+  } catch (error) {
+    const detail = error && typeof error === "object" ? error as Record<string, unknown> : {};
+    const code = typeof detail.code === "string" ? detail.code : "";
+    console.error(`Slack work channel join failed code=${code}`);
+  }
 }
 function escapeSlack(value: string) { return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
 

@@ -131,6 +131,37 @@ test("Slack work draft falls back to the request when Slack cannot read the thre
   }
 });
 
+test("explicit thread creation intent never disappears when the model returns none", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => Response.json({
+    output_text: JSON.stringify({
+      kind: "none", title: "", description: "", parentKind: "", parentId: "", parentReason: "",
+      responsibleMemberId: "", participantMemberIds: [], dueDate: "", priority: "medium", typeReason: "",
+    }),
+    usage: { input_tokens: 80, output_tokens: 20 },
+  });
+  try {
+    const runtime = {
+      OPENAI_API_KEY: "test-key",
+      DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }) },
+    };
+    const { prepareSlackWorkDraft } = load(async () => ({ messages: [
+      { user: "member-b", text: "결제 오류 재현 조건을 문서화하고 수정한다" },
+      { user: "member-a", text: "이 스레드 내용으로 업무 생성해 줘" },
+    ] }), { env: runtime });
+    const draft = await prepareSlackWorkDraft({
+      authorization: { ownerId: "workspace-a", userId: "user-a" }, memberId: "member-a", token: "token",
+      event: { channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 내용으로 업무 생성해 줘", ts: "1.2" },
+      query: "이 스레드 내용으로 업무 생성해 줘",
+    });
+    assert.equal(draft.kind, "task");
+    assert.equal(draft.title, "결제 오류 재현 조건을 문서화하고 수정한다");
+    assert.equal(draft.parentId, "general-a");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Slack work draft accepts only valid hierarchy IDs and falls back to General", () => {
   const { normalizeSlackWorkDraft } = load();
   const context = {

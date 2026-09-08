@@ -85,5 +85,7 @@ test("Slack channel events, private responses, permissions, and request idempote
   assert.match(schema, /slack_work_command_operations/);
   assert.match(domain, /saveSlackProjectImages/);
   assert.match(domain, /sourceThread/);
+  assert.match(domain, /conversations\.join/);
+  assert.match(domain, /conversations\.open/);
   assert.match(schema, /project_images/);
 });
