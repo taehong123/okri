@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { createExplicitDailyTask, currentDailyMember, normalizeDailySkipReason, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
 import { DAILY_CHECKLIST_PAGE_SIZE, dailyChecklistForm, dailyChoiceBlockId, dailyNoPlannedActionId, orderDailyChecklist, type DailyChecklist } from "@/lib/slack-daily-form";
+import { normalizeDailyWorkStatus, parseDailyWorkStatuses } from "@/lib/daily-work-status";
 import type { RequestAuthorization } from "@/lib/pace-data";
 import type { Translator } from "@/lib/server-language";
 
@@ -11,10 +12,13 @@ const metadataFor = (id: string, revision: number) => JSON.stringify({ id, revis
 export async function createDailyChecklist(ownerId: string, memberId: string, input: DailyChecklist, t: Translator) {
   const id = crypto.randomUUID();
   const choices = { ...input.choices };
+  const statusOptions = parseDailyWorkStatuses(input.workStatusOptions);
+  const requestedStatus = input.skipReason ? "skip" as const : normalizeDailyWorkStatus(input.workStatus);
   if (input.taskFocused) {
     for (const key of Object.keys(choices)) if (!key.startsWith("task:")) delete choices[key];
   }
-  const value = { ...input, choices, work: orderDailyChecklist(input.work), page: 0 };
+  const value = { ...input, choices, work: orderDailyChecklist(input.work), page: 0,
+    ...(input.taskFocused ? { noPlannedTasks: false, workStatus: statusOptions.includes(requestedStatus) ? requestedStatus : statusOptions[0] } : {}) };
   const now = new Date().toISOString();
   await env.DB.prepare("DELETE FROM slack_daily_checklists WHERE expires_at <= ?").bind(now).run();
   await env.DB.prepare("INSERT INTO slack_daily_checklists (id, owner_id, member_id, payload_json, expires_at) VALUES (?, ?, ?, ?, ?)")
@@ -50,10 +54,17 @@ export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t:
     if (state[block]?.value) next[key] = String(state[block].value.value ?? "");
   }
   const noPlanned = state.no_planned?.[dailyNoPlannedActionId(input)];
-  if (noPlanned) next.noPlannedTasks = Array.isArray(noPlanned.selected_options) && noPlanned.selected_options.some((option) => option?.value === "yes");
+  if (input.taskFocused) next.noPlannedTasks = false;
+  else if (noPlanned) next.noPlannedTasks = Array.isArray(noPlanned.selected_options) && noPlanned.selected_options.some((option) => option?.value === "yes");
   if (state.skip_reason?.value) {
     const selected = state.skip_reason.value.selected_option as { value?: string } | null;
     next.skipReason = selected?.value === "none" ? null : selected?.value ?? null;
+  }
+  if (input.taskFocused && state.work_status?.value) {
+    const selected = state.work_status.value.selected_option as { value?: string } | null;
+    const statuses = parseDailyWorkStatuses(input.workStatusOptions);
+    if (!selected?.value || !statuses.includes(selected.value as (typeof statuses)[number])) errors.work_status = t("올바른 근무 상태를 선택해 주세요.");
+    else next.workStatus = normalizeDailyWorkStatus(selected.value);
   }
   return { next, errors };
 }
@@ -80,7 +91,7 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
   if (action === "create") {
     if (!next.taskEntry || next.taskEntry.parentKey !== parentKey) throw new Error("Task 생성 요청을 다시 확인해 주세요.");
     if (!next.taskEntry.title.trim()) return dailyChecklistForm(next, metadata, t, t("새 Task 제목을 입력해 주세요."));
-    if (next.skipReason) return dailyChecklistForm(next, metadata, t, t("스킵을 해제하면 Task를 만들 수 있습니다."));
+    if (next.workStatus === "skip" || next.skipReason) return dailyChecklistForm(next, metadata, t, t("스킵을 해제하면 Task를 만들 수 있습니다."));
     if (Object.values(next.choices).filter((value) => ["today", "done", "delete"].includes(value)).length >= 50) {
       return dailyChecklistForm(next, metadata, t, t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다."));
     }
@@ -142,7 +153,8 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   const selected = (choice: string) => Object.entries(next.choices)
     .filter(([key, value]) => value === choice && (!next.taskFocused || key.startsWith("task:"))).map(([key]) => key);
   const today = selected("today"), done = selected("done"), deleted = selected("delete");
-  if (today.length + done.length + deleted.length > 50) return problem({ no_planned: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
+  const validationBlock = next.taskFocused ? "work_status" : "no_planned";
+  if (today.length + done.length + deleted.length > 50) return problem({ [validationBlock]: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
   if (previous || input.page + 1 < pages) {
     next.page = Math.max(0, Math.min(pages - 1, input.page + (previous ? -1 : 1)));
     const result = await env.DB.prepare("UPDATE slack_daily_checklists SET payload_json = ?, revision = revision + 1 WHERE id = ? AND owner_id = ? AND member_id = ? AND revision = ?")
@@ -152,9 +164,12 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   }
   if (next.taskEntry?.title.trim()) return problem({ daily_new_task: t("작성 중인 Task를 추가하거나 취소해 주세요.") });
   const skipReason = normalizeDailySkipReason(next.skipReason);
-  if (skipReason && (today.length || done.length || deleted.length)) return problem({ skip_reason: t("스킵하려면 선택한 업무 상태를 먼저 해제해 주세요.") });
+  const workStatus = skipReason ? "skip" : normalizeDailyWorkStatus(next.workStatus);
+  const skipping = workStatus === "skip";
+  if (skipping && (today.length || done.length || deleted.length)) return problem({ [next.taskFocused ? "work_status" : "skip_reason"]: t("스킵하려면 선택한 Task를 먼저 해제해 주세요.") });
   if (next.noPlannedTasks && today.length) return problem({ no_planned: t("오늘 예정 없음과 오늘 할 일을 함께 선택할 수 없습니다.") });
-  if (!skipReason && !next.noPlannedTasks && !today.length && !done.length && !deleted.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
+  if (!skipping && next.taskFocused && !today.length && !done.length) return problem({ work_status: t("오늘 진행하거나 완료한 Task를 하나 이상 선택해 주세요.") });
+  if (!skipping && !next.taskFocused && !next.noPlannedTasks && !today.length && !done.length && !deleted.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
   if (skipReason === "other" && !next.skipNote.trim()) return problem({ skip_note: t("기타 스킵 사유를 입력해 주세요.") });
   // Replays return the durable submission before revalidating already-completed work.
   const receipt = await env.DB.prepare("SELECT id FROM daily_submissions WHERE owner_id = ? AND member_id = ? AND request_id = ?")
@@ -162,7 +177,8 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
       selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => key.startsWith("task:") && !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
-      noPlannedTasks: next.noPlannedTasks || (!today.length && done.length + deleted.length > 0), skipReason, skipNote: next.skipNote, source: "slack" }, false);
+      noPlannedTasks: !next.taskFocused && (next.noPlannedTasks || (!today.length && done.length + deleted.length > 0)), workStatus,
+      skipReason, skipNote: next.skipNote, source: "slack" }, false);
   }
   return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done, deleted) };
 }

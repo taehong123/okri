@@ -34,7 +34,7 @@ function harness(t) {
     CREATE TABLE slack_member_links(owner_id TEXT, member_id TEXT, team_id TEXT);
     CREATE TABLE slack_daily_preferences(owner_id TEXT, member_id TEXT, enabled INTEGER);
     CREATE TABLE slack_daily_channels(owner_id TEXT, channel_id TEXT);
-    CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, work_snapshot_json TEXT, yesterday_work_snapshot_json TEXT, skip_reason TEXT);
+    CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, work_snapshot_json TEXT, yesterday_work_snapshot_json TEXT, work_status TEXT DEFAULT 'office', skip_reason TEXT);
     CREATE TABLE daily_task_snapshots(id TEXT, submission_id TEXT, task_id TEXT, parent_id TEXT, parent_kind TEXT);
     CREATE TABLE items(id TEXT PRIMARY KEY, owner_id TEXT, kind TEXT, title TEXT, parent_id TEXT, routine_id TEXT);`);
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
@@ -71,7 +71,7 @@ function harness(t) {
   const api = compile(source, { "./slack-bot-delivery": delivery, "./language-preferences": preferences, "./server-language": serverLanguage });
   const submit = (member, work = [], completed = [], skip = null, version = 1, date = "2026-09-07") => {
     const id = `${member}-${version}-${date}`;
-    db.prepare("INSERT INTO daily_submissions VALUES(?,?,?,?,?,?,?,?)").run(id, member[0], member, date, version, JSON.stringify(work), JSON.stringify(completed), skip);
+    db.prepare("INSERT INTO daily_submissions VALUES(?,?,?,?,?,?,?,?,?)").run(id, member[0], member, date, version, JSON.stringify(work), JSON.stringify(completed), skip ? "skip" : "office", skip);
     return id;
   };
   return { db, raw, api, delivery, submit, calls, behavior, SlackMessageError };

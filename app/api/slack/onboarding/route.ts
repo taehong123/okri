@@ -14,6 +14,7 @@ export async function POST(request: Request) {
       weekdays: Array.isArray(payload.weekdays) ? payload.weekdays.map(Number) : [],
       reminderTime: typeof payload.reminderTime === "string" ? payload.reminderTime : "",
       timezone: typeof payload.timezone === "string" ? payload.timezone : "",
+      workStatuses: Array.isArray(payload.workStatuses) ? payload.workStatuses.filter((value): value is string => typeof value === "string") : undefined,
       memberIds: Array.isArray(payload.memberIds) ? payload.memberIds.filter((value): value is string => typeof value === "string") : [],
       channelIds: Array.isArray(payload.channelIds) ? payload.channelIds.filter((value): value is string => typeof value === "string") : [],
     }));

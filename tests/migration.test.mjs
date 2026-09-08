@@ -28,6 +28,29 @@ test("daily yesterday selection migration keeps JSON valid and submission reques
   db.close();
 });
 
+test("daily work status migration is LF-only and preserves existing reports and settings", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE daily_scrums (id TEXT PRIMARY KEY, today_note TEXT);
+    CREATE TABLE daily_submissions (id TEXT PRIMARY KEY, today_note TEXT);
+    CREATE TABLE slack_daily_settings (owner_id TEXT PRIMARY KEY, reminder_time TEXT);
+    INSERT INTO daily_scrums (id,today_note) VALUES ('draft','keep draft');
+    INSERT INTO daily_submissions (id,today_note) VALUES ('submission','keep submission');
+    INSERT INTO slack_daily_settings (owner_id,reminder_time) VALUES ('workspace','09:00');`);
+  const migration = await readFile(new URL("../drizzle/0055_daily_work_status.sql", import.meta.url), "utf8");
+  assert.ok(!migration.includes("\r"));
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  const draft = db.prepare("SELECT today_note,work_status FROM daily_scrums").get();
+  const submission = db.prepare("SELECT today_note,work_status FROM daily_submissions").get();
+  const settings = db.prepare("SELECT reminder_time,work_statuses FROM slack_daily_settings").get();
+  assert.equal(draft.today_note, "keep draft");
+  assert.equal(draft.work_status, "office");
+  assert.equal(submission.today_note, "keep submission");
+  assert.equal(submission.work_status, "office");
+  assert.equal(settings.reminder_time, "09:00");
+  assert.equal(settings.work_statuses, '["office","remote","skip"]');
+  db.close();
+});
+
 test("Slack daily checklist repair migration is idempotent and restores its guarded table", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec(`

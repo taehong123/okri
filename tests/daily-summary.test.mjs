@@ -9,9 +9,9 @@ const formSource = ts.createSourceFile("slack-daily-form.ts", await readFile(new
 const helper = formSource.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name?.text === "dailyWorkContainerLabel").map((node) => node.getFullText(formSource).replace(/\bexport\s+function/, "function")).join("\n");
 const functions = source.statements.filter((node) => ts.isFunctionDeclaration(node) && ["dailyCard", "escapeSlack"].includes(node.name?.text)).map((node) => node.getFullText(source)).join("\n");
 const code = ts.transpileModule(`${helper}\n${functions}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-const dailyCard = new Function("env", "dailySkipReasonLabel", code + "\nreturn dailyCard;")({}, () => "휴가");
+const dailyCard = new Function("env", "dailySkipReasonLabel", "dailyWorkStatusLabel", code + "\nreturn dailyCard;")({}, () => "휴가", (status) => ({ office: "출근", remote: "재택", skip: "스킵" })[status]);
 const work = (id, completedToday = false, kind = "task") => ({ id, key: `${kind}:${id}`, title: id, kind, parentId: "project", parentKind: "project", parentTitle: "Parent", status: completedToday ? "done" : "todo", completedToday });
-const submission = (overrides = {}) => ({ memberName: "Member", date: "2026-09-05", tasks: [], work: [], yesterdayWork: [], yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, ...overrides });
+const submission = (overrides = {}) => ({ memberName: "Member", date: "2026-09-05", tasks: [], work: [], yesterdayWork: [], yesterdayNote: "", todayNote: "", blockersNote: "", workStatus: "office", skipReason: null, ...overrides });
 const sections = (card) => card.blocks.filter((block) => block.type === "section").map((block) => block.text.text);
 
 test("Slack merges all completed work and keeps remaining plans separate without mutating snapshots", () => {
@@ -37,6 +37,18 @@ test("completion-only daily shows no remaining plan and legacy plan-only submiss
   assert.equal(planned.length, 2);
   assert.doesNotMatch(planned.join("\n"), /어제 완료한 일|오늘 완료한 일/);
   assert.match(planned[1], /Legacy plan/);
+});
+
+test("shared Daily shows the selected work status and keeps the new skip card minimal", () => {
+  const remote = dailyCard(submission({ workStatus: "remote", work: [work("today")] }));
+  assert.match(JSON.stringify(remote.blocks), /오늘 근무/);
+  assert.match(JSON.stringify(remote.blocks), /재택/);
+
+  const skipped = dailyCard(submission({ workStatus: "skip" }));
+  const body = JSON.stringify(skipped.blocks);
+  assert.match(body, /오늘 근무/);
+  assert.match(body, /스킵/);
+  assert.doesNotMatch(body, /완료한 일|오늘 할 일|도움이 필요한 일/);
 });
 
 test("completed and planned lists have independent caps and escape user text", () => {

@@ -20,6 +20,7 @@ const source = await read("../lib/slack-bot-delivery.ts");
 const managementSource = await read("../lib/workspace-management-bot.ts");
 const managementReport = compile(await read("../lib/slack-management-report.ts"));
 const dailySource = await read("../lib/slack-daily.ts");
+const workStatus = compile(await read("../lib/daily-work-status.ts"));
 const files = await readdir(new URL("../drizzle/", import.meta.url));
 const migrationName = files.find((name) => name.endsWith("_slack_bot_deliveries.sql"));
 assert.ok(migrationName, "generated delivery migration must exist");
@@ -113,6 +114,7 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": api,
     "@/lib/daily-bot": { normalizeDailySkipReason: () => null },
+    "@/lib/daily-work-status": workStatus,
     "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") },
     "@/lib/slack-daily-form": { dailyWorkContainerLabel: (work, translate) => work.parentKind === "project" ? `${translate("Project")} · ${work.parentTitle}` : work.parentKind === "routine" ? `${translate("Routine")} · ${work.parentTitle}` : work.parentTitle },
     "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},

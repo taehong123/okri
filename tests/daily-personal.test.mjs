@@ -17,13 +17,15 @@ function compile(source, deps = {}) {
   return loaded.exports;
 }
 const work = compile(await read("../lib/daily-work.ts"));
-const form = compile(await read("../lib/slack-daily-form.ts"));
+const workStatus = compile(await read("../lib/daily-work-status.ts"));
+const form = compile(await read("../lib/slack-daily-form.ts"), { "@/lib/daily-work-status": workStatus });
 const matching = compile(await read("../lib/slack-member-matching.ts"));
 const dailySource = await read("../lib/daily-bot.ts");
 const schema = JSON.parse(await read("../drizzle/meta/0038_snapshot.json"));
 const migration = await read("../drizzle/0045_daily_work_selection.sql");
 const yesterdayMigration = await read("../drizzle/0047_daily_yesterday_selection.sql");
 const checklistMigration = await read("../drizzle/0049_slack_daily_checklists.sql");
+const workStatusMigration = await read("../drizzle/0055_daily_work_status.sql");
 const checklistSource = await read("../lib/slack-daily-checklist.ts");
 const paceSource = await read("../lib/pace-data.ts");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
@@ -75,6 +77,8 @@ function fixture(t, options = {}) {
   assert.ok(!yesterdayMigration.includes("\r"));
   db.exec(yesterdayMigration.replaceAll("--> statement-breakpoint", ""));
   db.exec(checklistMigration.replaceAll("--> statement-breakpoint", ""));
+  assert.ok(!workStatusMigration.includes("\r"));
+  db.exec(workStatusMigration.replaceAll("--> statement-breakpoint", ""));
   const raw = { prepare(sql) {
     const statement = db.prepare(sql); let args = [];
     return { bind(...values) { args = values; return this; }, async first() { return statement.get(...args) ?? null; },
@@ -108,7 +112,7 @@ function fixture(t, options = {}) {
       const rows = db.prepare(`SELECT * FROM ${table.$table}`).all().map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, x) => x.toUpperCase()), v])));
       return rows.filter((row) => conditions.every(({ key, value }) => row[key] === value)).slice(0, 1);
     } }) }) }) }) },
-    "@/lib/daily-work": work, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: options.realPersistence ? realTaskPersistence(raw).createItem : async (ownerId, input) => {
+    "@/lib/daily-work": work, "@/lib/daily-work-status": workStatus, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: options.realPersistence ? realTaskPersistence(raw).createItem : async (ownerId, input) => {
       if (!options.allowCreation) throw new Error("Must never invent tasks");
       await options.beforeCreate?.();
       const task = { id: crypto.randomUUID(), ownerId, priority: "medium", ...input };
@@ -120,7 +124,7 @@ function fixture(t, options = {}) {
       for (const memberId of memberIds) db.prepare("INSERT INTO item_assignments (id,owner_id,item_id,member_id,role) VALUES (?,?,?,?,?)").run(crypto.randomUUID(), ownerId, itemId, memberId, role);
     } },
   });
-  const checklist = compile(checklistSource, { "cloudflare:workers": { env: { DB: raw } }, "@/lib/daily-bot": api, "@/lib/slack-daily-form": form });
+  const checklist = compile(checklistSource, { "cloudflare:workers": { env: { DB: raw } }, "@/lib/daily-bot": api, "@/lib/slack-daily-form": form, "@/lib/daily-work-status": workStatus });
   return { db, raw, api, checklist };
 }
 
@@ -314,7 +318,10 @@ test("task-focused Slack checklist treats Project and Routine as peer containers
     { key: "routine:r", title: "Store management", hasTasks: true }, { key: "routine:er", title: "Empty Routine", hasTasks: false },
   ] };
   const modal = form.dailyChecklistForm(input, "{}");
-  assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text), ["My Task", "Routine Task"]);
+  assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text), ["└ My Task", "└ Routine Task"]);
+  assert.equal(modal.blocks[0].block_id, "work_status");
+  assert.deepEqual(modal.blocks[0].element.options.map((option) => option.value), ["office", "remote", "skip"]);
+  assert.doesNotMatch(JSON.stringify(modal), /today_note|yesterday_note|blockers_note|skip_reason|skip_note|no_planned|\"value\":\"delete\"/);
   assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 2);
   const emptyHeading = modal.blocks.findIndex((block) => block.text?.text === "Project · Empty Project");
   assert.equal(modal.blocks[emptyHeading + 1].elements[0].text, "아직 Task가 없습니다.");
@@ -334,6 +341,26 @@ test("task-focused Slack state discards stale parent choices", async (t) => {
     choices: { "project:project": "today", "routine:routine": "done", "task:task": "today" } };
   const merged = checklist.mergeDailyChecklist(input, {}, (key) => key).next;
   assert.deepEqual(merged.choices, { "task:task": "today" });
+});
+
+test("task-focused Slack checklist stores an allowed work status and skip rejects selected Tasks", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const task = (await work.listDailyWork(raw, "w", "me", date)).find((entry) => entry.key === "task:task");
+  const input = { ...checklistInput([task]), taskFocused: true, workStatus: "remote", workStatusOptions: ["remote", "skip"] };
+  const modal = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  assert.equal(modal.blocks[0].element.initial_option.value, "remote");
+  const remote = await checklist.handleDailyChecklist(authorization, modal.private_metadata, {
+    work_status: { value: { selected_option: { value: "remote" } } },
+    "daily_choice_task:task": choice("today"),
+  }, false, (key) => key);
+  assert.equal(remote.submission.workStatus, "remote");
+  assert.equal(db.prepare("SELECT work_status FROM daily_submissions").get().work_status, "remote");
+
+  const skipModal = await checklist.createDailyChecklist("w", "me", { ...input, choices: { "task:task": "today" } }, (key) => key);
+  const invalid = await checklist.handleDailyChecklist(authorization, skipModal.private_metadata, {
+    work_status: { value: { selected_option: { value: "skip" } } },
+  }, false, (key) => key);
+  assert.match(invalid.errors.work_status, /Task/);
 });
 
 test("empty-project buttons and their inline editor fit Slack limits in every language", async () => {
@@ -366,7 +393,7 @@ test("empty-project editor opens and cancels even with unfinished choices elsewh
     today_note: { value: { value: "Unsubmitted note" } } };
   const added = await checklist.editDailyChecklistTask(authorization, opened.private_metadata, state, "add", "project:worker", (key) => key);
   assert.equal(added.blocks.find((b) => b.block_id === "daily_new_task").element.focus_on_load, true);
-  assert.equal(added.blocks.find((b) => b.block_id === "today_note").element.initial_value, "Unsubmitted note");
+  assert.equal(added.blocks.some((b) => b.block_id === "today_note"), false);
   const cancelled = await checklist.editDailyChecklistTask(authorization, added.private_metadata, state, "cancel", "project:worker", (key) => key);
   assert.equal(cancelled.blocks.some((b) => b.block_id === "daily_new_task"), false);
   // Opening a field must not create a Task or commit incomplete checkbox choices.
@@ -385,7 +412,7 @@ test("untouched null checkbox state does not block adding a Task to an empty pro
   assert.ok(added.blocks.find((b) => b.block_id === "daily_new_task"));
   const created = await checklist.editDailyChecklistTask(authorization, added.private_metadata,
     { ...state, daily_new_task: { title: { value: "First Task" } } }, "create", "project:worker", (key) => key);
-  assert.ok(created.blocks.find((b) => b.label?.text === "First Task")?.element.initial_options.some((o) => o.value === "today"));
+  assert.ok(created.blocks.find((b) => b.label?.text === "└ First Task")?.element.initial_options.some((o) => o.value === "today"));
 });
 
 test("Slack Task creation uses real parent validation and D1 persistence for a Project in an OKR cycle", async (t) => {
@@ -410,7 +437,7 @@ test("Slack Task creation uses real parent validation and D1 persistence for a P
   assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
 });
 
-test("Slack participant adds a Task inside the checklist, preserves choices and notes, and replay creates once", async (t) => {
+test("Slack participant adds a Task inside the simplified checklist, preserves choices, and replay creates once", async (t) => {
   const { db, raw, api, checklist } = fixture(t, { allowCreation: true });
   const dashboard = await api.getDailyDashboard(authorization, date);
   const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
@@ -428,8 +455,8 @@ test("Slack participant adds a Task inside the checklist, preserves choices and 
   assert.equal(saved.choices[`task:${db.prepare("SELECT id FROM items WHERE title='Explicit participant task'").get().id}`], "today");
   assert.equal(saved.taskEntry, undefined);
   assert.equal(created.blocks.find((block) => block.block_id === "daily_choice_task:task").element.initial_options[0].value, "today");
-  assert.notEqual(opened.blocks.find((block) => block.block_id === "no_planned").element.action_id,
-    created.blocks.find((block) => block.block_id === "no_planned").element.action_id);
+  assert.equal(opened.blocks.some((block) => ["no_planned", "today_note", "yesterday_note", "blockers_note", "skip_reason", "skip_note"].includes(block.block_id)), false);
+  assert.equal(created.blocks.some((block) => ["no_planned", "today_note", "yesterday_note", "blockers_note", "skip_reason", "skip_note"].includes(block.block_id)), false);
   const submission = await checklist.handleDailyChecklist(authorization, created.private_metadata, {}, false, (key) => key);
   assert.equal(submission.submission.tasks.length, 2);
   assert.equal(submission.submission.work.length, 0);
@@ -515,9 +542,8 @@ test("simultaneous Slack create actions claim one Task and retain safe input IDs
   const saved = JSON.parse(db.prepare("SELECT payload_json FROM slack_daily_checklists").get().payload_json);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM items WHERE title='Create exactly once'").get().n, 1);
   assert.equal(saved.noPlannedTasks, false);
-  assert.equal(created.blocks.find((block) => block.block_id === "no_planned").element.initial_options, undefined);
-  const oldNone = opened.blocks.find((block) => block.block_id === "no_planned").element.action_id;
-  assert.equal(checklist.mergeDailyChecklist(saved, { no_planned: { [oldNone]: { selected_options: [{ value: "yes" }] } } }, (key) => key).next.noPlannedTasks, false);
+  assert.equal(created.blocks.some((block) => block.block_id === "no_planned"), false);
+  assert.equal(checklist.mergeDailyChecklist(saved, { no_planned: { value: { selected_options: [{ value: "yes" }] } } }, (key) => key).next.noPlannedTasks, false);
 });
 
 test("Task retries repair a failed own assignment but never reclaim a reassigned or archived Task", async (t) => {

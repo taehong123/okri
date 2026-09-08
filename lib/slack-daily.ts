@@ -12,6 +12,7 @@ import {
   type SlackConnection,
 } from "@/db/schema";
 import { currentDailyMember, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
+import { dailyWorkStatusLabel, normalizeDailyWorkStatus, parseDailyWorkStatuses, validateDailyWorkStatuses } from "@/lib/daily-work-status";
 import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
 import { dailyWorkContainerLabel, dailyWorkOption } from "@/lib/slack-daily-form";
 import { createDailyChecklist } from "@/lib/slack-daily-checklist";
@@ -225,7 +226,7 @@ export async function getSlackDailySettings(authorization: RequestAuthorization)
 
 export async function updateSlackDailySettings(ownerId: string, input: {
   enabled?: boolean; weekdays?: number[]; reminderTime?: string; timezone?: string; channelIds?: string[];
-  summaryEnabled?: boolean; summaryTime?: string;
+  summaryEnabled?: boolean; summaryTime?: string; workStatuses?: string[];
 }) {
   const connection = await getSlackConnection(ownerId);
   if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
@@ -233,11 +234,13 @@ export async function updateSlackDailySettings(ownerId: string, input: {
   const weekdays = input.weekdays === undefined ? parseWeekdays(current.weekdays) : normalizeWeekdays(input.weekdays);
   const reminderTime = input.reminderTime === undefined ? current.reminderTime : normalizeReminderTime(input.reminderTime);
   const timezone = input.timezone === undefined ? current.timezone : normalizeTimezone(input.timezone);
+  const workStatuses = input.workStatuses === undefined ? parseDailyWorkStatuses(current.workStatuses) : validateDailyWorkStatuses(input.workStatuses);
   await upsertSlackDailySettings(ownerId, {
     enabled: input.enabled ?? current.enabled,
     weekdays: JSON.stringify(weekdays), reminderTime, timezone,
     summaryEnabled: input.summaryEnabled ?? current.summaryEnabled,
     summaryTime: input.summaryTime === undefined ? current.summaryTime : normalizeReminderTime(input.summaryTime),
+    workStatuses: JSON.stringify(workStatuses),
   });
   if (input.channelIds) {
     const selected = await prepareSlackDailyChannels(ownerId, input.channelIds);
@@ -266,6 +269,7 @@ export async function getSlackDailyPreference(authorization: RequestAuthorizatio
     timezone: preference?.timezone ?? settings.timezone,
     usesWorkspaceTime: !preference?.reminderTime,
     usesWorkspaceTimezone: !preference?.timezone,
+    workStatuses: parseDailyWorkStatuses(settings.workStatuses),
   };
 }
 
@@ -375,7 +379,7 @@ export async function testDailyChannel(ownerId: string, channelId: string) {
 
 export async function configureSlackDailyOnboarding(authorization: RequestAuthorization, input: {
   weekdays: number[]; reminderTime: string; timezone: string; memberIds: string[]; channelIds: string[]; sendTests?: boolean;
-  summaryEnabled?: boolean; summaryTime?: string;
+  summaryEnabled?: boolean; summaryTime?: string; workStatuses?: string[];
 }) {
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection) throw new Error("Slack을 먼저 연결해 주세요.");
@@ -385,6 +389,8 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   const weekdays = normalizeWeekdays(input.weekdays);
   const reminderTime = normalizeReminderTime(input.reminderTime);
   const timezone = normalizeTimezone(input.timezone);
+  const currentSettings = await ensureDailySettingsRow(authorization.ownerId, connection);
+  const workStatuses = input.workStatuses === undefined ? parseDailyWorkStatuses(currentSettings.workStatuses) : validateDailyWorkStatuses(input.workStatuses);
   const memberIds = [...new Set(input.memberIds)];
   if (!memberIds.length) throw new Error("알림을 받을 멤버를 한 명 이상 선택해 주세요.");
 
@@ -401,7 +407,6 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   }
 
   const selectedChannels = await prepareSlackDailyChannels(authorization.ownerId, input.channelIds);
-  const currentSettings = await ensureDailySettingsRow(authorization.ownerId, connection);
   const summaryTime = input.summaryTime === undefined ? currentSettings.summaryTime : normalizeReminderTime(input.summaryTime);
   const now = new Date().toISOString();
   await upsertSlackDailySettings(authorization.ownerId, {
@@ -412,6 +417,7 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
     onboardingCompletedAt: now,
     summaryEnabled: input.summaryEnabled ?? currentSettings.summaryEnabled,
     summaryTime,
+    workStatuses: JSON.stringify(workStatuses),
     installStatus: "connected",
     requiredScopes: "",
     lastError: "",
@@ -773,8 +779,8 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
 export function dailyReminderBlocks(blockId: string, t: Translator = (key) => key) {
   return [
     { type: "context", elements: [{ type: "mrkdwn", text: `*${t("데일리 봇")}*` }] },
-    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: `*${t("오늘 할 업무를 선택해 주세요.")}*\n${t("내게 배정된 Project · Task · Routine에서 오늘 진행할 것을 고르고 제출합니다.")}` } },
-    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: t("내 업무 선택") }, style: "primary", value: "daily" }] },
+    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: `*${t("오늘 할 Task를 선택해 주세요.")}*\n${t("근무 상태를 고르고 Project별 Task를 선택합니다.")}` } },
+    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: t("Task 선택") }, style: "primary", value: "daily" }] },
   ];
 }
 
@@ -795,8 +801,9 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
       const preference = await getSlackDailyPreference(authorization);
       const dashboard = await getDailyDashboard(authorization, todayInTimezone(preference.timezone));
       const view = await createDailyChecklist(authorization.ownerId, dashboard.member.id, {
-        ...dashboard.draft, date: dashboard.date, work: dashboard.candidates.work, memberName: dashboard.member.displayName,
-        taskFocused: true,
+         ...dashboard.draft, date: dashboard.date, work: dashboard.candidates.work, memberName: dashboard.member.displayName,
+         taskFocused: true,
+         workStatusOptions: preference.workStatuses,
         taskTargets: [...dashboard.createTargets.projects.map((project) => ({ key: `project:${project.id}`, title: project.title, hasTasks: project.hasTasks })),
           ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title, hasTasks: routine.hasTasks }))],
         choices: Object.fromEntries(dashboard.draft.selectedWorkIds.filter((key) => key.startsWith("task:")).map((key) => [key, "today" as const])),
@@ -941,6 +948,7 @@ async function loadSubmission(id: string, ownerId: string) {
     id: String(row.id), memberId: row.member_id ? String(row.member_id) : null, memberName: String(row.current_member_name || row.member_name), memberEmail: String(row.member_email),
     date: String(row.scrum_date), version: Number(row.version), yesterdayNote: String(row.yesterday_note), todayNote: String(row.today_note),
     blockersNote: String(row.blockers_note), noPlannedTasks: Boolean(row.no_planned_tasks),
+    workStatus: row.skip_reason ? "skip" : normalizeDailyWorkStatus(row.work_status),
     skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
     source: String(row.source), submittedAt: String(row.submitted_at),
     work: dailyWorkSnapshots(String(row.work_snapshot_json || "[]")),
@@ -952,6 +960,14 @@ async function loadSubmission(id: string, ownerId: string) {
 }
 
 function dailyCard(submission: DailySubmissionValue, t: Translator = (key, values) => key.replace(/\{(\w+)\}/g, (match, name: string) => values && Object.hasOwn(values, name) ? String(values[name]) : match)) {
+  if (submission.workStatus === "skip" && !submission.skipReason) {
+    const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
+    return { text: `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })} · ${t("스킵")}`, unfurl_links: false, unfurl_media: false, blocks: [
+      { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+      { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 근무")}*\n${t("스킵")}` } },
+      { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
+    ] };
+  }
   if (submission.skipReason) {
     const reason = t(dailySkipReasonLabel(submission.skipReason));
     const detail = submission.skipNote ? `\n${escapeSlack(submission.skipNote)}` : "";
@@ -984,6 +1000,7 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
+    { type: "context", elements: [{ type: "mrkdwn", text: `*${t("오늘 근무")}:* ${t(dailyWorkStatusLabel(submission.workStatus))}` }] },
     { type: "section", text: { type: "mrkdwn", text: `*${t("완료한 일")}*\n${groupedLines(completedWork, t("선택한 업무 없음"))}${completedNote}`.slice(0, 2900) } },
     { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } },
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
@@ -993,6 +1010,7 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
 function serializeSettings(settings: typeof slackDailySettings.$inferSelect) {
   return { enabled: settings.enabled, weekdays: parseWeekdays(settings.weekdays), reminderTime: settings.reminderTime, timezone: settings.timezone,
     summaryEnabled: settings.summaryEnabled, summaryTime: settings.summaryTime,
+    workStatuses: parseDailyWorkStatuses(settings.workStatuses),
     installStatus: settings.installStatus, requiredScopes: settings.requiredScopes ? settings.requiredScopes.split(",").filter(Boolean) : [],
     onboardingCompletedAt: settings.onboardingCompletedAt,
     lastSyncedAt: settings.lastSyncedAt, lastError: settings.lastError, updatedAt: settings.updatedAt };

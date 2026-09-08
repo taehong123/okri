@@ -4,7 +4,7 @@ import { serverTranslator, type Translator } from "./server-language";
 
 type Member = { id: string; name: string };
 type Work = { id: string; kind: string; completedToday?: boolean; parentId?: string | null; parentKind?: string };
-type Submission = { id: string; member_id: string; work_snapshot_json: string; yesterday_work_snapshot_json: string; skip_reason: string | null };
+type Submission = { id: string; member_id: string; work_snapshot_json: string; yesterday_work_snapshot_json: string; work_status?: string; skip_reason: string | null };
 type Item = { id: string; kind: string; title: string; parent_id: string | null; routine_id: string | null };
 type Snapshot = { submission_id: string; task_id: string | null; id: string; parent_id: string | null; parent_kind: string };
 type Settings = { owner_id: string; weekdays: string; timezone: string; summary_time: string };
@@ -35,7 +35,7 @@ export async function loadDailyDigest(db: D1Database, ownerId: string, date: str
     WHERE m.workspace_id = ? AND m.status = 'active' AND COALESCE(p.enabled, 1) = 1 ORDER BY m.display_name, m.id`)
     .bind(ownerId).all<Member>();
   const [submissions, items, snapshots] = await Promise.all([
-    db.prepare(`SELECT s.id, s.member_id, s.work_snapshot_json, s.yesterday_work_snapshot_json, s.skip_reason
+    db.prepare(`SELECT s.id, s.member_id, s.work_snapshot_json, s.yesterday_work_snapshot_json, s.work_status, s.skip_reason
       FROM daily_submissions s WHERE s.owner_id = ? AND s.scrum_date = ? AND NOT EXISTS
       (SELECT 1 FROM daily_submissions newer WHERE newer.owner_id = s.owner_id AND newer.member_id = s.member_id
         AND newer.scrum_date = s.scrum_date AND newer.version > s.version)`)
@@ -87,7 +87,7 @@ export function aggregateDailyDigest(date: string, members: Member[], submission
         group[kind].add(work.id); totals[kind].add(work.id); groups.set(value.id, group);
       }
     }
-    return { ...member, shared: Boolean(submission), skipped: Boolean(submission?.skip_reason), completed: completed.size, planned: planned.size };
+    return { ...member, shared: Boolean(submission), skipped: submission?.work_status === "skip" || Boolean(submission?.skip_reason), completed: completed.size, planned: planned.size };
   });
   if (!groups.has("routines")) groups.set("routines", { id: "routines", title: "Routines", completed: new Set(), planned: new Set() });
   return { date, members: rows, groups: [...groups.values()].sort((a, b) => {

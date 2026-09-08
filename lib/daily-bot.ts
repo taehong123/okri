@@ -3,6 +3,7 @@ import { and, eq } from "drizzle-orm";
 import { getDb } from "@/db";
 import { items, routines, workspaceMembers, type WorkspaceMember } from "@/db/schema";
 import { dailyWorkSnapshots, listDailyWork, listDailyYesterdayWork, parseDailyWorkKeys, validateDailyWork, validateDailyYesterdayWork, type DailyWork } from "@/lib/daily-work";
+import { normalizeDailyWorkStatus, type DailyWorkStatus } from "@/lib/daily-work-status";
 import {
   createItem,
   dispatchSlackAutomationEvent,
@@ -58,6 +59,7 @@ export type DailySubmissionValue = {
   todayNote: string;
   blockersNote: string;
   noPlannedTasks: boolean;
+  workStatus: DailyWorkStatus;
   skipReason: DailySkipReason | null;
   skipNote: string;
   source: string;
@@ -75,6 +77,7 @@ type DraftRow = {
   today_note: string;
   blockers_note: string;
   no_planned_tasks: number;
+  work_status?: string;
   skip_reason: string | null;
   skip_note: string;
   source: string;
@@ -105,6 +108,7 @@ type SubmissionRow = {
   today_note: string;
   blockers_note: string;
   no_planned_tasks: number;
+  work_status?: string;
   skip_reason: string | null;
   skip_note: string;
   source: string;
@@ -150,7 +154,7 @@ export async function getDailyDashboard(authorization: RequestAuthorization, raw
   const timezone = await dailyTimezone(d1, authorization.ownerId, member.id);
   const [draft, selectedRows, candidates, projectTargets, routineTargets, teamRows, legacy, work, yesterdayWork] = await Promise.all([
     d1.prepare(`SELECT id, member_id, scrum_date, yesterday_note, today_note, blockers_note,
-        no_planned_tasks, skip_reason, skip_note, source, updated_at, work_selection_json, yesterday_work_selection_json
+        no_planned_tasks, work_status, skip_reason, skip_note, source, updated_at, work_selection_json, yesterday_work_selection_json
       FROM daily_scrums WHERE owner_id = ? AND member_id = ? AND scrum_date = ? LIMIT 1`)
       .bind(authorization.ownerId, member.id, date).first<DraftRow>(),
     d1.prepare(`SELECT selection.task_id AS id
@@ -165,7 +169,7 @@ export async function getDailyDashboard(authorization: RequestAuthorization, raw
         draft.id AS draft_id, link.id AS slack_link_id,
         submission.id AS submission_id, submission.member_name, submission.member_email,
         submission.scrum_date, submission.version, submission.yesterday_note, submission.today_note,
-        submission.blockers_note, submission.no_planned_tasks, submission.skip_reason, submission.skip_note,
+        submission.blockers_note, submission.no_planned_tasks, submission.work_status, submission.skip_reason, submission.skip_note,
         submission.source, submission.submitted_at, submission.work_snapshot_json, submission.yesterday_work_snapshot_json
       FROM workspace_members AS member
       LEFT JOIN daily_scrums AS draft
@@ -203,7 +207,7 @@ export async function getDailyDashboard(authorization: RequestAuthorization, raw
       displayName: String(row.display_name || row.email || "멤버"),
       email: String(row.email || ""),
       role: String(row.role || "member"),
-      status: submission ? submission.skipReason ? "skipped" : "submitted" : row.draft_id ? "writing" : "missing",
+      status: submission ? submission.workStatus === "skip" || submission.skipReason ? "skipped" : "submitted" : row.draft_id ? "writing" : "missing",
       slackConnected: Boolean(row.slack_link_id),
       submission,
     };
@@ -220,6 +224,7 @@ export async function getDailyDashboard(authorization: RequestAuthorization, raw
       todayNote: draft?.today_note ?? "",
       blockersNote: draft?.blockers_note ?? "",
       noPlannedTasks: Boolean(draft?.no_planned_tasks),
+      workStatus: draft?.skip_reason ? "skip" : normalizeDailyWorkStatus(draft?.work_status),
       skipReason: normalizeDailySkipReason(draft?.skip_reason),
       skipNote: draft?.skip_note ?? "",
       selectedTaskIds: selectedRows.results.map((row) => row.id),
@@ -263,6 +268,7 @@ export async function saveDailyDraft(
     selectedWorkIds?: string[];
     selectedYesterdayWorkIds?: string[];
     noPlannedTasks?: boolean;
+    workStatus?: DailyWorkStatus;
     skipReason?: DailySkipReason | null;
     skipNote?: string;
     source?: "web" | "slack";
@@ -275,14 +281,19 @@ export async function saveDailyDraft(
   const yesterdayKeys = input.selectedYesterdayWorkIds === undefined ? undefined : parseDailyWorkKeys(input.selectedYesterdayWorkIds, "yesterday");
   const requestedIds = uniqueIds(workKeys === undefined ? input.selectedTaskIds ?? [] : workKeys.filter((key) => key.startsWith("task:")).map((key) => key.slice(5)));
   if (requestedIds.length > MAX_DAILY_TASKS) throw new Error(`오늘 Task는 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
+  const existing = await env.DB.prepare(`SELECT id, work_status FROM daily_scrums
+    WHERE owner_id = ? AND member_id = ? AND scrum_date = ? LIMIT 1`)
+    .bind(authorization.ownerId, member.id, date).first<{ id: string; work_status?: string }>();
   const skipReason = normalizeDailySkipReason(input.skipReason);
-  const noPlannedTasks = skipReason ? false : Boolean(input.noPlannedTasks);
+  const workStatus = skipReason ? "skip" : normalizeDailyWorkStatus(input.workStatus ?? existing?.work_status);
+  const skipping = workStatus === "skip";
+  const noPlannedTasks = skipping ? false : Boolean(input.noPlannedTasks);
   const skipNote = skipReason ? cleanSkipNote(input.skipNote) : "";
-  const selectedTaskIds = skipReason || noPlannedTasks ? [] : requestedIds;
+  const selectedTaskIds = skipping || noPlannedTasks ? [] : requestedIds;
   const previousWork = workKeys === undefined || yesterdayKeys === undefined ? await env.DB.prepare("SELECT work_selection_json, yesterday_work_selection_json FROM daily_scrums WHERE owner_id = ? AND member_id = ? AND scrum_date = ?")
     .bind(authorization.ownerId, member.id, date).first<{ work_selection_json: string; yesterday_work_selection_json: string }>() : null;
-  const selectedWorkIds = skipReason || noPlannedTasks ? [] : (workKeys ?? parseDailyWorkKeys(previousWork?.work_selection_json || "[]")).filter((key) => !key.startsWith("task:"));
-  const selectedYesterdayWorkIds = skipReason ? [] : (yesterdayKeys ?? parseDailyWorkKeys(previousWork?.yesterday_work_selection_json || "[]", "yesterday"));
+  const selectedWorkIds = skipping || noPlannedTasks ? [] : (workKeys ?? parseDailyWorkKeys(previousWork?.work_selection_json || "[]")).filter((key) => !key.startsWith("task:"));
+  const selectedYesterdayWorkIds = skipping ? [] : (yesterdayKeys ?? parseDailyWorkKeys(previousWork?.yesterday_work_selection_json || "[]", "yesterday"));
   if (selectedWorkIds.length + selectedTaskIds.length > MAX_DAILY_TASKS) throw new Error("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.");
   if (selectedYesterdayWorkIds.length > MAX_DAILY_TASKS) throw new Error("완료한 일은 최대 50개까지 선택할 수 있습니다.");
   const todayKeys = new Set([...selectedWorkIds, ...selectedTaskIds.map((id) => `task:${id}`)]);
@@ -291,19 +302,16 @@ export async function saveDailyDraft(
   await validateDailyYesterdayWork(env.DB, authorization.ownerId, member.id, date, await dailyTimezone(env.DB, authorization.ownerId, member.id), selectedYesterdayWorkIds);
   await assertAssignedTaskIds(authorization.ownerId, member.id, selectedTaskIds);
   const d1 = env.DB;
-  const existing = await d1.prepare(`SELECT id FROM daily_scrums
-    WHERE owner_id = ? AND member_id = ? AND scrum_date = ? LIMIT 1`)
-    .bind(authorization.ownerId, member.id, date).first<{ id: string }>();
   const draftId = existing?.id ?? crypto.randomUUID();
   const now = new Date().toISOString();
   const draftStatement = !existing
     ? d1.prepare(`INSERT INTO daily_scrums
-      (id, owner_id, member_id, scrum_date, yesterday_note, today_note, blockers_note, no_planned_tasks, skip_reason, skip_note, source, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(draftId, authorization.ownerId, member.id, date, cleanNote(input.yesterdayNote), cleanNote(input.todayNote), cleanNote(input.blockersNote), noPlannedTasks ? 1 : 0, skipReason, skipNote, input.source ?? "web", now, now)
+      (id, owner_id, member_id, scrum_date, yesterday_note, today_note, blockers_note, no_planned_tasks, work_status, skip_reason, skip_note, source, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .bind(draftId, authorization.ownerId, member.id, date, cleanNote(input.yesterdayNote), cleanNote(input.todayNote), cleanNote(input.blockersNote), noPlannedTasks ? 1 : 0, workStatus, skipReason, skipNote, input.source ?? "web", now, now)
     : d1.prepare(`UPDATE daily_scrums SET yesterday_note = ?, today_note = ?, blockers_note = ?,
-      no_planned_tasks = ?, skip_reason = ?, skip_note = ?, source = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND member_id = ?`)
-      .bind(cleanNote(input.yesterdayNote), cleanNote(input.todayNote), cleanNote(input.blockersNote), noPlannedTasks ? 1 : 0, skipReason, skipNote, input.source ?? "web", now, draftId, authorization.ownerId, member.id);
+      no_planned_tasks = ?, work_status = ?, skip_reason = ?, skip_note = ?, source = ?, updated_at = ? WHERE id = ? AND owner_id = ? AND member_id = ?`)
+      .bind(cleanNote(input.yesterdayNote), cleanNote(input.todayNote), cleanNote(input.blockersNote), noPlannedTasks ? 1 : 0, workStatus, skipReason, skipNote, input.source ?? "web", now, draftId, authorization.ownerId, member.id);
   await d1.batch([
     draftStatement,
     d1.prepare("UPDATE daily_scrums SET work_selection_json = ? WHERE id = ? AND owner_id = ? AND member_id = ?")
@@ -377,7 +385,7 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     if (existingSubmission) return serializeSubmission(existingSubmission, await snapshotsForSubmissions([existingSubmission.id]));
   }
   const draft = await d1.prepare(`SELECT id, member_id, scrum_date, yesterday_note, today_note, blockers_note,
-      no_planned_tasks, skip_reason, skip_note, source, updated_at, work_selection_json, yesterday_work_selection_json FROM daily_scrums
+      no_planned_tasks, work_status, skip_reason, skip_note, source, updated_at, work_selection_json, yesterday_work_selection_json FROM daily_scrums
     WHERE owner_id = ? AND member_id = ? AND scrum_date = ? LIMIT 1`)
     .bind(authorization.ownerId, member.id, date).first<DraftRow>();
   if (!draft) throw new Error("먼저 데일리 초안을 저장해 주세요.");
@@ -396,11 +404,13 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     throw new Error("선택한 Task의 상태 또는 할당이 변경되었습니다. 초안을 새로고침해 다시 선택해 주세요.");
   }
   const skipReason = normalizeDailySkipReason(draft.skip_reason);
-  if (skipReason && completedToday.length + deletedTasks.length) throw new Error("스킵하려면 선택한 업무 상태를 먼저 해제해 주세요.");
+  const workStatus = skipReason ? "skip" : normalizeDailyWorkStatus(draft.work_status);
+  const skipping = workStatus === "skip";
+  if (skipping && selected.length + work.length + completedToday.length + deletedTasks.length) throw new Error("스킵하려면 선택한 Task를 먼저 해제해 주세요.");
   if (skipReason === "other" && !draft.skip_note.trim()) {
     throw new Error("기타 스킵 사유를 입력해 주세요.");
   }
-  if (!skipReason && !draft.no_planned_tasks && selected.length + work.length === 0 && !draft.today_note.trim()) {
+  if (!skipping && !draft.no_planned_tasks && selected.length + work.length === 0 && !draft.today_note.trim()) {
     throw new Error("오늘 Task를 선택하거나 ‘오늘 예정 없음’을 선택해 주세요.");
   }
   if (selected.length + work.length + completedToday.length + deletedTasks.length > MAX_DAILY_TASKS) throw new Error(`오늘 할 업무는 최대 ${MAX_DAILY_TASKS}개까지 선택할 수 있습니다.`);
@@ -440,11 +450,11 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
     await d1.batch([
     d1.prepare(`INSERT INTO daily_submissions
       (id, owner_id, member_id, member_name, member_email, scrum_date, version, yesterday_note, today_note,
-       blockers_note, no_planned_tasks, skip_reason, skip_note, source, submitted_at, work_snapshot_json,
+       blockers_note, no_planned_tasks, work_status, skip_reason, skip_note, source, submitted_at, work_snapshot_json,
        yesterday_work_snapshot_json, request_id)
-      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${mutationGuard}`)
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE ${mutationGuard}`)
       .bind(submissionId, authorization.ownerId, member.id, member.displayName || member.email || "멤버", member.email || "", date, version,
-        draft.yesterday_note, draft.today_note, draft.blockers_note, draft.no_planned_tasks, skipReason, draft.skip_note, source, submittedAt,
+        draft.yesterday_note, draft.today_note, draft.blockers_note, draft.no_planned_tasks, workStatus, skipReason, draft.skip_note, source, submittedAt,
         JSON.stringify([...work, ...completedToday.map((entry) => ({ ...entry, status: "done" }))]), JSON.stringify(yesterdayWork), normalizedRequestId, ...mutationGuardArgs),
     // Match trashItems' recoverable archive fields without deleting the Project, Routine or any sibling Task.
     ...deletedTasks.flatMap((entry) => [
@@ -696,6 +706,7 @@ function serializeSubmission(row: SubmissionRow, snapshots: SnapshotRow[]): Dail
     todayNote: row.today_note,
     blockersNote: row.blockers_note,
     noPlannedTasks: Boolean(row.no_planned_tasks),
+    workStatus: row.skip_reason ? "skip" : normalizeDailyWorkStatus(row.work_status),
     skipReason: normalizeDailySkipReason(row.skip_reason),
     skipNote: row.skip_note,
     source: row.source,

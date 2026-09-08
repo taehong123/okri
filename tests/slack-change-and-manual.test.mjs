@@ -13,6 +13,7 @@ const deliverySource = await read("lib/slack-bot-delivery.ts");
 const manualSource = await read("lib/slack-daily-manual.ts");
 const changeSource = await read("lib/slack-task-changes.ts");
 const dailySource = await read("lib/slack-daily.ts");
+const workStatus = compile(await read("lib/daily-work-status.ts"));
 const workerSource = await read("worker/index.ts");
 const auth = { ownerId: "w", userId: "u", role: "owner" };
 const requestId = "manual-request-0000001";
@@ -58,7 +59,7 @@ function fixture(t) {
     "cloudflare:workers": {}, "drizzle-orm": {}, "@/db": {}, "@/db/schema": {}, "@/lib/pace-data": {},
     "./language-preferences": preferences, "./server-language": serverLanguage,
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": {},
-    "@/lib/daily-bot": {}, "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
+    "@/lib/daily-bot": {}, "@/lib/daily-work": {}, "@/lib/daily-work-status": workStatus, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
   });
   const manual = compile(manualSource, {
     "@/lib/pace-data": { getSlackConnection: async (ownerId) => db.prepare("SELECT * FROM slack_connections WHERE owner_id=?").get(ownerId) },

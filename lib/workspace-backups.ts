@@ -12,9 +12,9 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   item_assignments: "id,owner_id,item_id,member_id,role,created_at,updated_at",
   checklist_items: "id,owner_id,task_id,title,completed,sort_order,created_at,updated_at",
   routine_completions: "id,owner_id,routine_id,completion_date,note,created_at",
-  daily_scrums: "id,owner_id,member_id,scrum_date,yesterday_note,today_note,blockers_note,no_planned_tasks,skip_reason,skip_note,source,created_at,updated_at,work_selection_json,yesterday_work_selection_json",
+  daily_scrums: "id,owner_id,member_id,scrum_date,yesterday_note,today_note,blockers_note,no_planned_tasks,work_status,skip_reason,skip_note,source,created_at,updated_at,work_selection_json,yesterday_work_selection_json",
   daily_scrum_task_selections: "id,owner_id,daily_scrum_id,member_id,task_id,created_at",
-  daily_submissions: "id,owner_id,member_id,member_name,member_email,scrum_date,version,yesterday_note,today_note,blockers_note,no_planned_tasks,skip_reason,skip_note,source,submitted_at,work_snapshot_json,yesterday_work_snapshot_json,request_id",
+  daily_submissions: "id,owner_id,member_id,member_name,member_email,scrum_date,version,yesterday_note,today_note,blockers_note,no_planned_tasks,work_status,skip_reason,skip_note,source,submitted_at,work_snapshot_json,yesterday_work_snapshot_json,request_id",
   daily_task_snapshots: "id,owner_id,submission_id,task_id,task_title,parent_kind,parent_id,parent_title,status,is_new,sort_order",
 }).map(([name, columns]) => [name, columns.split(",")]));
 
@@ -143,8 +143,8 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
     data.tables.routine_property_definitions = [];
     if (Array.isArray(data.tables.routines)) data.tables.routines = data.tables.routines.map((row) => ({ properties_json: "{}", ...row }));
   }
-  if (Array.isArray(data.tables.daily_scrums)) data.tables.daily_scrums = data.tables.daily_scrums.map((row) => ({ work_selection_json: "[]", yesterday_work_selection_json: "[]", ...row }));
-  if (Array.isArray(data.tables.daily_submissions)) data.tables.daily_submissions = data.tables.daily_submissions.map((row) => ({ work_snapshot_json: "[]", yesterday_work_snapshot_json: "[]", request_id: null, ...row }));
+  if (Array.isArray(data.tables.daily_scrums)) data.tables.daily_scrums = data.tables.daily_scrums.map((row) => ({ work_selection_json: "[]", yesterday_work_selection_json: "[]", work_status: "office", ...row }));
+  if (Array.isArray(data.tables.daily_submissions)) data.tables.daily_submissions = data.tables.daily_submissions.map((row) => ({ work_snapshot_json: "[]", yesterday_work_snapshot_json: "[]", request_id: null, work_status: "office", ...row }));
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");

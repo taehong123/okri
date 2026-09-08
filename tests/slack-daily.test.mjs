@@ -18,6 +18,7 @@ function compile(source, dependencies = {}) {
 }
 const status = compile(await read("../lib/slack-daily-status.ts"));
 const display = compile(await read("../lib/slack-display.ts"));
+const workStatus = compile(await read("../lib/daily-work-status.ts"));
 
 test("Slack customer messages never echo raw errors or diagnostic payloads", () => {
   for (const error of ["Slack chat.scheduleMessage failed: invalid_blocks", "D1_ERROR SELECT * FROM secrets", "Error: socket timeout\n at worker.js:123", '<script>alert("token")</script>', null]) {
@@ -43,7 +44,7 @@ function harness(t) {
     CREATE TABLE users(id TEXT PRIMARY KEY, language_preference TEXT DEFAULT 'ko', resolved_language TEXT DEFAULT 'ko', language_revision INTEGER DEFAULT 0);
     CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, bot_user_id TEXT, encrypted_bot_token TEXT);
     CREATE TABLE workspace_members(id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT, user_id TEXT);
-    CREATE TABLE slack_daily_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, reminder_time TEXT, timezone TEXT, install_status TEXT, onboarding_completed_at TEXT, last_error TEXT, updated_at TEXT, required_scopes TEXT);
+    CREATE TABLE slack_daily_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, reminder_time TEXT, timezone TEXT, install_status TEXT, onboarding_completed_at TEXT, last_error TEXT, updated_at TEXT, required_scopes TEXT, work_statuses TEXT DEFAULT '["office","remote","skip"]');
     CREATE TABLE slack_daily_preferences(owner_id TEXT, member_id TEXT, enabled INTEGER, reminder_time TEXT, timezone TEXT);
     CREATE TABLE slack_member_links(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, slack_user_id TEXT, dm_channel_id TEXT, team_id TEXT);
     CREATE TABLE slack_daily_channels(id TEXT PRIMARY KEY, owner_id TEXT);
@@ -52,7 +53,7 @@ function harness(t) {
     INSERT INTO workspaces(id,scheduled_deletion_at) VALUES('workspace',NULL);
     INSERT INTO workspace_members VALUES('member','workspace','active','user');
     INSERT INTO slack_connections VALUES('connection','workspace','T-team','U-bot','workspace');
-    INSERT INTO slack_daily_settings VALUES('workspace',1,'[0,1,2,3,4,5,6]','09:00','Asia/Seoul','connected','2026-09-02T00:00:00Z','old error','2026-09-02T00:00:00Z','');
+    INSERT INTO slack_daily_settings VALUES('workspace',1,'[0,1,2,3,4,5,6]','09:00','Asia/Seoul','connected','2026-09-02T00:00:00Z','old error','2026-09-02T00:00:00Z','','["office","remote","skip"]');
     INSERT INTO slack_member_links VALUES('link','workspace','member','U-member','D-member','T-team');
     INSERT INTO slack_daily_preferences VALUES('workspace','member',1,NULL,NULL);`);
   db.exec(`ALTER TABLE slack_daily_reminders ADD message_language TEXT DEFAULT 'ko' NOT NULL;
@@ -99,6 +100,7 @@ function harness(t) {
     "@/lib/pace-data": { getSlackConnection: async (owner) => connectionFor("owner_id", owner), getSlackConnectionByTeam: async (team) => connectionFor("team_id", team), ensureWorkspace: async () => {} },
     "@/lib/slack-oauth": { decryptSlackSecret: async (owner) => `mock-token-${owner}`, slackScopes: [] },
     "@/lib/slack-daily-status": status,
+    "@/lib/daily-work-status": workStatus,
     "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
   });
   const calls = [], pending = [];
@@ -145,7 +147,7 @@ function harness(t) {
   const addOther = () => db.exec(`INSERT INTO workspaces(id,scheduled_deletion_at) VALUES('other',NULL);
     INSERT INTO slack_connections VALUES('connection-other','other','T-other','U-other-bot','other');
     INSERT INTO workspace_members(id,workspace_id,status) VALUES('member-other','other','active');
-    INSERT INTO slack_daily_settings VALUES('other',1,'[0,1,2,3,4,5,6]','09:00','America/New_York','connected','2026-09-02T00:00:00Z','','2026-09-02T00:00:00Z','');
+    INSERT INTO slack_daily_settings VALUES('other',1,'[0,1,2,3,4,5,6]','09:00','America/New_York','connected','2026-09-02T00:00:00Z','','2026-09-02T00:00:00Z','','["office","remote","skip"]');
     INSERT INTO slack_member_links VALUES('link-other','other','member-other','U-other','D-other','T-other');
     INSERT INTO slack_daily_preferences VALUES('other','member-other',1,NULL,NULL);`);
   return { api, db, calls, pending, behavior, reminder, addOther, connectionFor, raw };
