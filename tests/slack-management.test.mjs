@@ -274,11 +274,17 @@ for (const locale of ["ko", "en", "ja", "zh", "es"]) test(`${locale} native form
   }
   const data = sampleReport();
   data.groups[1].items.push(...Array.from({ length: 100 }, (_, i) => ({ id: `extra${i}`, kind: "task", title: "제목", isOverdue: false })));
-  const blocks = report.managementReportBlocks(data, tr);
-  assert.ok(blocks.length <= 50);
-  assert.equal(blocks.filter((b) => b.accessory).length, 10);
-  for (const b of blocks) assert.ok((b.text?.text.length ?? 0) <= (b.type === "header" ? 150 : 3000));
-  assert.equal(blocks.at(-1).elements[0].url, "https://okrptr.example/?settings=workspace&tab=summary");
+  const pages = report.managementReportMessages(data, tr);
+  assert.ok(pages.length > 1);
+  assert.equal(pages.flatMap((page) => page.itemIds).length, 103);
+  assert.equal(new Set(pages.flatMap((page) => page.itemIds)).size, 103);
+  for (const page of pages) {
+    assert.ok(page.blocks.length <= 50);
+    assert.ok(page.itemIds.length <= 20);
+    assert.equal(page.blocks.filter((b) => b.accessory).length, page.itemIds.length);
+    for (const b of page.blocks) assert.ok((b.text?.text.length ?? 0) <= (b.type === "header" ? 150 : 3000));
+    assert.equal(page.blocks.at(-1).elements[0].url, "https://okrptr.example/?settings=workspace&tab=summary");
+  }
 });
 
 test("interaction route checks signatures and scope before editor access; suggestions and submissions acknowledge without waiting on saves", async () => {

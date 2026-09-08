@@ -3,7 +3,8 @@ import { decryptSlackSecret, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
 
 type BotKind = "management" | "automation" | "daily_publication" | "daily_manual" | "daily_digest";
-type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string };
+type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string;
+  reportKey?: string; pageIndex?: number; pageCount?: number };
 type Row = {
   id: string; owner_id: string; bot_kind: BotKind; subject_id: string; event_key: string;
   connection_key: string; policy: string; payload: string; status: string; attempts: number;
@@ -32,6 +33,61 @@ export async function queueDailyDigest(db: D1Database, input: {
     ON CONFLICT(owner_id, bot_kind, event_key) DO NOTHING`).bind(crypto.randomUUID(), input.ownerId, input.channel,
       `${input.date}/${input.channel}/${index}`, connectionKey(connection), JSON.stringify(policy), JSON.stringify({ channel: input.channel, ...page }),
       stamp, input.expiresAt, stamp, stamp, input.ownerId, `${input.date}/${input.channel}/0`)));
+}
+
+// Persist every page before the first Slack request. This keeps a long report
+// recoverable when a Worker is interrupted or Slack rate-limits a continuation
+// message, without risking a duplicate of a page whose outcome is uncertain.
+export async function deliverSlackBotMessages(db: D1Database, input: {
+  ownerId: string; botKind: BotKind; subjectId: string; eventKey: string; payloads: Payload[]; expiresAt: string;
+}, now = new Date()): Promise<Row[]> {
+  if (!input.payloads.length) throw new Error("발송할 Slack 메시지가 없습니다.");
+  if (input.payloads.length === 1) return [await deliverSlackBotMessage(db, { ...input, payload: input.payloads[0] }, now)];
+  const connection = await readConnection(db, input.ownerId);
+  if (!connection) throw new Error("워크스페이스 Slack 연결이 필요합니다.");
+  const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payloads[0].test));
+  if (!policy || policy.channel !== input.payloads[0].channel) throw new Error("봇이 중지되었거나 발송 대상이 변경되었습니다.");
+  const stamp = now.toISOString();
+  const reportKey = `${input.botKind}:${input.eventKey}`;
+  const pages = input.payloads.map((payload, pageIndex) => ({
+    eventKey: `${input.eventKey}/${pageIndex}`,
+    payload: { ...payload, reportKey, pageIndex, pageCount: input.payloads.length },
+    pageIndex,
+  }));
+  const rootEventKey = pages[0].eventKey;
+  await db.batch([...pages.slice(1), pages[0]].map(({ eventKey, payload }) => db.prepare(`INSERT INTO slack_bot_deliveries
+    (id, owner_id, bot_kind, subject_id, event_key, connection_key, policy, payload, status, attempts, retry_at, expires_at, last_error, created_at, updated_at)
+    SELECT ?, ?, ?, ?, ?, ?, ?, ?, 'pending', 0, ?, ?, '', ?, ?
+    WHERE NOT EXISTS (SELECT 1 FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = ? AND event_key = ?)
+    ON CONFLICT(owner_id, bot_kind, event_key) DO NOTHING`).bind(crypto.randomUUID(), input.ownerId, input.botKind, input.subjectId,
+      eventKey, connectionKey(connection), JSON.stringify(policy), JSON.stringify(payload), stamp, input.expiresAt, stamp, stamp,
+      input.ownerId, input.botKind, rootEventKey)));
+
+  let stored = await db.prepare(`SELECT * FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = ?
+    AND json_extract(payload, '$.reportKey') = ? ORDER BY CAST(json_extract(payload, '$.pageIndex') AS INTEGER)`)
+    .bind(input.ownerId, input.botKind, reportKey).all<Row>();
+  if (!stored.results.length) throw new Error("Slack 분할 발송 기록을 만들지 못했습니다.");
+
+  // Preserve the queued report snapshot, but allow a confirmed rejection to
+  // resume after the administrator repairs the connection or bot settings.
+  const currentConnection = await readConnection(db, input.ownerId);
+  const currentPolicy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payloads[0].test));
+  if (currentConnection && currentPolicy) {
+    const currentConnectionKey = connectionKey(currentConnection), currentPolicyJson = JSON.stringify(currentPolicy);
+    for (const row of stored.results) {
+      if (input.botKind !== "management" || !["failed", "cancelled"].includes(row.status)
+        || (row.connection_key === currentConnectionKey && row.policy === currentPolicyJson)) continue;
+      await db.prepare(`UPDATE slack_bot_deliveries SET status='pending', attempts=0, connection_key=?, policy=?,
+        retry_at=?, last_error='', updated_at=? WHERE id=? AND status=? AND updated_at=?`)
+        .bind(currentConnectionKey, currentPolicyJson, stamp, stamp, row.id, row.status, row.updated_at).run();
+    }
+    stored = await db.prepare(`SELECT * FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = ?
+      AND json_extract(payload, '$.reportKey') = ? ORDER BY CAST(json_extract(payload, '$.pageIndex') AS INTEGER)`)
+      .bind(input.ownerId, input.botKind, reportKey).all<Row>();
+  }
+  const results: Row[] = [];
+  for (const row of stored.results) results.push(await processDelivery(db, row.id, now));
+  return results;
 }
 
 // Persist first, claim atomically, and never guess whether an unacknowledged POST succeeded.
@@ -263,6 +319,14 @@ async function mirrorDelivery(db: D1Database, row: Row) {
       .bind(row.created_at, status, row.last_error, row.owner_id, row.owner_id, row.subject_id, row.created_at).run();
   } else if (row.bot_kind === "management" && !payload.test) {
     if (row.status === "sent") {
+      if (payload.reportKey && payload.pageCount && payload.pageCount > 1) {
+        const pages = await db.prepare(`SELECT COUNT(*) AS total,
+          SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) AS sent
+          FROM slack_bot_deliveries WHERE owner_id=? AND bot_kind='management'
+            AND json_extract(payload, '$.reportKey')=?`).bind(row.owner_id, payload.reportKey)
+          .first<{ total: number; sent: number }>();
+        if (!pages || Number(pages.total) !== payload.pageCount || Number(pages.sent) !== payload.pageCount) return;
+      }
       await db.prepare(`UPDATE workspace_management_bot_settings SET last_sent_date = ?, last_sent_at = ?, last_error = ''
         WHERE owner_id = ? AND COALESCE(last_sent_date, '') <= ?`)
         .bind(row.subject_id, row.updated_at, row.owner_id, row.subject_id).run();

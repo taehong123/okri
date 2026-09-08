@@ -67,6 +67,17 @@ function harness(t) {
     const stmt = db.prepare(sql); let values = [];
     return { bind(...args) { values = args; return this; }, async first() { return stmt.get(...values) ?? null; },
       async all() { return { results: stmt.all(...values) }; }, async run() { return { meta: { changes: Number(stmt.run(...values).changes) } }; } };
+  }, async batch(statements) {
+    const results = [];
+    db.exec("BEGIN");
+    try {
+      for (const statement of statements) results.push(await statement.run());
+      db.exec("COMMIT");
+      return results;
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
   } };
   const calls = [], behavior = { code: {}, loseResponse: false, beforeDecrypt: null };
   const originalFetch = globalThis.fetch;
@@ -286,6 +297,26 @@ test("management groups tasks under projects and emphasizes project and task ove
   assert.match(report, /배포 점검>[\s\S]*\*1일 지연\* · 2026-09-02\nProject · 출시 준비/);
   assert.equal(rows.length, 3);
   assert.ok(report.indexOf("출시 준비") < report.indexOf("배포 점검"));
+});
+
+test("management splits long reports without omitting work items", async (t) => {
+  const { management, raw, db, calls } = harness(t);
+  for (let index = 0; index < 45; index++) {
+    db.prepare("INSERT INTO items(id,owner_id,kind,title,status,due_date,archived_at) VALUES(?,?,'task',?,'todo',NULL,NULL)")
+      .run(`extra-${index}`, "a", `정리할 업무 ${index}`);
+  }
+  await management.runDueWorkspaceManagementBots(raw, NOW, "a");
+  const reportCalls = calls.filter((call) => call.payload.channel === "C-a" && call.method === "chat.postMessage");
+  assert.equal(reportCalls.length, 3);
+  const itemIds = reportCalls.flatMap((call) => call.payload.blocks
+    .filter((block) => block.accessory?.action_id === "management_edit")
+    .map((block) => block.accessory.value));
+  assert.equal(itemIds.length, 46);
+  assert.equal(new Set(itemIds).size, 46);
+  assert.ok(reportCalls.every((call) => call.payload.blocks.length <= 50));
+  assert.deepEqual(reportCalls.map((call) => call.payload.blocks[0].text.text), ["관리 봇 (1/3)", "관리 봇 (2/3)", "관리 봇 (3/3)"]);
+  assert.equal(db.prepare("SELECT count(*) n FROM slack_bot_deliveries WHERE owner_id='a' AND bot_kind='management' AND status='sent'").get().n, 3);
+  assert.equal(db.prepare("SELECT last_sent_date FROM workspace_management_bot_settings WHERE owner_id='a'").get().last_sent_date, "2026-09-03");
 });
 
 test("management rejects invalid dates and report blocks remain within Slack limits", async (t) => {
