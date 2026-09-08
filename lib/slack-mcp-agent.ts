@@ -1,5 +1,4 @@
 import { env } from "cloudflare:workers";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { SlackConnection } from "@/db/schema";
 import { createOkriServer } from "@/app/mcp/route";
@@ -48,6 +47,7 @@ type McpTool = {
 };
 type StoredToolTurn = { name: string; arguments: Record<string, unknown>; result: unknown; at: string };
 type StoredSession = { version: 1; turns: StoredToolTurn[]; answer: string; updatedAt: string };
+type JsonRpcResponse = { jsonrpc: "2.0"; id: number; result?: unknown; error?: { code?: number; message?: string } };
 
 const maxAgentRounds = 4;
 const maxToolCalls = 7;
@@ -126,15 +126,15 @@ async function runMcpAgent(input: {
 
   const origin = (runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL || "https://okrptr.com").replace(/\/$/, "");
   const server = await createOkriServer(input.authorization, origin);
-  const client = new Client({ name: "okri-slack-conversation", version: "1.0.0" });
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+  const client = new RawMcpClient(clientTransport);
   await server.connect(serverTransport);
-  await client.connect(clientTransport);
+  await client.connect();
   let reservationId = "";
   let finalized = false;
   try {
-    const listed = await client.listTools();
-    const tools = selectTools(listed.tools as McpTool[], input.query, thread.messages.map((entry) => entry.text).join("\n"));
+    const listed = await client.request<{ tools: McpTool[] }>("tools/list", {});
+    const tools = selectTools(listed.tools, input.query, thread.messages.map((entry) => entry.text).join("\n"));
     const conversation = thread.messages.filter((message) => message.text !== "요청을 확인하고 있어요…").map((message) => ({
       author: authors.get(message.user) || (message.user === input.event.user ? input.authorization.displayName || "요청자" : "Slack 멤버"),
       text: message.text,
@@ -194,7 +194,7 @@ async function runMcpAgent(input: {
           continue;
         }
         const args = parseArguments(call.arguments);
-        const result = await client.callTool({ name: call.name, arguments: args });
+        const result = await client.request<Record<string, unknown>>("tools/call", { name: call.name, arguments: args });
         const safeResult = serializableToolResult(result);
         executed.push({ name: call.name, arguments: args, result: safeResult, at: new Date().toISOString() });
         nextInput.push({ type: "function_call_output", call_id: call.call_id, output: JSON.stringify(safeResult) });
@@ -238,6 +238,74 @@ async function runMcpAgent(input: {
     if (reservationId && !finalized) await releaseAiUsageReservation(reservationId);
     await client.close().catch(() => undefined);
     await server.close().catch(() => undefined);
+  }
+}
+
+// The SDK Client eagerly compiles every tool output schema with generated code.
+// Cloudflare Workers forbids that eval path, so the Slack bridge speaks the
+// standard MCP JSON-RPC handshake directly over the SDK's in-memory transport.
+// The McpServer still owns input validation, authorization, and tool execution.
+class RawMcpClient {
+  private nextId = 1;
+  private pending = new Map<number, {
+    resolve: (value: unknown) => void;
+    reject: (error: Error) => void;
+    timeout: ReturnType<typeof setTimeout>;
+  }>();
+
+  constructor(private readonly transport: InMemoryTransport) {
+    transport.onmessage = (message) => this.receive(message as JsonRpcResponse);
+    transport.onerror = (error) => this.failAll(error);
+    transport.onclose = () => this.failAll(new Error("Internal MCP transport closed."));
+  }
+
+  async connect() {
+    await this.transport.start();
+    await this.request("initialize", {
+      protocolVersion: "2025-11-25",
+      capabilities: {},
+      clientInfo: { name: "okri-slack-conversation", version: "1.0.0" },
+    });
+    await this.transport.send({ jsonrpc: "2.0", method: "notifications/initialized" });
+  }
+
+  request<T>(method: string, params: Record<string, unknown>): Promise<T> {
+    const id = this.nextId++;
+    return new Promise<T>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`Internal MCP request timed out: ${method}`));
+      }, 30_000);
+      this.pending.set(id, { resolve: resolve as (value: unknown) => void, reject, timeout });
+      this.transport.send({ jsonrpc: "2.0", id, method, params }).catch((error) => {
+        clearTimeout(timeout);
+        this.pending.delete(id);
+        reject(error instanceof Error ? error : new Error("Internal MCP request failed."));
+      });
+    });
+  }
+
+  async close() { await this.transport.close(); }
+
+  private receive(message: JsonRpcResponse) {
+    if (typeof message?.id !== "number") return;
+    const pending = this.pending.get(message.id);
+    if (!pending) return;
+    clearTimeout(pending.timeout);
+    this.pending.delete(message.id);
+    if (message.error) {
+      pending.reject(new Error(message.error.message || `Internal MCP error ${message.error.code ?? ""}`.trim()));
+      return;
+    }
+    pending.resolve(message.result);
+  }
+
+  private failAll(error: Error) {
+    for (const pending of this.pending.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(error);
+    }
+    this.pending.clear();
   }
 }
 

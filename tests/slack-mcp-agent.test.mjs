@@ -17,8 +17,11 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   ]);
   assert.match(mcp, /export async function createOkriServer/);
   assert.match(agent, /InMemoryTransport\.createLinkedPair/);
-  assert.match(agent, /await client\.listTools\(\)/);
-  assert.match(agent, /await client\.callTool/);
+  assert.match(agent, /new RawMcpClient/);
+  assert.match(agent, /"tools\/list"/);
+  assert.match(agent, /"tools\/call"/);
+  assert.match(agent, /"notifications\/initialized"/);
+  assert.doesNotMatch(agent, /sdk\/client\/index/);
   assert.match(agent, /chat\.postMessage/);
   assert.match(agent, /chat\.update/);
   assert.match(agent, /thread_ts: event\.threadTs \|\| event\.ts/);
