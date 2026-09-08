@@ -29,6 +29,23 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /source: "slack_mcp"/);
   assert.match(agent, /workspaceRequestsThisMinute/);
   assert.match(agent, /workspaceRequestsToday/);
+  assert.match(agent, /name: "prepare_work"/);
+  assert.match(agent, /tool_choice: mustProgressCreation \? "required" : "auto"/);
+  assert.match(agent, /never ask the user to repeat a title or work description/);
+  assert.match(agent, /Slack MCP thread read failed/);
+  assert.match(agent, /requiredThreadScope/);
+});
+
+test("Slack MCP OAuth covers public, private, direct, and group-direct thread history", async () => {
+  const [oauth, manifest] = await Promise.all([
+    readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
+    readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
+  ]);
+  for (const scope of ["channels:history", "groups:history", "im:history", "mpim:history"]) {
+    assert.match(oauth, new RegExp(scope));
+    assert.match(manifest, new RegExp(scope));
+  }
+  assert.match(manifest, /message\.mpim/);
 });
 
 test("Slack MCP conversation preserves Project approval state without exposing it", async () => {

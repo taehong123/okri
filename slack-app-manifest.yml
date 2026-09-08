@@ -29,6 +29,8 @@ oauth_config:
       - groups:read
       - channels:history
       - groups:history
+      - mpim:read
+      - mpim:history
       - app_mentions:read
       - files:read
 settings:
@@ -42,6 +44,7 @@ settings:
       - message.im
       - message.channels
       - message.groups
+      - message.mpim
       - app_mention
   org_deploy_enabled: false
   socket_mode_enabled: false

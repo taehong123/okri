@@ -48,7 +48,44 @@ type SlackFileInfoResult = {
 
 const maxImageBytes = 5 * 1024 * 1024;
 const maxThreadImageBytes = 20 * 1024 * 1024;
+const maxAgentThreadImageBytes = 10 * 1024 * 1024;
+const maxAgentThreadImages = 3;
 export const maxSlackThreadImages = 10;
+
+export async function readSlackImagesForAgent(token: string, files: SlackImageFile[]) {
+  const images: Array<{ name: string; mimeType: string; data: string }> = [];
+  const uniqueFiles = [...new Map(files.map((file) => [file.id, file])).values()].slice(0, maxAgentThreadImages);
+  const loaded = await Promise.all(uniqueFiles.map(async (reference) => {
+    try {
+      const file = await hydrateSlackFile(token, reference);
+      if (!file || file.size <= 0 || file.size > maxImageBytes) return null;
+      const downloadUrl = slackDownloadUrl(file.urlPrivateDownload);
+      if (!downloadUrl) return null;
+      const response = await fetch(downloadUrl, {
+        headers: { Authorization: `Bearer ${token}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(15_000),
+      });
+      if (!response.ok || Number(response.headers.get("content-length") || 0) > maxImageBytes) return null;
+      const bytes = new Uint8Array(await response.arrayBuffer());
+      const mimeType = verifiedImageType(bytes);
+      if (!mimeType || bytes.byteLength > maxImageBytes) return null;
+      return { name: cleanFileName(file.name), mimeType, bytes };
+    } catch (error) {
+      const detail = error && typeof error === "object" ? error as Record<string, unknown> : {};
+      console.error("Slack agent image read failed", { name: error instanceof Error ? error.name : "unknown",
+        code: typeof detail.code === "string" ? detail.code : "" });
+      return null;
+    }
+  }));
+  let totalBytes = 0;
+  for (const image of loaded) {
+    if (!image || totalBytes + image.bytes.byteLength > maxAgentThreadImageBytes) continue;
+    totalBytes += image.bytes.byteLength;
+    images.push({ name: image.name, mimeType: image.mimeType, data: arrayBufferToBase64(image.bytes) });
+  }
+  return images;
+}
 
 export async function listProjectImages(ownerId: string, projectId: string) {
   await assertProject(ownerId, projectId);

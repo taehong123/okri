@@ -17,7 +17,7 @@ new Function("require", "module", "exports", compiled)((name) => ({
   "@/lib/slack-daily": { slackApi: async () => slackFileInfo },
 })[name] ?? require(name), loaded, loaded.exports);
 
-const { arrayBufferToBase64, saveSlackProjectImages, verifiedImageType } = loaded.exports;
+const { arrayBufferToBase64, readSlackImagesForAgent, saveSlackProjectImages, verifiedImageType } = loaded.exports;
 
 test("Project image validation accepts supported signatures and rejects declared-only files", () => {
   assert.equal(verifiedImageType(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])), "image/png");
@@ -28,6 +28,27 @@ test("Project image validation accepts supported signatures and rejects declared
 
 test("Project image bytes are encoded for MCP image content without data URLs", () => {
   assert.equal(arrayBufferToBase64(Uint8Array.from([0, 1, 2, 253, 254, 255])), "AAEC/f7/");
+});
+
+test("Slack thread images can be supplied to the agent without exposing the bot token", async () => {
+  slackFileInfo = { file: {
+    id: "F1", name: "thread.png", mimetype: "image/png", size: 8,
+    url_private_download: "https://files.slack.com/files-pri/T-F/download/thread.png",
+  } };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(options.headers.Authorization, "Bearer xoxb-agent");
+    return new Response(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), { status: 200 });
+  };
+  try {
+    const images = await readSlackImagesForAgent("xoxb-agent", [
+      { id: "F1", name: "stale", mimeType: "image/png", size: 8, urlPrivateDownload: "" },
+    ]);
+    assert.deepEqual(images, [{ name: "thread.png", mimeType: "image/png", data: "iVBORw0KGgo=" }]);
+    assert.ok(!JSON.stringify(images).includes("xoxb-agent"));
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
 });
 
 test("Slack images are copied to private Project storage without persisting Slack URLs or tokens", async () => {
