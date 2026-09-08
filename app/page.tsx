@@ -7026,6 +7026,7 @@ function SlackDailySettingsPanel({ active, connected, canManage, teamName, onSum
 }
 
 function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", onNotice }: { connected: boolean; canManage: boolean; mode?: "personal" | "workspace"; onNotice: (message: string) => void }) {
+  const confirmAction = useAppConfirm();
   const [preference, setPreference] = useState<SlackDailyPreferenceData | null>(null);
   const [savedPreference, setSavedPreference] = useState<SlackDailyPreferenceData | null>(null);
   const [preferenceError, setPreferenceError] = useState("");
@@ -7070,6 +7071,17 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
       if (data.settings) setAdmin(data); onNotice(notice);
     } catch (error) { onNotice(slackErrorMessage(error, "Slack 데일리 설정을 저장하지 못했습니다.")); } finally { setBusy(false); }
   }
+  async function republishLatest(member: SlackDailyAdminData["members"][number]) {
+    if (!admin?.channels.length) { onNotice(t("데일리 공유 채널을 먼저 선택해 주세요.")); return; }
+    const channels = admin.channels.map((channel) => `#${channel.name}`).join(", ");
+    if (!await confirmAction({
+      title: t("최신 데일리 공유"),
+      message: t("{name}님의 마지막 제출을 {channels}에 공유합니다. 이미 공유된 카드가 있으면 최신 내용으로 바꾸고, 삭제됐다면 새로 게시합니다.", { name: messageValue(member.displayName), channels: messageValue(channels) }),
+      confirmLabel: t("지금 공유"),
+    })) return;
+    await patchAdmin({ action: "republish_latest", memberId: member.memberId, requestId: crypto.randomUUID() },
+      t("{name}님의 최신 데일리를 공유했습니다.", { name: messageValue(member.displayName) }));
+  }
   if (!connected) return null;
   if (loadError) return <section className="integration-state-message error"><AlertTriangle size={17} /><div><b>{t("Slack 데일리 설정을 불러오지 못했습니다")}</b><p>{t("연결은 유지됩니다. 잠시 후 다시 불러와 주세요.")}</p></div><button onClick={() => { setLoadError(false); setPreference(null); setAdmin(null); setLoadAttempt((attempt) => attempt + 1); }}>{t("다시 불러오기")}</button></section>;
   return <div className="slack-setup-flow">
@@ -7100,7 +7112,7 @@ function SlackDailyAdvancedSettings({ connected, canManage, mode = "workspace", 
 
     <section className="integration-step" aria-labelledby="slack-step-test">
       <span className="integration-step-number">5</span><div className="integration-step-copy"><h4 id="slack-step-test">{t("테스트 DM과 작동 확인")}</h4><p>{t("사용자 연결과 다음 알림 예약을 확인하고 실제 테스트 DM을 보냅니다.")}</p></div>
-      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, t("Slack 사용자와 예약을 재동기화했습니다."))}><RefreshCw size={13} />{t("사용자·예약 재동기화")}</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? t("다음 알림 · {value1}", { value1: messageValue(slackReminderLabel(member.reminder.status)) }) : t("알림 예약 확인 필요") : t("Slack 미연결")}</small></p>{member.linked && <button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, t("{value1}님에게 테스트 DM을 보냈습니다.", { value1: messageValue(member.displayName) }))}>{t("테스트 DM")}</button>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>{t("채널 전송 실패")}</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {admin.channels.find((channel) => channel.id === failure.channelId)?.name ?? t("공유 채널")}<small>{slackErrorMessage(failure.error)}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, t("채널 전송을 다시 시도했습니다."))}>{t("재시도")}</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />{t("연결된 사용자는 Slack에서 `/okri daily`로 언제든 데일리를 열 수 있습니다.")}</div>}</div>
+      <div className="integration-step-body">{canManage && admin ? <><div className="slack-admin-actions"><button disabled={busy} onClick={() => void patchAdmin({ action: "resync" }, t("Slack 사용자와 예약을 재동기화했습니다."))}><RefreshCw size={13} />{t("사용자·예약 재동기화")}</button></div><div className="slack-member-links slack-test-list">{admin.members.map((member) => <div key={member.memberId}><span className={member.linked ? "linked" : "unlinked"} /><p><b>{member.displayName}</b><small>{member.linked ? member.reminder ? t("다음 알림 · {value1}", { value1: messageValue(slackReminderLabel(member.reminder.status)) }) : t("알림 예약 확인 필요") : t("Slack 미연결")}</small></p>{member.linked && <><button disabled={busy} onClick={() => void patchAdmin({ action: "test_dm", memberId: member.memberId }, t("{value1}님에게 테스트 DM을 보냈습니다.", { value1: messageValue(member.displayName) }))}>{t("테스트 DM")}</button><button disabled={busy || !admin.channels.length} onClick={() => void republishLatest(member)}>{t("최신 데일리 공유")}</button></>}</div>)}</div>{admin.failedPublications.length > 0 && <div className="slack-publication-failures"><b>{t("채널 전송 실패")}</b>{admin.failedPublications.map((failure) => <div key={failure.id}><p>{failure.memberName} · {failure.date} · {admin.channels.find((channel) => channel.id === failure.channelId)?.name ?? t("공유 채널")}<small>{slackErrorMessage(failure.error)}</small></p><button disabled={busy} onClick={() => void patchAdmin({ action: "retry_publication", publicationId: failure.id }, t("채널 전송을 다시 시도했습니다."))}>{t("재시도")}</button></div>)}</div>}</> : <div className="integration-connected-note"><CheckCircle2 size={15} />{t("연결된 사용자는 Slack에서 `/okri daily`로 언제든 데일리를 열 수 있습니다.")}</div>}</div>
     </section></>}
   </div>;
 }

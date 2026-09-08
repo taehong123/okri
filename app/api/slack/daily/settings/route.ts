@@ -3,7 +3,7 @@ import { env, waitUntil } from "cloudflare:workers";
 import { getDailyManualRun, latestDailyManualRun, processDailyManualRun, startDailyManualRun } from "@/lib/slack-daily-manual";
 import { runDueSlackBotDeliveries } from "@/lib/slack-bot-delivery";
 import { parseDigestSettings } from "@/lib/slack-daily-digest";
-import { getSlackDailySettings, reconcileDailyReminders, retryDailyPublication, sendDailyReminderNow, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
+import { getSlackDailySettings, reconcileDailyReminders, republishLatestDailySubmission, retryDailyPublication, sendDailyReminderNow, syncSlackDailyInstallation, testDailyChannel, testDailyDm, updateSlackDailySettings } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
@@ -58,6 +58,10 @@ export async function PATCH(request: Request) {
       await retryDailyPublication(authorization.ownerId, payload.publicationId);
       return Response.json(await getSlackDailySettings(authorization));
     }
+    if (payload.action === "republish_latest" && typeof payload.memberId === "string" && typeof payload.requestId === "string") {
+      await republishLatestDailySubmission(authorization.ownerId, payload.memberId, payload.requestId);
+      return Response.json(await getSlackDailySettings(authorization));
+    }
     return Response.json(await updateSlackDailySettings(authorization.ownerId, {
       ...parseDigestSettings(payload),
       enabled: typeof payload.enabled === "boolean" ? payload.enabled : undefined,
@@ -72,5 +76,5 @@ export async function PATCH(request: Request) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Slack 데일리 설정을 처리하지 못했습니다.";
-  return Response.json({ error: message }, { status: /필요|선택|시간|시간대|채널|찾을 수|설정/i.test(message) ? 400 : 500 });
+  return Response.json({ error: message }, { status: /필요|선택|시간|시간대|채널|찾을 수|설정|요청|제출/i.test(message) ? 400 : 500 });
 }

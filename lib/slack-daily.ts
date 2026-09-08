@@ -776,6 +776,58 @@ export async function retryDailyPublication(ownerId: string, publicationId: stri
   if (result?.status === "failed") throw new Error(result.error || "데일리 공유 결과 확인이 필요합니다.");
 }
 
+export async function republishLatestDailySubmission(ownerId: string, memberId: string, requestId: string) {
+  const normalizedRequestId = requestId.trim();
+  if (!/^[A-Za-z0-9_-]{8,100}$/.test(normalizedRequestId)) throw new Error("재공유 요청을 확인할 수 없습니다.");
+  const latest = await env.DB.prepare(`SELECT submission.id
+    FROM daily_submissions submission
+    INNER JOIN workspace_members member ON member.workspace_id = submission.owner_id
+      AND member.id = submission.member_id AND member.status = 'active'
+    WHERE submission.owner_id = ? AND submission.member_id = ?
+    ORDER BY submission.scrum_date DESC, submission.version DESC, submission.submitted_at DESC LIMIT 1`)
+    .bind(ownerId, memberId).first<{ id: string }>();
+  if (!latest) throw new Error("공유할 최신 데일리 제출을 찾을 수 없습니다.");
+  const submission = await loadSubmission(latest.id, ownerId);
+  if (!submission) throw new Error("공유할 최신 데일리 제출을 찾을 수 없습니다.");
+  const channels = await env.DB.prepare("SELECT channel_id FROM slack_daily_channels WHERE owner_id = ? ORDER BY channel_id")
+    .bind(ownerId).all<{ channel_id: string }>();
+  if (!channels.results.length) throw new Error("데일리 공유 채널을 먼저 선택해 주세요.");
+
+  const { deliverSlackBotMessage } = await import("@/lib/slack-bot-delivery");
+  const t = await serverTranslator(await workspaceMessageLanguage(env.DB, ownerId));
+  const message = dailyCard(submission, t);
+  for (const channel of channels.results) {
+    const createdId = crypto.randomUUID();
+    const now = new Date().toISOString();
+    await env.DB.prepare(`INSERT INTO slack_daily_publications
+      (id, owner_id, member_id, submission_id, scrum_date, channel_id, status, error, attempts, updated_at)
+      SELECT ?, submission.owner_id, submission.member_id, submission.id, submission.scrum_date, ?, 'pending', '', 0, ?
+      FROM daily_submissions submission
+      INNER JOIN slack_daily_channels configured ON configured.owner_id = submission.owner_id AND configured.channel_id = ?
+      WHERE submission.owner_id = ? AND submission.id = ?
+      ON CONFLICT(submission_id, channel_id) DO NOTHING`)
+      .bind(createdId, channel.channel_id, now, channel.channel_id, ownerId, submission.id).run();
+    const publication = await env.DB.prepare(`SELECT id FROM slack_daily_publications
+      WHERE owner_id = ? AND submission_id = ? AND channel_id = ? LIMIT 1`)
+      .bind(ownerId, submission.id, channel.channel_id).first<{ id: string }>();
+    if (!publication) throw new Error("데일리 공유 기록을 만들지 못했습니다.");
+    const receipt = await deliverSlackBotMessage(env.DB, {
+      ownerId, botKind: "daily_publication", subjectId: publication.id,
+      eventKey: `republish:${publication.id}:${normalizedRequestId}`,
+      payload: { channel: channel.channel_id, ...message,
+        streamKey: JSON.stringify([submission.memberId, submission.date, channel.channel_id]) },
+      expiresAt: new Date(Date.now() + 24 * 60 * 60_000).toISOString(),
+    });
+    if (receipt.status !== "sent") throw new Error(receipt.last_error || "최신 데일리를 Slack 채널에 공유하지 못했습니다.");
+    await env.DB.prepare(`UPDATE slack_daily_publications SET status = 'superseded', error = '', updated_at = ?
+      WHERE owner_id = ? AND member_id = ? AND scrum_date = ? AND channel_id = ? AND id != ? AND status = 'failed'`)
+      .bind(new Date().toISOString(), ownerId, submission.memberId, submission.date, channel.channel_id, publication.id).run();
+  }
+  const { runDueDailyDigests } = await import("@/lib/slack-daily-digest");
+  await runDueDailyDigests(env.DB, new Date(), ownerId);
+  return { memberId: submission.memberId, submissionId: submission.id, date: submission.date, version: submission.version, channels: channels.results.length };
+}
+
 export function dailyReminderBlocks(blockId: string, t: Translator = (key) => key) {
   return [
     { type: "context", elements: [{ type: "mrkdwn", text: `*${t("데일리 봇")}*` }] },
