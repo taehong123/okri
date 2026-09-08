@@ -107,6 +107,10 @@ export async function handleSlackWorkCommandEvent(
         query: parsed.query,
       });
     } catch (error) {
+      console.error("Slack work draft preparation stopped", {
+        name: error instanceof Error ? error.name : "unknown",
+        code: error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "",
+      });
       const message = error instanceof SlackWorkIntakeError
         ? t(error.message)
         : t("생성 초안을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.");

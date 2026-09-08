@@ -149,7 +149,10 @@ export async function prepareSlackWorkDraft(input: {
   const rateLimits = assertSlackWorkRequestRate(runtime, usage);
 
   const [thread, context, rules, language, authors] = await Promise.all([
-    readSlackThread(input.token, input.event),
+    readSlackThread(input.token, input.event).catch((error) => {
+      logPreparationFailure("thread", error);
+      return fallbackSlackThread(input.event, input.query);
+    }),
     readWorkContext(env.DB, input.authorization.ownerId, input.authorization.userId, { kind: "unsure", limit: 12 }),
     getWorkspaceRules(input.authorization.ownerId),
     readLanguagePreferences(env.DB, input.authorization.userId),
@@ -240,6 +243,25 @@ export async function prepareSlackWorkDraft(input: {
   } finally {
     if (!finalized) await releaseAiUsageReservation(reservationId);
   }
+}
+
+function fallbackSlackThread(event: SlackWorkIntakeEvent, query: string) {
+  const text = cleanSlackText(query || event.text);
+  return {
+    messages: text ? [{ user: event.user, text }] : [],
+    truncated: true,
+    imageFiles: [] as SlackImageFile[],
+    imagesTruncated: false,
+  };
+}
+
+function logPreparationFailure(stage: string, error: unknown) {
+  const detail = error && typeof error === "object" ? error as Record<string, unknown> : {};
+  console.error("Slack work draft preparation failed", {
+    stage,
+    name: error instanceof Error ? error.name : "unknown",
+    code: typeof detail.code === "string" ? detail.code : "",
+  });
 }
 
 async function requestOpenAiDraft(apiKey: string, model: string, requestPayload: Record<string, unknown>, structured: boolean) {

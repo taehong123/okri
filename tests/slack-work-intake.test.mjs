@@ -96,6 +96,41 @@ test("Slack work draft retries a rejected structured response with JSON compatib
   }
 });
 
+test("Slack work draft falls back to the request when Slack cannot read the thread", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async (_url, init) => {
+    const body = JSON.parse(init.body);
+    const input = JSON.parse(body.input[1].content);
+    assert.equal(input.thread[0].text, "고객 오류 화면을 수정해 줘");
+    assert.equal(input.threadTruncated, true);
+    return Response.json({
+      output_text: JSON.stringify({
+        kind: "task", title: "고객 오류 화면 수정", description: "", parentKind: "routine", parentId: "general-a",
+        parentReason: "", responsibleMemberId: "member-a", participantMemberIds: [], dueDate: "",
+        priority: "medium", typeReason: "한 가지 완료 결과",
+      }),
+      usage: { input_tokens: 100, output_tokens: 40 },
+    });
+  };
+  try {
+    const runtime = {
+      OPENAI_API_KEY: "test-key",
+      DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }) },
+    };
+    const slackError = Object.assign(new Error("private channel history unavailable"), { code: "not_in_channel" });
+    const { prepareSlackWorkDraft } = load(async () => { throw slackError; }, { env: runtime });
+    const draft = await prepareSlackWorkDraft({
+      authorization: { ownerId: "workspace-a", userId: "user-a" }, memberId: "member-a", token: "token",
+      event: { channel: "C1", channelType: "group", user: "member-a", text: "고객 오류 화면을 수정해 줘", ts: "1.2" },
+      query: "고객 오류 화면을 수정해 줘",
+    });
+    assert.equal(draft.title, "고객 오류 화면 수정");
+    assert.equal(draft.threadTruncated, true);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Slack work draft accepts only valid hierarchy IDs and falls back to General", () => {
   const { normalizeSlackWorkDraft } = load();
   const context = {
