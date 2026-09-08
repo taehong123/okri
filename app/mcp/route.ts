@@ -343,7 +343,7 @@ const projectConversationOutputSchema = {
 
 type ProjectConversationInput = z.infer<typeof projectConversationInputSchema>;
 
-async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai") {
+export async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai") {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(

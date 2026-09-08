@@ -81,6 +81,12 @@ function harness() {
       parseSlackWorkCommand: () => null,
       async handleSlackWorkCommandEvent() { calls.push(["work-command"]); },
     },
+    "@/lib/slack-mcp-agent": {
+      async handleSlackMcpConversation(_request, connection, event, query) {
+        calls.push(["mcp-conversation", connection.ownerId, event.channel, event.user, query]);
+      },
+    },
+    "@/lib/slack-task-changes": { async runDueTaskChanges() { calls.push(["task-changes"]); } },
     "@/lib/slack-oauth": {
       slackConfigured: () => state.configured,
       async verifySlackRequest() { calls.push(["verify"]); return state.signature; },
@@ -259,6 +265,21 @@ test("Slack event dispatch uses the signed team's workspace and exact delivery m
   await Promise.all(h.pending);
   assert.deepEqual(h.calls.filter((c) => c[0] === "repair"), [["repair", "other"]]);
   assert.deepEqual(h.calls.find((c) => c[0] === "delivery"), ["delivery", { teamId: "T-other", channelId: "D-other", botId: "U-other", blockIds: ["marker"] }]);
+});
+
+test("signed app mentions dispatch the public MCP conversation once", async () => {
+  const h = harness();
+  h.state.target = h.old;
+  const event = { event_id: "mention", team_id: "T-old", event: {
+    type: "app_mention", channel_type: "channel", channel: "C-team", user: "U-member", ts: "1.2",
+    text: "<@U123ABC> 이번 스레드로 업무를 정리해줘",
+  } };
+  await h.routes.events.POST(h.request("POST", event));
+  await h.routes.events.POST(h.request("POST", event));
+  await Promise.all(h.pending);
+  assert.deepEqual(h.calls.filter((call) => call[0] === "mcp-conversation"), [[
+    "mcp-conversation", "workspace", "C-team", "U-member", "이번 스레드로 업무를 정리해줘",
+  ]]);
 });
 
 test("Slack OAuth exchange and token revocation have bounded external requests", async (t) => {
