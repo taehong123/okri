@@ -1,7 +1,5 @@
-import { readFileSync } from "node:fs";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const root = fileURLToPath(new URL("../../", import.meta.url));
@@ -10,13 +8,15 @@ export const sha = value => typeof value === "string" && /^[a-f0-9]{40}$/.test(v
 export function git(...args) { return execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim(); }
 export function sourceDigest() {
   // Receipts are not executable input and can be committed after device testing.
-  const files = git("ls-files", "-z", "--", "mobile", "lib", "app/api", "drizzle", "package.json", "package-lock.json")
-    .split("\0").filter(f => f && !/^mobile\/release\/(?:device-verification|candidate)\.json$/.test(f)).sort();
+  // Hash canonical Git blobs, not platform-dependent checkout line endings.
+  // Preflight requires a clean tree; CI creates candidates from committed input.
+  const entries = git("ls-files", "--stage", "-z", "--", "mobile", "lib", "app/api", "drizzle", "package.json", "package-lock.json").split("\0").filter(Boolean);
   const digest = createHash("sha256");
-  for (const file of files) {
-    const bytes = readFileSync(path.join(root, file));
-    const input = /\.(?:tsx?|jsx?|mjs|cjs|json|sql|md|ya?ml|css)$/.test(file) ? Buffer.from(bytes.toString("utf8").replace(/\r\n/g, "\n")) : bytes;
-    digest.update(file + "\0" + input.length + "\0").update(input);
+  for (const entry of entries.sort()) {
+    const match = entry.match(/^(\d+) ([a-f0-9]+) (\d)\t([\s\S]+)$/);
+    if (!match || match[3] !== "0") throw new Error("Unmerged release inputs");
+    if (/^mobile\/release\/(?:device-verification|candidate)\.json$/.test(match[4])) continue;
+    digest.update(entry + "\0");
   }
   return digest.digest("hex");
 }

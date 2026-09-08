@@ -2,6 +2,7 @@ import { writeFileSync, mkdirSync } from "node:fs";
 import { git, root, sourceDigest } from "./release-lib.mjs";
 import path from "node:path";
 const sourceCommit = git("rev-parse", "HEAD");
+if (git("status", "--porcelain")) throw new Error("Commit sources before recording a release candidate");
 const since = process.env.OKRI_PREVIOUS_MOBILE_COMMIT;
 const changed = since ? git("diff", "--name-only", since, sourceCommit).split("\n") : git("ls-files", "mobile", "lib", "app/api").split("\n");
 const native = changed.filter(p => p.startsWith("mobile/"));
