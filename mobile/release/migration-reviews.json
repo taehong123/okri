@@ -5,5 +5,12 @@
     "rollbackPlan": "Keep the added columns and their data when rolling back application code. Older code ignores them; do not drop columns or rewrite existing migration history.",
     "dataPreservation": "ADD COLUMN with defaults preserves record IDs, assignments, drafts and submission history. The migration contains no deletes or destructive table replacement.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-08"
+  },
+  "drizzle/0056_native_sessions_repair.sql": {
+    "sha256": "e1f7984b1fb8c22bf068671cc194f52204c78cbffcb690be26c396f8bd466f91",
+    "v1Compatibility": "Replays the unchanged additive native schema from 0054 after already-published 0055. IF NOT EXISTS preserves installed schema; the account-deletion safety CHECK remains enforced.",
+    "rollbackPlan": "Leave the native tables and indexes in place on application rollback. Do not delete sessions, alter previous migrations, or remove the account-deletion guard.",
+    "dataPreservation": "Only CREATE TABLE/INDEX IF NOT EXISTS statements are executed. ON DELETE CASCADE is the existing user-owned session foreign-key policy, not a deletion command. No existing records are mutated.",
+    "reviewedBy": "Codex native compatibility integration review, 2026-09-08"
   }
 }

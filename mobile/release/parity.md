@@ -15,6 +15,8 @@
   translates skip to the existing skipReason contract; selecting work can resume
   without discarding Tasks. Native office/remote controls are explicitly deferred
   to the next native UI release and are not claimed in this candidate.
+- Native schema repair 0056 retains 0054 unchanged and covers environments that
+  already applied 0055 before native authentication was deployed.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or
