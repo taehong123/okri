@@ -17,7 +17,7 @@ import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
 import { dailyWorkContainerLabel, dailyWorkOption } from "@/lib/slack-daily-form";
 import { createDailyChecklist } from "@/lib/slack-daily-checklist";
 import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
-import { ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
+import { dispatchSlackAutomationEvent, ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
 import { decryptSlackSecret, slackDailyScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { dailyDeliveryHealth } from "@/lib/slack-daily-status";
 
@@ -744,7 +744,7 @@ export async function publishDailySubmission(ownerId: string, submissionId: stri
   for (const publication of publications.results) {
     const now = new Date().toISOString();
     try {
-      const message = dailyCard(submission, t);
+      const message = await dailyPublicationCard(ownerId, String(publication.id), submission, t);
       const receipt = await env.DB.prepare("SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication' AND event_key = ?")
         .bind(ownerId, publication.id).first();
       if (!receipt && Number(publication.attempts) > 0 && !publication.slack_message_ts) {
@@ -795,7 +795,6 @@ export async function republishLatestDailySubmission(ownerId: string, memberId: 
 
   const { deliverSlackBotMessage } = await import("@/lib/slack-bot-delivery");
   const t = await serverTranslator(await workspaceMessageLanguage(env.DB, ownerId));
-  const message = dailyCard(submission, t);
   for (const channel of channels.results) {
     const createdId = crypto.randomUUID();
     const now = new Date().toISOString();
@@ -811,6 +810,7 @@ export async function republishLatestDailySubmission(ownerId: string, memberId: 
       WHERE owner_id = ? AND submission_id = ? AND channel_id = ? LIMIT 1`)
       .bind(ownerId, submission.id, channel.channel_id).first<{ id: string }>();
     if (!publication) throw new Error("데일리 공유 기록을 만들지 못했습니다.");
+    const message = await dailyPublicationCard(ownerId, publication.id, submission, t);
     const receipt = await deliverSlackBotMessage(env.DB, {
       ownerId, botKind: "daily_publication", subjectId: publication.id,
       eventKey: `republish:${publication.id}:${normalizedRequestId}`,
@@ -1011,7 +1011,155 @@ async function loadSubmission(id: string, ownerId: string) {
   } satisfies DailySubmissionValue;
 }
 
-function dailyCard(submission: DailySubmissionValue, t: Translator = (key, values) => key.replace(/\{(\w+)\}/g, (match, name: string) => values && Object.hasOwn(values, name) ? String(values[name]) : match)) {
+type DailyCardOptions = { publicationId?: string; completedTaskIds?: ReadonlySet<string> };
+
+async function dailyPublicationCard(ownerId: string, publicationId: string, submission: DailySubmissionValue, t: Translator) {
+  const taskIds = [...new Set([
+    ...submission.tasks.flatMap((task) => task.taskId ? [task.taskId] : []),
+    ...(submission.work ?? []).flatMap((work) => work.kind === "task" ? [work.id] : []),
+  ])];
+  if (!taskIds.length) return dailyCard(submission, t, { publicationId });
+  const completed = await env.DB.prepare(`SELECT id FROM items
+    WHERE owner_id = ? AND kind = 'task' AND archived_at IS NULL
+      AND status IN ('done', 'development_done') AND id IN (SELECT value FROM json_each(?))`)
+    .bind(ownerId, JSON.stringify(taskIds)).all<{ id: string }>();
+  return dailyCard(submission, t, { publicationId, completedTaskIds: new Set(completed.results.map((item) => item.id)) });
+}
+
+export async function completePublishedDailyTask(input: {
+  authorization: RequestAuthorization;
+  memberId: string;
+  teamId: string;
+  slackUserId: string;
+  channelId: string;
+  messageTs: string;
+  actionTs: string;
+  value: string;
+}) {
+  if (input.authorization.role === "viewer") throw new Error("읽기 전용 멤버는 데일리를 제출할 수 없습니다.");
+  const target = parseDailyPublicationAction(input.value);
+  const connection = await getSlackConnection(input.authorization.ownerId);
+  if (!connection || connection.teamId !== input.teamId) throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+  const publication = await env.DB.prepare(`SELECT publication.id, publication.submission_id, publication.member_id,
+      publication.channel_id, publication.slack_message_ts, submission.scrum_date
+    FROM slack_daily_publications publication
+    JOIN daily_submissions submission ON submission.id = publication.submission_id AND submission.owner_id = publication.owner_id
+    WHERE publication.id = ? AND publication.owner_id = ? AND publication.member_id = ?
+      AND submission.member_id = ? AND publication.channel_id = ? AND publication.slack_message_ts = ?
+      AND publication.status = 'sent'
+      AND NOT EXISTS (SELECT 1 FROM daily_submissions newer WHERE newer.owner_id = submission.owner_id
+        AND newer.member_id = submission.member_id AND newer.scrum_date = submission.scrum_date AND newer.version > submission.version)
+    LIMIT 1`)
+    .bind(target.publicationId, input.authorization.ownerId, input.memberId, input.memberId, input.channelId, input.messageTs)
+    .first<{ id: string; submission_id: string; member_id: string; channel_id: string; slack_message_ts: string; scrum_date: string }>();
+  if (!publication) throw new Error("다른 사용자 또는 워크스페이스의 명령은 실행할 수 없습니다.");
+  const selected = await env.DB.prepare(`SELECT 1 AS selected FROM daily_submissions submission
+    WHERE submission.id = ? AND submission.owner_id = ? AND (
+      EXISTS (SELECT 1 FROM daily_task_snapshots snapshot
+        WHERE snapshot.submission_id = submission.id AND snapshot.owner_id = submission.owner_id AND snapshot.task_id = ?)
+      OR EXISTS (SELECT 1 FROM json_each(submission.work_snapshot_json) work
+        WHERE json_extract(work.value, '$.kind') = 'task' AND json_extract(work.value, '$.id') = ?
+          AND COALESCE(json_extract(work.value, '$.completedToday'), 0) = 0)
+    ) LIMIT 1`)
+    .bind(publication.submission_id, input.authorization.ownerId, target.taskId, target.taskId).first();
+  if (!selected) throw new Error("업무의 할당 또는 완료 상태가 변경됐습니다. 내 업무를 다시 확인해 주세요.");
+  const task = await env.DB.prepare(`SELECT item.id, item.title, item.status, item.priority, item.archived_at
+    FROM items item
+    JOIN item_assignments assignment ON assignment.owner_id = item.owner_id AND assignment.item_id = item.id
+      AND assignment.member_id = ? AND assignment.role = 'task_assignee'
+    JOIN workspace_members member ON member.workspace_id = item.owner_id AND member.id = assignment.member_id
+      AND member.status = 'active' AND member.role <> 'viewer'
+    WHERE item.owner_id = ? AND item.id = ? AND item.kind = 'task' LIMIT 1`)
+    .bind(input.memberId, input.authorization.ownerId, target.taskId)
+    .first<{ id: string; title: string; status: string; priority: string; archived_at: string | null }>();
+  if (!task || task.archived_at) throw new Error("업무의 할당 또는 완료 상태가 변경됐습니다. 내 업무를 다시 확인해 주세요.");
+
+  const requestSeed = [input.teamId, input.slackUserId, input.actionTs || "legacy", publication.id, task.id].join(":");
+  const requestId = `daily-card:${await sha256(requestSeed)}`;
+  const now = new Date().toISOString();
+  const claim = await env.DB.prepare(`INSERT OR IGNORE INTO slack_work_command_operations
+    (request_id, owner_id, team_id, slack_user_id, command, target_id, status, result_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'daily_publication_complete', ?, 'processing', '{}', ?, ?)`)
+    .bind(requestId, input.authorization.ownerId, input.teamId, input.slackUserId, task.id, now, now).run();
+  let changed = false;
+  if (claim.meta.changes) {
+    try {
+      const updated = await env.DB.prepare(`UPDATE items SET status = 'done', progress = 100, source = 'slack', updated_at = ?
+        WHERE owner_id = ? AND id = ? AND kind = 'task' AND archived_at IS NULL
+          AND status NOT IN ('done', 'development_done', 'archived')
+          AND EXISTS (SELECT 1 FROM workspace_members member WHERE member.workspace_id = items.owner_id
+            AND member.id = ? AND member.status = 'active' AND member.role <> 'viewer')
+          AND EXISTS (SELECT 1 FROM item_assignments assignment WHERE assignment.owner_id = items.owner_id
+            AND assignment.item_id = items.id AND assignment.member_id = ? AND assignment.role = 'task_assignee')`)
+        .bind(now, input.authorization.ownerId, task.id, input.memberId, input.memberId).run();
+      changed = Boolean(updated.meta.changes);
+      if (!changed) {
+        const latest = await env.DB.prepare("SELECT status FROM items WHERE owner_id = ? AND id = ? AND archived_at IS NULL")
+          .bind(input.authorization.ownerId, task.id).first<{ status: string }>();
+        if (!latest || !["done", "development_done"].includes(latest.status)) {
+          throw new Error("업무의 할당 또는 완료 상태가 변경됐습니다. 내 업무를 다시 확인해 주세요.");
+        }
+      }
+      if (changed) {
+        await env.DB.prepare(`INSERT OR IGNORE INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
+          VALUES (?, ?, ?, 'updated', 'slack', ?, ?)`)
+          .bind(requestId, input.authorization.ownerId, task.id, JSON.stringify({ status: "done", fromStatus: task.status,
+            progress: 100, effectiveDate: publication.scrum_date, origin: "slack_daily_publication", requestId }), now).run();
+      }
+      await env.DB.prepare("UPDATE slack_work_command_operations SET status = 'succeeded', result_json = ?, updated_at = ? WHERE request_id = ? AND status = 'processing'")
+        .bind(JSON.stringify({ completed: true }), new Date().toISOString(), requestId).run();
+    } catch (error) {
+      await env.DB.prepare("UPDATE slack_work_command_operations SET status = 'failed', result_json = ?, updated_at = ? WHERE request_id = ? AND status = 'processing'")
+        .bind(JSON.stringify({ error: "task_state_changed" }), new Date().toISOString(), requestId).run();
+      throw error;
+    }
+  }
+  if (changed) {
+    await dispatchSlackAutomationEvent(input.authorization.ownerId, { triggerType: "task_status_changed",
+      item: { id: task.id, ownerId: input.authorization.ownerId, kind: "task", title: task.title,
+        status: "done", priority: task.priority, updatedAt: now }, fromStatus: task.status });
+  }
+  await refreshDailyPublicationMessages(input.authorization.ownerId, publication.submission_id, publication.id, connection);
+  return { completed: true, changed, taskId: task.id };
+}
+
+function parseDailyPublicationAction(raw: string) {
+  let value: unknown;
+  try { value = JSON.parse(raw); } catch { throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요."); }
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+  const publicationId = "publicationId" in value ? String(value.publicationId) : "";
+  const taskId = "taskId" in value ? String(value.taskId) : "";
+  const invalidCharacter = [...publicationId, ...taskId].some((character) => character === "|" || character.charCodeAt(0) < 32);
+  if (!publicationId || !taskId || publicationId.length > 150 || taskId.length > 150 || invalidCharacter) {
+    throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+  }
+  return { publicationId, taskId };
+}
+
+async function refreshDailyPublicationMessages(ownerId: string, submissionId: string, clickedPublicationId: string, connection: SlackConnection) {
+  const submission = await loadSubmission(submissionId, ownerId);
+  if (!submission) throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+  const publications = await env.DB.prepare(`SELECT id, channel_id, slack_message_ts FROM slack_daily_publications
+    WHERE owner_id = ? AND submission_id = ? AND status = 'sent' AND slack_message_ts IS NOT NULL
+    ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, channel_id`)
+    .bind(ownerId, submissionId, clickedPublicationId).all<{ id: string; channel_id: string; slack_message_ts: string }>();
+  const token = await slackTokenForConnection(connection);
+  const t = await serverTranslator(await workspaceMessageLanguage(env.DB, ownerId));
+  let clickedError: unknown = null;
+  for (const publication of publications.results) {
+    try {
+      const message = await dailyPublicationCard(ownerId, publication.id, submission, t);
+      await slackApi(token, "chat.update", { channel: publication.channel_id, ts: publication.slack_message_ts,
+        text: message.text, blocks: message.blocks, unfurl_links: false, unfurl_media: false });
+    } catch (error) {
+      if (publication.id === clickedPublicationId) clickedError = error;
+      else console.error("slack_daily_publication_refresh_failed", { publicationId: publication.id });
+    }
+  }
+  if (clickedError) throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+}
+
+function dailyCard(submission: DailySubmissionValue, t: Translator = (key, values) => key.replace(/\{(\w+)\}/g, (match, name: string) => values && Object.hasOwn(values, name) ? String(values[name]) : match), options: DailyCardOptions = {}) {
   if (submission.workStatus === "skip" && !submission.skipReason) {
     const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
     return { text: `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })} · ${t("스킵")}`, unfurl_links: false, unfurl_media: false, blocks: [
@@ -1030,10 +1178,10 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
     ] };
   }
-  type CardWork = { taskTitle: string; parentTitle: string; parentKind?: string; groupKey: string; completedToday: boolean };
-  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: Boolean(work.completedToday) }))];
+  type CardWork = { taskId: string | null; taskTitle: string; parentTitle: string; parentKind?: string; groupKey: string; completedToday: boolean };
+  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, taskId: task.taskId, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskId: work.kind === "task" ? work.id : null, taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, completedToday: Boolean(work.completedToday) }))];
   const completedSnapshots = [...new Map([...(submission.yesterdayWork ?? []), ...(submission.work ?? []).filter((work) => work.completedToday)].map((work) => [work.key, work])).values()];
-  const completedWork = completedSnapshots.map((work) => ({ taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, isNew: false, completedToday: true }));
+  const completedWork = completedSnapshots.map((work) => ({ taskId: work.kind === "task" ? work.id : null, taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, completedToday: true }));
   const plannedWork = allWork.filter((work) => !work.completedToday);
   const groupedLines = (work: CardWork[], emptyText = t("오늘 예정 없음")) => {
     const groups = new Map<string, { title: string; lines: string[] }>();
@@ -1050,11 +1198,32 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   const completedNote = submission.yesterdayNote ? `\n*${t("완료 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
+  const interactiveTodayBlocks: Array<Record<string, unknown>> = [];
+  if (options.publicationId) {
+    interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*` } });
+    const visible = plannedWork.slice(0, 20);
+    let currentGroup = "";
+    for (const task of visible) {
+      if (task.groupKey !== currentGroup) {
+        currentGroup = task.groupKey;
+        interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `*${escapeSlack(dailyWorkContainerLabel(task, t))}*` } });
+      }
+      const completed = Boolean(task.taskId && options.completedTaskIds?.has(task.taskId));
+      const title = escapeSlack(task.taskTitle);
+      interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `\u2003• ${completed ? `~${title}~` : title}`.slice(0, 2900) },
+        ...(!completed && task.taskId ? { accessory: { type: "button", action_id: "daily_publication_complete",
+          text: { type: "plain_text", text: t("완료") }, style: "primary",
+          value: JSON.stringify({ publicationId: options.publicationId, taskId: task.taskId }) } } : {}) });
+    }
+    if (!visible.length) interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `• ${t("오늘 예정 없음")}` } });
+    if (plannedWork.length > 20) interactiveTodayBlocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `_${t("외 {count}개", { count: plannedWork.length - 20 })}_` }] });
+    if (note || blocker) interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `${note}${blocker}`.trim().slice(0, 2900) } });
+  }
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
     { type: "context", elements: [{ type: "mrkdwn", text: `*${t("오늘 근무")}:* ${t(dailyWorkStatusLabel(submission.workStatus))}` }] },
     { type: "section", text: { type: "mrkdwn", text: `*${t("완료한 일")}*\n${groupedLines(completedWork, t("선택한 업무 없음"))}${completedNote}`.slice(0, 2900) } },
-    { type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } },
+    ...(options.publicationId ? interactiveTodayBlocks : [{ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } }]),
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };
 }

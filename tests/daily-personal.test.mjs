@@ -913,6 +913,41 @@ test("Task buttons acknowledge before slow identity lookups and use block_action
   assert.equal(updates.length, 1);
 });
 
+test("published Daily completion acknowledges before identity lookup and updates in the background", async () => {
+  const pending = [], completions = [];
+  let release;
+  const lookup = new Promise((resolve) => { release = resolve; });
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => lookup },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": {
+      dailyMemberBySlack: async () => ({ authorization, memberId: "me" }),
+      completePublishedDailyTask: async (input) => completions.push(input),
+    },
+    "@/lib/slack-management-actions": {}, "@/lib/slack-daily-checklist": {},
+    "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await Promise.race([
+    route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+      type: "block_actions", team: { id: "T" }, user: { id: "U" },
+      container: { channel_id: "C", message_ts: "1.001" },
+      actions: [{ action_id: "daily_publication_complete", action_ts: "2.002", value: '{"publicationId":"p","taskId":"task"}' }],
+    }) }) })),
+    new Promise((resolve) => { const timer = setTimeout(() => resolve(null), 1000); timer.unref(); }),
+  ]);
+  assert.ok(response, "Slack must receive an acknowledgement while identity lookup is pending");
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "");
+  release({ ownerId: "w", teamId: "T" });
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.equal(completions.length, 1);
+  assert.deepEqual({ channelId: completions[0].channelId, messageTs: completions[0].messageTs, actionTs: completions[0].actionTs },
+    { channelId: "C", messageTs: "1.001", actionTs: "2.002" });
+});
+
 test("failed Slack view recovery is logged without payload data and displays a minimal error", async (t) => {
   const pending = [], updates = [], logs = [];
   t.mock.method(console, "error", (...args) => logs.push(args));
