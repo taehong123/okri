@@ -1,9 +1,14 @@
 import type { ExpoConfig } from "expo/config";
 import { existsSync } from "node:fs";
+import { resolve } from "node:path";
 import updatePolicy from "./release/update-policy.json";
 
 const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
 const certificate = "./release/update-certificate.pem";
+const hasCertificate = existsSync(resolve(__dirname, certificate));
+if (projectId && updatePolicy.ota === "signed" && !hasCertificate) {
+  throw new Error("Signed OTA requires the public update certificate");
+}
 const config: ExpoConfig = {
   name: "OKRI",
   slug: "okri",
@@ -16,7 +21,7 @@ const config: ExpoConfig = {
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
     useEmbeddedUpdate: true,
-    ...(existsSync(certificate) ? {
+    ...(hasCertificate ? {
       codeSigningCertificate: certificate,
       codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
     } : {}),
