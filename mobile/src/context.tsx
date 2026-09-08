@@ -67,7 +67,7 @@ function StateProvider({ children, loadSession = readSession }: { children: Reac
     setTheme: async m => { await AsyncStorage.setItem("okri.native.theme", m); setMode(m); },
     switchWorkspace: async id => {
       // Validate membership before clearing the old workspace's rendered data.
-      await api("/api/workspaces", { method: "PATCH", body: JSON.stringify({ workspaceId: id }) });
+      await api("/api/mobile/v1/workspaces", { method: "PATCH", body: JSON.stringify({ workspaceId: id }) });
       generation.current++; await queryClient.cancelQueries(); queryClient.clear(); setWorkspace(id);
     },
     signIn: async () => { const value = await login(language); if (value) await acceptSession(value); },
@@ -83,5 +83,5 @@ export function Providers({ children, loadSession }: { children: React.ReactNode
 }
 export function useBootstrap() {
   const { session, workspace, api } = useApp();
-  return useQuery({ queryKey: ["bootstrap", session?.user.id, workspace, today()], queryFn: ({ signal }) => api<Bootstrap>("/api/bootstrap?date=" + today(), { signal }), enabled: !!session });
+  return useQuery({ queryKey: ["bootstrap", session?.user.id, workspace, today()], queryFn: ({ signal }) => api<Bootstrap>("/api/mobile/v1/bootstrap?date=" + today(), { signal }), enabled: !!session });
 }

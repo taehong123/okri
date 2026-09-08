@@ -10,6 +10,14 @@ export const languages: { id: Language; name: string }[] = [
   { id: "zh", name: "中文" }, { id: "es", name: "Español" },
 ];
 const extra: Record<string, [string, string, string, string]> = {
+  "앱 업데이트": ["App updates", "アプリの更新", "应用更新", "Actualizaciones de la app"],
+  "받은 업데이트는 앱을 다음에 실행할 때 적용됩니다.": ["Downloaded updates apply the next time you start the app.", "ダウンロードした更新は次回の起動時に適用されます。", "已下载的更新将在下次启动应用时生效。", "Las actualizaciones descargadas se aplican al volver a iniciar la app."],
+  "이 버전의 지원 기간이 끝났습니다. 스토어에서 업데이트해 주세요.": ["Support for this version has ended. Update from the store.", "このバージョンのサポートは終了しました。ストアから更新してください。", "此版本已停止支持，请从应用商店更新。", "Esta versión ya no tiene soporte. Actualízala desde la tienda."],
+  "새 버전을 사용할 수 있습니다.": ["A new version is available.", "新しいバージョンを利用できます。", "有新版本可用。", "Hay una nueva versión disponible."],
+  "스토어에서 업데이트": ["Update in store", "ストアで更新", "在应用商店更新", "Actualizar en la tienda"],
+  "업데이트 다시 확인": ["Check for updates again", "更新を再確認", "重新检查更新", "Volver a buscar actualizaciones"],
+  "업데이트가 있어도 작성 중인 화면은 다시 시작하지 않습니다.": ["Updates will not restart a screen while you are working.", "更新があっても作業中の画面は再起動しません。", "更新不会重新启动正在编辑的页面。", "Las actualizaciones no reinician la pantalla mientras trabajas."],
+  "스토어를 열지 못했습니다. 잠시 후 다시 시도해 주세요.": ["Could not open the store. Try again shortly.", "ストアを開けませんでした。しばらくして再度お試しください。", "无法打开应用商店，请稍后重试。", "No se pudo abrir la tienda. Inténtalo de nuevo más tarde."],
   "상위 항목을 선택해 주세요.": ["Select a parent item.", "親項目を選択してください。", "请选择上级项目。", "Selecciona un elemento superior."],
   "하위 항목 추가": ["Add child item", "子項目を追加", "添加子项", "Añadir elemento hijo"],
   "Objective 추가": ["Add objective", "目標を追加", "添加目标", "Añadir objetivo"],

@@ -1,0 +1,52 @@
+{
+  "bootstrap": {
+    "user": { "id": "user-1", "email": "alex@example.test", "displayName": "Alex" },
+    "items": [{
+      "id": "task-1", "kind": "task", "title": "Review requirements", "description": "",
+      "parentId": "project-1", "routineId": null, "cycleId": "cycle-1",
+      "status": "todo", "priority": "medium", "progress": 0, "dueDate": "2026-09-09",
+      "archivedAt": null, "createdByUserId": "user-1",
+      "assignments": [{ "memberId": "member-1", "displayName": "Alex", "role": "task_assignee" }]
+    }],
+    "routines": [{
+      "id": "routine-1", "title": "Operations", "description": "", "cadence": "daily",
+      "active": true, "completed": false, "systemKey": null, "assigneeMemberId": "member-1"
+    }],
+    "workspaces": [{ "id": "workspace-1", "name": "Studio", "role": "owner" }],
+    "team": {
+      "workspace": { "id": "workspace-1", "name": "Studio" },
+      "members": [{ "id": "member-1", "userId": "user-1", "displayName": "Alex", "email": "alex@example.test", "status": "active", "role": "owner" }],
+      "currentRole": "owner", "canManage": true
+    },
+    "cycles": [{ "id": "cycle-1", "name": "Q3", "status": "active" }]
+  },
+  "daily": {
+    "date": "2026-09-08",
+    "member": { "id": "member-1", "displayName": "Alex", "email": "alex@example.test", "role": "owner" },
+    "draft": {
+      "yesterdayNote": "", "todayNote": "", "blockersNote": "", "selectedTaskIds": [],
+      "selectedWorkIds": [], "selectedYesterdayWorkIds": [], "noPlannedTasks": false, "skipReason": null, "skipNote": ""
+    },
+    "candidates": {
+      "work": [
+        { "id": "project-1", "key": "project:project-1", "kind": "project", "title": "Launch", "status": "todo", "dueDate": "2026-09-09", "parentTitle": "" },
+        { "id": "routine-1", "key": "routine:routine-1", "kind": "routine", "title": "Operations", "status": "todo", "dueDate": null, "parentTitle": "" },
+        { "id": "task-1", "key": "task:task-1", "kind": "task", "title": "Review requirements", "status": "todo", "dueDate": "2026-09-09", "parentId": "routine-1", "parentKind": "routine", "parentTitle": "Operations" }
+      ],
+      "yesterdayWork": []
+    },
+    "createTargets": { "projects": [{ "id": "project-1", "title": "Launch" }], "routines": [{ "id": "routine-1", "title": "Operations" }], "allowGeneral": false },
+    "latestSubmission": null
+  },
+  "requests": {
+    "POST items": { "kind": "task", "title": "Review requirements", "parentId": "project-1", "routineId": null, "cycleId": "cycle-1", "status": "todo", "priority": "medium", "dueDate": null, "assigneeMemberId": "member-1", "source": "web" },
+    "PATCH items": { "id": "task-1", "status": "done" },
+    "POST routines": { "title": "Operations", "description": "", "cadence": "daily", "assigneeMemberId": "member-1" },
+    "PATCH routines": { "id": "routine-1", "title": "Operations" },
+    "PUT routine-completions": { "routineId": "routine-1", "date": "2026-09-08", "completed": true },
+    "PUT daily-scrum": { "date": "2026-09-08", "yesterdayNote": "", "todayNote": "", "blockersNote": "", "selectedTaskIds": ["task-1"], "selectedWorkIds": ["task:task-1"], "selectedYesterdayWorkIds": [], "noPlannedTasks": false, "skipReason": null, "skipNote": "" },
+    "POST daily-scrum/submit": { "date": "2026-09-08", "requestId": "daily-submit-1" },
+    "POST daily-scrum/tasks": { "date": "2026-09-08", "requestId": "daily-task-1", "title": "Follow up", "parentKind": "routine", "parentId": "routine-1" },
+    "PATCH workspaces": { "workspaceId": "workspace-2" }
+  }
+}

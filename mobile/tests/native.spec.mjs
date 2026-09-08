@@ -7,6 +7,20 @@ test.beforeEach(async ({ page }) => {
     return host === "127.0.0.1" || host === "localhost" ? route.continue() : route.abort();
   });
 });
+
+test("release settings use native typography without forcing navigation or reload", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto("/?lang=en&theme=dark");
+  await page.getByRole("tab", { name: /More/i }).click();
+  await page.getByRole("button", { name: /^Settings/i }).click();
+  await expect(page.getByText("App updates", { exact: true })).toBeVisible();
+  await expect(page.getByText("Updates will not restart a screen while you are working.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Update in store", exact: true })).toHaveCount(0);
+  await page.getByText("App updates", { exact: true }).scrollIntoViewIfNeeded();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: new URL("release-settings-dark.png", screenshots).pathname.replace(/^\/([A-Z]:)/, "$1") });
+});
 test("native screens render, preserve failed drafts, and submit once", async ({ page }) => {
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   await page.goto("/?lang=en");
@@ -59,7 +73,7 @@ test("native project creation retains parent cycle and task status choices match
   await page.getByRole("combobox").first().selectOption("i");
   await page.getByRole("button", { name: "Save", exact: true }).click();
   await expect(page.getByText("Native project", { exact: true })).toBeVisible();
-  const write = await page.evaluate(() => globalThis.__OKRI_PREVIEW__.writes.find(w => w.path === "/api/items" && w.method === "POST"));
+  const write = await page.evaluate(() => globalThis.__OKRI_PREVIEW__.writes.find(w => w.path === "/api/mobile/v1/items" && w.method === "POST"));
   expect(write.body.parentId).toBe("i"); expect(write.body.cycleId).toBe("cycle");
   await page.getByRole("tab", { name: "My work", exact: true }).click();
   await page.getByRole("button", { name: "Add task", exact: true }).click();

@@ -1,17 +1,19 @@
 import type { Session } from "./types";
+import { clientHeaders } from "./client-version";
 
 export const ORIGIN = "https://okri.ai";
 export class ApiError extends Error {
   constructor(public status: number, public code: string, message: string) { super(message); }
 }
 export async function request<T>(path: string, session: Session | null, workspace: string | null, language: string, init: RequestInit = {}): Promise<T> {
-  if (!path.startsWith("/api/") || path.startsWith("//")) throw new Error("Invalid API path");
+  if (!/^\/api\/(?:mobile\/v1\/|native\/)[a-z/-]+(?:\?[^#]*)?$/.test(path)) throw new Error("Invalid API path");
   const controller = new AbortController();
   const abort = () => controller.abort();
   if (init.signal?.aborted) abort(); else init.signal?.addEventListener("abort", abort, { once: true });
   const timer = setTimeout(abort, 20000);
   try {
     const headers = new Headers(init.headers);
+    for (const [key, value] of Object.entries(clientHeaders())) headers.set(key, value);
     headers.set("Accept", "application/json");
     headers.set("Accept-Language", language);
     if (init.body) headers.set("Content-Type", "application/json");

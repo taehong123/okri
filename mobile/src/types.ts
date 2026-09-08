@@ -24,7 +24,7 @@ export type DailyDraft = {
   noPlannedTasks: boolean; skipReason: string | null; skipNote: string;
 };
 export type Daily = {
-  date: string; member: Member; draft: DailyDraft;
+  date: string; member: Pick<Member, "id" | "displayName" | "email" | "role">; draft: DailyDraft;
   candidates: { work: DailyWork[]; yesterdayWork: DailyWork[] };
   createTargets: { projects: { id: string; title: string }[]; routines: { id: string; title: string }[]; allowGeneral: boolean };
   latestSubmission: { id: string; submittedAt: string } | null;

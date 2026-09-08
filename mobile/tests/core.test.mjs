@@ -53,18 +53,18 @@ test("assigned tasks never include another member's tasks", () => {
   assert.deepEqual(model.myTasks(data).map(i => i.id), ["mine"]);
 });
 test("API sends native bearer, language and workspace without cookies; writes are not retried", async () => {
-  const api = compileLanguageModule(await read("../src/api.ts"));
+  const api = compileLanguageModule(await read("../src/api.ts"), { "./client-version": { clientHeaders: () => ({ "X-OKRI-App-Version": "1.0.0", "X-OKRI-Platform": "ios" }) } });
   const previous = globalThis.fetch, calls = [];
   globalThis.fetch = async (url, init) => { calls.push({ url, init }); return Response.json({ ok: true }); };
   try {
-    await api.request("/api/items", { accessToken: "mock" }, "workspace", "es", { method: "PATCH", body: "{}" });
-    assert.equal(calls.length, 1); assert.equal(calls[0].url, "https://okri.ai/api/items");
+    await api.request("/api/mobile/v1/items", { accessToken: "mock" }, "workspace", "es", { method: "PATCH", body: "{}" });
+    assert.equal(calls.length, 1); assert.equal(calls[0].url, "https://okri.ai/api/mobile/v1/items");
     assert.equal(calls[0].init.headers.get("authorization"), "Bearer mock");
     assert.equal(calls[0].init.headers.get("x-okri-workspace-id"), "workspace");
     assert.equal(calls[0].init.headers.get("accept-language"), "es");
     assert.equal(calls[0].init.credentials, "omit");
     await assert.rejects(api.request("https://elsewhere.test/api/", null, null, "en"));
     globalThis.fetch = async () => Response.json({ error: "Expired" }, { status: 401 });
-    await assert.rejects(api.request("/api/items", null, null, "en"), error => error.status === 401);
+    await assert.rejects(api.request("/api/mobile/v1/items", null, null, "en"), error => error.status === 401);
   } finally { globalThis.fetch = previous; }
 });

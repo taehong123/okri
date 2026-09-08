@@ -10,7 +10,7 @@ import type { Daily, DailyDraft, DailyWork } from "../types";
 
 export function DailyScreen() {
   const { session, workspace, api } = useApp(), date = today();
-  const query = useQuery({ queryKey: ["daily", session?.user.id, workspace, date], queryFn: ({ signal }) => api<Daily>("/api/daily-scrum?date=" + date, { signal }) });
+  const query = useQuery({ queryKey: ["daily", session?.user.id, workspace, date], queryFn: ({ signal }) => api<Daily>("/api/mobile/v1/daily-scrum?date=" + date, { signal }) });
   if (query.isPending) return <Loading />;
   if (!query.data) return <Screen><ErrorState retry={() => void query.refetch()} /></Screen>;
   return <DailyForm data={query.data} refresh={() => void query.refetch()} refreshing={query.isRefetching} key={(workspace || "") + date} />;
@@ -33,8 +33,8 @@ function DailyForm({ data, refresh, refreshing }: { data: Daily; refresh: () => 
   async function save(submit: boolean) {
     if (lock.current) return; lock.current = true; setBusy(true); setError(""); setSaved("");
     try {
-      await api("/api/daily-scrum", { method: "PUT", body: JSON.stringify({ ...draft, date: data.date, selectedTaskIds: draft.selectedWorkIds.filter(k => k.startsWith("task:")).map(k => k.slice(5)) }) });
-      if (submit) await api("/api/daily-scrum/submit", { method: "POST", body: JSON.stringify({ date: data.date, requestId: submitId.current }) });
+      await api("/api/mobile/v1/daily-scrum", { method: "PUT", body: JSON.stringify({ ...draft, date: data.date, selectedTaskIds: draft.selectedWorkIds.filter(k => k.startsWith("task:")).map(k => k.slice(5)) }) });
+      if (submit) await api("/api/mobile/v1/daily-scrum/submit", { method: "POST", body: JSON.stringify({ date: data.date, requestId: submitId.current }) });
       dirty.current = false; setSaved(t(submit ? "제출했습니다." : "저장했습니다."));
       await client.invalidateQueries();
     } catch { setError(t("연결을 확인하고 다시 시도해 주세요.") + " " + t("저장한 내용은 유지됩니다.")); }
@@ -43,7 +43,7 @@ function DailyForm({ data, refresh, refreshing }: { data: Daily; refresh: () => 
   async function addTask(kind: string, id: string) {
     if (!newTitle.trim() || lock.current) return; lock.current = true; setBusy(true); setError("");
     try {
-      const result = await api<{ task: { id: string } }>("/api/daily-scrum/tasks", { method: "POST", body: JSON.stringify({ title: newTitle.trim(), date: data.date, parentKind: kind, parentId: id, requestId: addId.current }) });
+      const result = await api<{ task: { id: string } }>("/api/mobile/v1/daily-scrum/tasks", { method: "POST", body: JSON.stringify({ title: newTitle.trim(), date: data.date, parentKind: kind, parentId: id, requestId: addId.current }) });
       patch({ selectedWorkIds: [...new Set([...draft.selectedWorkIds, "task:" + result.task.id])] });
       addId.current = randomValue(); setAdding(null); setNewTitle(""); setSaved(t("Task를 추가하고 오늘 할 일에 선택했습니다."));
       await client.invalidateQueries();

@@ -10,6 +10,7 @@ import { Button, ErrorState, Row, Screen, Txt } from "../ui";
 import { Select } from "./editor";
 import type { Routes } from "../types";
 import { ApiError } from "../api";
+import { ReleaseStatus } from "../release-status";
 
 export function MoreScreen() {
   const { t } = useApp(), nav = useNavigation<NativeStackNavigationProp<Routes>>();
@@ -47,6 +48,6 @@ export function SettingsScreen() {
     {!!error && <ErrorState message={error} />}
     <Button secondary icon={LogOut} label={t("로그아웃")} busy={busy} onPress={() => Alert.alert(t("로그아웃"), "", [{ text: t("취소"), style: "cancel" }, { text: t("로그아웃"), onPress: () => void run(signOut) }])} />
     <Button secondary label={t("계정 삭제")} disabled={busy} onPress={() => Alert.alert(t("계정을 삭제할까요?"), t("개인 워크스페이스와 계정을 영구 삭제합니다. 공유 워크스페이스의 자료는 팀에 남습니다."), [{ text: t("취소"), style: "cancel" }, { text: t("영구 삭제"), style: "destructive", onPress: () => void deleteAccount() }])} />
-    <Txt role="meta" muted>OKRI 1.0.0</Txt>
+    <ReleaseStatus />
   </Screen>;
 }

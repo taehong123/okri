@@ -1,11 +1,26 @@
 import type { ExpoConfig } from "expo/config";
+import { existsSync } from "node:fs";
+import updatePolicy from "./release/update-policy.json";
 
 const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+const certificate = "./release/update-certificate.pem";
 const config: ExpoConfig = {
   name: "OKRI",
   slug: "okri",
   owner: process.env.EXPO_OWNER,
   version: "1.0.0",
+  runtimeVersion: { policy: "fingerprint" },
+  updates: {
+    enabled: Boolean(projectId) && updatePolicy.ota === "signed",
+    ...(projectId ? { url: "https://u.expo.dev/" + projectId } : {}),
+    checkAutomatically: "ON_LOAD",
+    fallbackToCacheTimeout: 0,
+    useEmbeddedUpdate: true,
+    ...(existsSync(certificate) ? {
+      codeSigningCertificate: certificate,
+      codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
+    } : {}),
+  },
   scheme: "okri",
   orientation: "default",
   icon: "./assets/icon.png",

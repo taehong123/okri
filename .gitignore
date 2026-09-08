@@ -21,6 +21,7 @@
 # misc
 .DS_Store
 *.pem
+!/mobile/release/update-certificate.pem
 
 # debug
 npm-debug.log*

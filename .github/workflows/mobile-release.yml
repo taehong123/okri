@@ -1,0 +1,66 @@
+name: OKRI mobile release
+on:
+  workflow_dispatch:
+    inputs:
+      platform:
+        type: choice
+        required: true
+        options: [android, ios]
+      action:
+        type: choice
+        required: true
+        options: [build, submit, update]
+permissions:
+  contents: read
+concurrency:
+  group: okri-mobile-production
+  cancel-in-progress: false
+jobs:
+  release:
+    # Configure required reviewers and main-only deployment in GitHub Settings.
+    if: github.ref == 'refs/heads/main'
+    environment: mobile-production
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
+      EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.20.0"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - name: Require linked release account
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: test -n "$EXPO_TOKEN" && test -n "$EXPO_OWNER" && test -n "$EXPO_PUBLIC_EAS_PROJECT_ID"
+      - run: npm ci
+      - run: npm ci --prefix mobile
+      - run: npm run test:mobile-contract
+      - run: npm run typecheck --prefix mobile
+      - run: npm test --prefix mobile
+      - name: Materialize OTA key only for approved OTA promotion
+        if: inputs.action == 'update'
+        env:
+          UPDATE_KEY: ${{ secrets.OKRI_UPDATE_PRIVATE_KEY }}
+        run: |
+          test -n "$UPDATE_KEY"
+          umask 077
+          printf '%s' "$UPDATE_KEY" > "$RUNNER_TEMP/okri-update-private.pem"
+          echo "OKRI_UPDATE_PRIVATE_KEY_PATH=$RUNNER_TEMP/okri-update-private.pem" >> "$GITHUB_ENV"
+      - name: Promote exact reviewed artifact
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RELEASE_ACTION: ${{ inputs.action }}
+          RELEASE_PLATFORM: ${{ inputs.platform }}
+        run: npm run "$RELEASE_ACTION:$RELEASE_PLATFORM" --prefix mobile
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f -- "$RUNNER_TEMP/okri-update-private.pem"

@@ -18,7 +18,7 @@ export function ItemScreen({ route, navigation }: NativeStackScreenProps<Routes,
   return <Screen refresh={() => void query.refetch()} refreshing={query.isRefetching}>
     <Badge>{t(item.kind === "key_result" ? "Key Result" : item.kind === "objective" ? "Objective" : item.kind === "initiative" ? "Initiative" : item.kind === "project" ? "Project" : "Task")}</Badge>
     <Txt role="title">{item.title}</Txt>
-    {writable && <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}><Button secondary icon={Pencil} label={t("수정")} onPress={() => navigation.navigate("Editor", { id: item.id })} />{item.kind === "task" && <Button icon={complete(item.status) ? RotateCcw : Check} busy={write.isPending} label={t(complete(item.status) ? "완료 취소" : "완료")} onPress={() => write.mutate({ path: "/api/items", body: { id: item.id, status: complete(item.status) ? "todo" : "done" } })} />}</View>}
+    {writable && <View style={{ flexDirection: "row", gap: 8, flexWrap: "wrap" }}><Button secondary icon={Pencil} label={t("수정")} onPress={() => navigation.navigate("Editor", { id: item.id })} />{item.kind === "task" && <Button icon={complete(item.status) ? RotateCcw : Check} busy={write.isPending} label={t(complete(item.status) ? "완료 취소" : "완료")} onPress={() => write.mutate({ path: "/api/mobile/v1/items", body: { id: item.id, status: complete(item.status) ? "todo" : "done" } })} />}</View>}
     <View><Row><Txt muted role="label">{t("상태")}</Txt><Badge danger={overdue(item)}>{t(overdue(item) ? "기한 초과" : statusText[item.status])}</Badge></Row>
       <Row><Txt muted role="label">{t("기한")}</Txt><Txt>{item.dueDate || t("기한 없음")}</Txt></Row>
       <Row><Txt muted role="label">{t(item.kind === "project" ? "책임자" : "담당자")}</Txt><Txt>{item.assignments.filter(a => a.role !== "project_worker").map(a => a.displayName).join(", ") || t("미지정")}</Txt></Row>
@@ -40,7 +40,7 @@ export function RoutineScreen({ route, navigation }: NativeStackScreenProps<Rout
   const tasks = activeItems(data).filter(i => i.kind === "task" && i.routineId === routine.id);
   return <Screen refresh={() => void query.refetch()} refreshing={query.isRefetching}>
     <Badge>{t("Routine")}</Badge><Txt role="title">{routine.title}</Txt><Txt>{routine.description}</Txt>
-    {writable && <Button icon={routine.completed ? RotateCcw : Check} busy={write.isPending} label={t(routine.completed ? "완료 취소" : "오늘 완료")} onPress={() => write.mutate({ path: "/api/routine-completions", method: "PUT", body: { routineId: routine.id, date: today(), completed: !routine.completed } })} />}
+    {writable && <Button icon={routine.completed ? RotateCcw : Check} busy={write.isPending} label={t(routine.completed ? "완료 취소" : "오늘 완료")} onPress={() => write.mutate({ path: "/api/mobile/v1/routine-completions", method: "PUT", body: { routineId: routine.id, date: today(), completed: !routine.completed } })} />}
     <View>{tasks.map(task => <TaskRow key={task.id} item={task} writable={writable} />)}</View>
     {writable && <Button secondary icon={Plus} label={t("Task 추가")} onPress={() => navigation.navigate("Editor", { kind: "task", routineId: routine.id })} />}
   </Screen>;

@@ -12,6 +12,7 @@
     "@tanstack/react-query": "^5.102.8",
     "expo": "~57.0.20",
     "expo-apple-authentication": "~57.0.1",
+    "expo-application": "~57.0.2",
     "expo-asset": "~57.0.16",
     "expo-constants": "~57.0.17",
     "expo-crypto": "~57.0.2",
@@ -24,6 +25,7 @@
     "expo-splash-screen": "~57.0.8",
     "expo-status-bar": "~57.0.1",
     "expo-system-ui": "~57.0.3",
+    "expo-updates": "~57.0.21",
     "expo-web-browser": "~57.0.2",
     "lucide-react-native": "^1.42.0",
     "react": "19.2.3",
@@ -49,11 +51,13 @@
     "test": "node --test tests/*.test.mjs",
     "preview:export": "node scripts/export-preview.mjs",
     "preview:serve": "node scripts/serve-preview.mjs",
-    "build:android": "npx --yes eas-cli@23.2.0 build --platform android --profile production",
-    "build:ios": "npx --yes eas-cli@23.2.0 build --platform ios --profile production",
+    "build:android": "node scripts/release.mjs android build",
+    "build:ios": "node scripts/release.mjs ios build",
     "preflight": "node scripts/release-preflight.mjs",
-    "submit:android": "node scripts/release-preflight.mjs --submit && npx --yes eas-cli@23.2.0 submit --platform android --profile production",
-    "submit:ios": "node scripts/release-preflight.mjs --submit && npx --yes eas-cli@23.2.0 submit --platform ios --profile production"
+    "submit:android": "node scripts/release.mjs android submit",
+    "submit:ios": "node scripts/release.mjs ios submit",
+    "update:android": "node scripts/release.mjs android ota",
+    "update:ios": "node scripts/release.mjs ios ota"
   },
   "private": true
 }

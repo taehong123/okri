@@ -38,6 +38,12 @@ for single-worker browser checks. Install the root Playwright Chromium browser f
 
 ## Release sequence
 
+The authoritative compatibility, cadence, rollback and evidence contract is
+[MOBILE_RELEASE_POLICY.md](../docs/MOBILE_RELEASE_POLICY.md). The weekly workflow
+creates candidates, not automatic public releases. Store releases target a
+14-day cadence after device verification. OTA is disabled by default; signed OTA
+requires an explicit account/plan/key setup and a new binary.
+
 1. Authenticate Expo/EAS and select the actual Apple/Google developer organizations.
 2. Confirm `ai.okri.app` in both stores. Link the real EAS project using `eas init`.
    Supply `EXPO_OWNER` and `EXPO_PUBLIC_EAS_PROJECT_ID` to the build environment.
@@ -55,28 +61,16 @@ for single-worker browser checks. Install the root Playwright Chromium browser f
    Account deletion tests must use a designated non-production account/database.
 7. Review dependency advisories, privacy/data-safety declarations and legal copy.
    Record real device checks in `release/device-verification.json` using the schema
-   below. Do not mark browser-preview checks as device checks.
+   in scripts/release-lib.mjs. Do not mark browser-preview checks as device checks.
 8. Build signed production AAB/IPA, then submit to Play internal testing/TestFlight.
    A first Play upload may require Console upload before automated submissions.
    Complete store metadata, reviewer access, age rating and export declarations.
 9. Verify accepted processing, testing eligibility and store review status before
    claiming publication. An EAS upload is not a public store release.
 
-```json
-{
-  "iosBuildId": "actual EAS build ID",
-  "androidBuildId": "actual EAS build ID",
-  "googleLogin": true,
-  "appleLogin": true,
-  "dailySubmission": true,
-  "workspaceIsolation": true,
-  "accountDeletion": true,
-  "systemText200Percent": true,
-  "screenReader": true,
-  "privacyDeclarationsReviewed": true,
-  "dependencyAdvisoriesReviewed": true
-}
-```
+Use `build:android` / `build:ios`, then verify the exact signed artifact.
+`submit:android` / `submit:ios` only promote the tested build ID after matching
+source digest, fresh per-platform physical-device checks and reachable native API.
 
 No payment purchase UI, advertising, analytics SDK or new push delivery is included
 in this first native companion. Existing server-side bot behavior is reused when
@@ -111,6 +105,8 @@ upstream patches before the release candidate and record the outcome.
 - The verification APK uses the Android debug keystore and is not a Play Store
   upload artifact. It must be rebuilt with an EAS production signing key before
   internal testing or public release.
+- That APK predates the API v1/release-policy changes. Its launch check is not
+  evidence for the current candidate.
 - Native auth/model/API/localization unit tests pass; existing daily, language,
   migration and workspace regression suites were checked.
 - Mocked browser flow and five-language/six-theme layout checks pass.

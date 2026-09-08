@@ -59,7 +59,7 @@ function EditorForm({ route, navigation, data }: NativeStackScreenProps<Routes, 
           ...(parentKind[kind] ? { parentId: itemParentId, routineId, cycleId: routineId ? null : data.items.find(i => i.id === itemParentId)?.cycleId ?? null } : {}),
           ...(kind === "project" ? { driMemberId: member || null } : kind === "task" ? { assigneeMemberId: member || null } : {}),
         };
-      const result = await api<{ item?: Item; code?: string }>(kind === "routine" ? "/api/routines" : "/api/items", { method: original ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      const result = await api<{ item?: Item; code?: string }>(kind === "routine" ? "/api/mobile/v1/routines" : "/api/mobile/v1/items", { method: original ? "PATCH" : "POST", body: JSON.stringify(payload) });
       if (result.code) throw new Error("Confirmation required");
       await client.invalidateQueries(); setSaved(true);
     } catch { setError(t("연결을 확인하고 다시 시도해 주세요.") + " " + t("저장한 내용은 유지됩니다.")); }

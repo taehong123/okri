@@ -21,3 +21,4 @@ credentials.json
 *.mobileprovision
 *.key
 *.pem
+!/release/update-certificate.pem

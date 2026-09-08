@@ -1,0 +1,54 @@
+name: OKRI mobile compatibility
+on:
+  pull_request:
+  push:
+    branches: [main, codex/native-mobile]
+  workflow_dispatch:
+  schedule:
+    # Tuesday 10:00 Asia/Seoul. Candidates are not automatic public releases.
+    - cron: "0 1 * * 2"
+permissions:
+  contents: read
+concurrency:
+  group: mobile-compatibility-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  compatibility:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.20.0"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - run: npm ci
+      - run: npm ci --prefix mobile
+      - run: npm run test:mobile-contract
+      - run: npm test --prefix mobile
+      - run: npm run typecheck --prefix mobile
+      - run: npx tsc --noEmit
+      - run: npm run build
+      - run: npm run preview:export --prefix mobile
+      - run: npx playwright install --with-deps chromium
+      - run: npx playwright test --config mobile/playwright.config.mjs --workers=1
+      - name: Export both native bundles
+        working-directory: mobile
+        run: |
+          npx expo export --platform ios --output-dir dist/ios --max-workers 1
+          npx expo export --platform android --output-dir dist/android --max-workers 1
+      - name: Record immutable candidate
+        run: node mobile/scripts/candidate.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mobile-candidate-${{ github.sha }}
+          path: |
+            mobile/artifacts/candidate.json
+            mobile/dist
+          retention-days: 30

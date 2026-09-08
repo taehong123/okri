@@ -24,7 +24,7 @@ export function TaskRow({ item, writable, data }: { item: Item; writable: boolea
   const parent = data?.items.find(i => i.id === item.parentId)?.title || data?.routines.find(r => r.id === item.routineId)?.title;
   return <View style={{ flexDirection: "row", alignItems: "flex-start", borderBottomWidth: 0.5, borderBottomColor: theme.tokens["border-default"] }}>
     <Pressable accessibilityRole="checkbox" aria-checked={done} aria-disabled={!writable || write.isPending} accessibilityState={{ checked: done, disabled: !writable || write.isPending }} accessibilityLabel={item.title + ": " + t(done ? "완료 취소" : "완료")} disabled={!writable || write.isPending}
-      onPress={() => write.mutate({ path: "/api/items", body: { id: item.id, status: done ? "todo" : "done" } })}
+      onPress={() => write.mutate({ path: "/api/mobile/v1/items", body: { id: item.id, status: done ? "todo" : "done" } })}
       style={({ pressed }) => ({ minWidth: 48, minHeight: 56, alignItems: "center", justifyContent: "center", backgroundColor: pressed ? theme.tokens["bg-hover"] : "transparent" })}>
       {done ? <CircleCheck size={22} color={theme.tokens["success-fg"]} /> : <Circle size={22} color={theme.tokens["border-control"]} />}
     </Pressable>

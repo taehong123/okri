@@ -36,6 +36,7 @@ yarn-error.*
 # macOS
 .DS_Store
 *.pem
+!/release/update-certificate.pem
 
 # local env files
 .env*.local

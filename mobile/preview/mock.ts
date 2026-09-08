@@ -39,26 +39,26 @@ export function installPreview() {
     if (method !== "GET") controls.writes.push({ path: url.pathname, method, body });
     if (controls.delay) await new Promise(resolve => setTimeout(resolve, controls.delay));
     if (controls.failure) { const status = controls.failure; controls.failure = 0; return Response.json({ error: "Mock failure" }, { status }); }
-    if (method === "GET" && url.pathname === "/api/bootstrap") return Response.json(bootstrap);
-    if (url.pathname === "/api/daily-scrum") {
+    if (method === "GET" && url.pathname === "/api/mobile/v1/bootstrap") return Response.json(bootstrap);
+    if (url.pathname === "/api/mobile/v1/daily-scrum") {
       if (method === "PUT") draft = body;
       return Response.json(dashboard());
     }
-    if (url.pathname === "/api/daily-scrum/submit") { submitted = { id: body.requestId, submittedAt: new Date().toISOString() }; return Response.json({ submitted: true }); }
-    if (url.pathname === "/api/daily-scrum/tasks") {
+    if (url.pathname === "/api/mobile/v1/daily-scrum/submit") { submitted = { id: body.requestId, submittedAt: new Date().toISOString() }; return Response.json({ submitted: true }); }
+    if (url.pathname === "/api/mobile/v1/daily-scrum/tasks") {
       const existing = bootstrap.items.find(i => i.id === body.requestId);
       const task = existing || { ...item(body.requestId, "task", body.title, body.parentKind === "project" ? body.parentId : null), routineId: body.parentKind === "routine" ? body.parentId : null };
       if (!existing) bootstrap.items.push(task);
       return Response.json({ task });
     }
-    if (url.pathname === "/api/items") {
+    if (url.pathname === "/api/mobile/v1/items") {
       if (method === "PATCH") { const existing = bootstrap.items.find(i => i.id === body.id); if (existing) Object.assign(existing, body); return Response.json({ item: existing }); }
       const created = { ...item("new-" + bootstrap.items.length, body.kind, body.title, body.parentId), ...body };
       bootstrap.items.push(created); return Response.json({ item: created });
     }
-    if (url.pathname === "/api/routine-completions") { const routine = bootstrap.routines.find(r => r.id === body.routineId); if (routine) routine.completed = body.completed; return Response.json({ routine }); }
+    if (url.pathname === "/api/mobile/v1/routine-completions") { const routine = bootstrap.routines.find(r => r.id === body.routineId); if (routine) routine.completed = body.completed; return Response.json({ routine }); }
     if (url.pathname === "/api/native/apple") return Response.json({ enabled: false });
-    if (url.pathname === "/api/workspaces" || url.pathname === "/api/native/session") return Response.json({ ok: true });
+    if (url.pathname === "/api/mobile/v1/workspaces" || url.pathname === "/api/native/session") return Response.json({ ok: true });
     return Response.json({ error: "Unmocked preview request" }, { status: 501 });
   };
 }

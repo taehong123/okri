@@ -8,7 +8,8 @@
   "scripts": {
     "predev": "node scripts/prepare-pwa.mjs",
     "dev": "vinext dev",
-    "prebuild": "node scripts/prepare-pwa.mjs",
+    "prebuild": "npm run test:mobile-contract && node scripts/prepare-pwa.mjs",
+    "test:mobile-contract": "node --test --test-concurrency=1 tests/mobile-contract.test.mjs tests/mobile-release.test.mjs tests/mobile-migrations.test.mjs tests/native-session.test.mjs",
     "build": "vinext build && node scripts/publish-prerender.mjs",
     "start": "vinext start",
     "pretest": "node --test --test-concurrency=1 tests/billing-paypal.test.mjs tests/workspace-search.test.mjs tests/guide.test.mjs tests/slack-management.test.mjs",
