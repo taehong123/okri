@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import { getSlackConnection } from "@/lib/pace-data";
 import { canAutoJoinSlackChannel, listSlackChannels, slackApi, slackTokenForConnection, type SlackDailyChannel } from "@/lib/slack-daily";
-import { deliverSlackBotMessage } from "@/lib/slack-bot-delivery";
-import { managementReportBlocks, slackText, type ManagementAssignee } from "./slack-management-report";
+import { deliverSlackBotMessages } from "@/lib/slack-bot-delivery";
+import { managementReportMessages, slackText, type ManagementAssignee } from "./slack-management-report";
 
 export const managementBotSignalIds = [
   "missing_due_date",
@@ -115,13 +115,14 @@ export async function testWorkspaceManagementBot(ownerId: string) {
   const settings = await readSettings(ownerId);
   if (!settings.channelId) throw new Error("테스트 리포트를 받을 Slack 채널을 선택해 주세요.");
   await prepareSlackChannel(ownerId, settings.channelId);
-  const snapshot = await collectWorkspaceManagementSnapshot(ownerId, undefined, settings.timezone, settings.signals);
+  const snapshot = await collectWorkspaceManagementSnapshot(ownerId, undefined, settings.timezone, settings.signals, { itemLimitPerSignal: null });
   const delivery = await sendReport(ownerId, settings, snapshot, true);
   if (delivery.status !== "sent") throw new Error(delivery.last_error || "테스트 리포트 전송 결과를 확인하지 못했습니다.");
   return { sent: true, snapshot };
 }
 
-export async function collectWorkspaceManagementSnapshot(ownerId: string, requestedDate?: string, timezone = "Asia/Seoul", signals: ManagementBotSignal[] = defaultSignals) {
+export async function collectWorkspaceManagementSnapshot(ownerId: string, requestedDate?: string, timezone = "Asia/Seoul", signals: ManagementBotSignal[] = defaultSignals,
+  options: { itemLimitPerSignal?: number | null } = {}) {
   const date = requestedDate ? normalizeDate(requestedDate) : todayInTimezone(timezone);
   const previousDate = addDays(date, -1);
   const db = (env as RuntimeEnv).DB;
@@ -164,7 +165,8 @@ export async function collectWorkspaceManagementSnapshot(ownerId: string, reques
   return {
     date,
     groups: signals.map((signal) => {
-      const items = bySignal[signal].slice(0, 20);
+      const limit = options.itemLimitPerSignal === undefined ? 20 : options.itemLimitPerSignal;
+      const items = limit === null ? bySignal[signal] : bySignal[signal].slice(0, Math.max(0, limit));
       return { signal, count: bySignal[signal].length, items, projects: groupManagementItems(items) };
     }),
     totalCount: signals.reduce((total, signal) => total + bySignal[signal].length, 0),
@@ -189,7 +191,7 @@ export async function runDueWorkspaceManagementBots(db: D1Database, now = new Da
       const date = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}`;
       const currentTime = `${pad(parts.hour)}:${pad(parts.minute)}`;
       if (!settings.weekdays.includes(localWeekday(date)) || currentTime < settings.reportTime || settings.lastSentDate === date) continue;
-      const snapshot = await collectWorkspaceManagementSnapshot(String(row.owner_id), date, settings.timezone, settings.signals);
+      const snapshot = await collectWorkspaceManagementSnapshot(String(row.owner_id), date, settings.timezone, settings.signals, { itemLimitPerSignal: null });
       const delivery = await sendReport(String(row.owner_id), settings, snapshot, false, now);
       if (delivery.status === "sent") sent += 1;
       else if (!["pending", "preparing", "sending", "retry"].includes(delivery.status)) failed += 1;
@@ -235,16 +237,17 @@ async function prepareSlackChannel(ownerId: string, channelId: string): Promise<
 }
 
 async function sendReport(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, now = new Date()) {
-  const payload = await managementPayload(ownerId, settings, snapshot, test, true);
-  return deliverSlackBotMessage((env as RuntimeEnv).DB, {
+  const payloads = await managementPayloads(ownerId, settings, snapshot, test, true);
+  const deliveries = await deliverSlackBotMessages((env as RuntimeEnv).DB, {
     ownerId, botKind: "management", subjectId: snapshot.date,
     eventKey: test ? `test:${crypto.randomUUID()}` : snapshot.date,
     expiresAt: new Date(zonedDayRange(snapshot.date, settings.timezone)[1]).toISOString(),
-    payload,
+    payloads,
   }, now);
+  return deliveries.find((delivery) => delivery.status !== "sent") ?? deliveries[0];
 }
 
-async function managementPayload(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, mentions: boolean) {
+async function managementPayloads(ownerId: string, settings: ManagementBotSettings, snapshot: Awaited<ReturnType<typeof collectWorkspaceManagementSnapshot>>, test: boolean, mentions: boolean) {
   const t = await serverTranslator(await workspaceMessageLanguage((env as RuntimeEnv).DB, ownerId));
   const workspace = await (env as RuntimeEnv).DB.prepare("SELECT name FROM workspaces WHERE id = ? LIMIT 1").bind(ownerId).first<{ name: string }>();
   const rows = await (env as RuntimeEnv).DB.prepare(`SELECT a.item_id, m.display_name, l.slack_user_id
@@ -258,21 +261,25 @@ async function managementPayload(ownerId: string, settings: ManagementBotSetting
   const assignees: Record<string, ManagementAssignee[]> = {};
   for (const row of rows.results) (assignees[row.item_id] ??= []).push({ name: row.display_name, slackId: row.slack_user_id });
   const appUrl = String((env as RuntimeEnv).OKRI_APP_URL || (env as RuntimeEnv).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "");
-  return { channel: settings.channelId, test,
-    text: `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: slackText((workspace?.name || "OKRI").slice(0, 300)), date: snapshot.date })}`,
-    blocks: managementReportBlocks({ ...snapshot, appUrl, workspace: workspace?.name || "OKRI", test, assignees, mentions }, t),
-  };
+  const baseText = `[${t("관리 봇")}] ${t("{workspace} 워크스페이스 관리 리포트 · {date}", { workspace: slackText((workspace?.name || "OKRI").slice(0, 300)), date: snapshot.date })}`;
+  const messages = managementReportMessages({ ...snapshot, appUrl, workspace: workspace?.name || "OKRI", test, assignees, mentions }, t);
+  return messages.map((message, index) => ({ channel: settings.channelId, test,
+    text: `${baseText}${messages.length > 1 ? ` (${index + 1}/${messages.length})` : ""}`,
+    blocks: message.blocks,
+  }));
 }
 
 export async function refreshManagementReport(ownerId: string, channel: string, ts: string) {
   // Only modify our own recorded management message, never an arbitrary thread.
-  const receipt = await (env as RuntimeEnv).DB.prepare(`SELECT subject_id FROM slack_bot_deliveries
+  const receipt = await (env as RuntimeEnv).DB.prepare(`SELECT subject_id, payload FROM slack_bot_deliveries
     WHERE owner_id=? AND bot_kind='management' AND status='sent' AND message_ts=? AND json_extract(payload,'$.channel')=? LIMIT 1`)
-    .bind(ownerId, ts, channel).first<{ subject_id: string }>();
+    .bind(ownerId, ts, channel).first<{ subject_id: string; payload: string }>();
   const settings = await readSettings(ownerId), connection = await getSlackConnection(ownerId);
   if (!receipt || !connection || settings.channelId !== channel) return;
-  const snapshot = await collectWorkspaceManagementSnapshot(ownerId, receipt.subject_id, settings.timezone, settings.signals);
-  const payload = await managementPayload(ownerId, settings, snapshot, false, false);
+  const snapshot = await collectWorkspaceManagementSnapshot(ownerId, receipt.subject_id, settings.timezone, settings.signals, { itemLimitPerSignal: null });
+  const payloads = await managementPayloads(ownerId, settings, snapshot, false, false);
+  const pageIndex = Number((JSON.parse(receipt.payload) as { pageIndex?: number }).pageIndex ?? 0);
+  const payload = payloads[pageIndex] ?? payloads[payloads.length - 1];
   await slackApi(await slackTokenForConnection(connection), "chat.update", { channel, ts, text: payload.text, blocks: payload.blocks });
 }
 
