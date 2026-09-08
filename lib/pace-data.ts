@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
 import { newAccountLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
 import { serverTranslator } from "./server-language";
-import { parseRoutineProperties, prepareRoutineProperties } from "./routine-properties";
+import {
+  defaultRoutineClassificationMigrationId,
+  ensureDefaultRoutineClassification,
+  parseRoutineProperties,
+  prepareRoutineProperties,
+} from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -1152,6 +1157,7 @@ export async function ensureWorkspace(ownerId: string) {
       await migrateLegacyHierarchy(ownerId);
       await removeLegacySeedWorkspaceData(ownerId);
       await seedProjectExecutionProperties(ownerId);
+      await ensureDefaultRoutineClassification((env as RuntimeEnv).DB, ownerId);
       await migrateLegacyItemAssignments(ownerId);
       await ensureActiveOkrCycle(ownerId);
       const general = await ensureGeneralRoutine(ownerId);
@@ -1253,6 +1259,8 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
         WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ITEM_TITLES)})) AS seed_item_exists,
       EXISTS(SELECT 1 FROM routines
         WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ROUTINE_TITLES)})) AS seed_routine_exists,
+      EXISTS(SELECT 1 FROM app_migrations
+        WHERE id = ?) AS routine_classification_current,
       EXISTS(SELECT 1
       FROM items AS current_item
       WHERE current_item.owner_id = ? AND (
@@ -1273,18 +1281,21 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
     ...LEGACY_SEED_ITEM_TITLES,
     ownerId,
     ...LEGACY_SEED_ROUTINE_TITLES,
+    defaultRoutineClassificationMigrationId(ownerId),
     ownerId,
   ).first<{
     property_count: number;
     general_exists: number;
     seed_item_exists: number;
     seed_routine_exists: number;
+    routine_classification_current: number;
     legacy_hierarchy_exists: number;
   }>();
   return Number(row?.property_count ?? 0) === executionPropertyNames.length
     && Boolean(row?.general_exists)
     && !row?.seed_item_exists
     && !row?.seed_routine_exists
+    && Boolean(row?.routine_classification_current)
     && !row?.legacy_hierarchy_exists;
 }
 
