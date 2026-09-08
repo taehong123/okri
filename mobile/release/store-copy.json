@@ -1,0 +1,15 @@
+{
+  "name": "OKRI",
+  "category": "PRODUCTIVITY",
+  "supportEmail": "taehong0613@gmail.com",
+  "supportUrl": "https://okri.ai/guide",
+  "privacyUrl": "https://okri.ai/privacy",
+  "termsUrl": "https://okri.ai/terms",
+  "localizations": {
+    "ko-KR": { "subtitle": "목표부터 오늘 할 일까지", "description": "팀의 목표와 오늘의 업무를 한곳에서 확인하세요. OKR, Project, Task의 연결을 살펴보고, 담당 업무와 기한을 관리할 수 있습니다. Routine과 Project를 구분해 데일리를 작성하고, 내용을 확인한 뒤 팀에 제출하세요. 기존 OKRI 워크스페이스와 함께 사용합니다." },
+    "en-US": { "subtitle": "From goals to today's work", "description": "Keep your team's goals and daily work together. Explore the connection between OKRs, projects and tasks. Manage assignments and due dates, review your routines, and prepare a daily update before sharing it with your team. Works with your existing OKRI workspace." },
+    "ja": { "subtitle": "目標から今日の業務まで", "description": "チームの目標と毎日の業務をひとつに。OKR、プロジェクト、タスクのつながりを確認し、担当業務や期限を管理できます。ルーティンとプロジェクトを分けてデイリーをまとめ、内容を確認してからチームに共有します。既存のOKRIワークスペースと連携します。" },
+    "zh-Hans": { "subtitle": "从目标到今天的工作", "description": "将团队目标和日常工作集中管理。查看OKR、项目与任务之间的联系，管理负责人和截止日期。分别查看例行工作与项目，整理日报并确认后与团队分享。与现有OKRI工作区配合使用。" },
+    "es-ES": { "subtitle": "De objetivos a tareas diarias", "description": "Reúne los objetivos de tu equipo y el trabajo diario. Explora la relación entre OKR, proyectos y tareas. Gestiona responsables y fechas límite, revisa tus rutinas y prepara una actualización diaria antes de compartirla con tu equipo. Funciona con tu espacio de trabajo de OKRI." }
+  }
+}

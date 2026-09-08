@@ -1,0 +1,16 @@
+import { copyFile, mkdir, readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import sharp from "sharp";
+import ts from "typescript";
+const source = await readFile(new URL("../../lib/brand-artwork.ts", import.meta.url), "utf8");
+const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
+const { brandSvg, BRAND_INK, BRAND_SYMBOL_PATH } = await import("data:text/javascript;base64," + Buffer.from(compiled).toString("base64"));
+const assets = new URL("../assets/", import.meta.url);
+await mkdir(assets, { recursive: true });
+await sharp(Buffer.from(brandSvg({ maskable: true }))).resize(1024, 1024).flatten({ background: BRAND_INK }).png().toFile(fileURLToPath(new URL("icon.png", assets)));
+const symbol = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path transform="translate(38.4 38.4) scale(.7)" d="' + BRAND_SYMBOL_PATH + '" fill="' + BRAND_INK + '"/></svg>';
+await sharp(Buffer.from(symbol)).resize(1024, 1024).png().toFile(fileURLToPath(new URL("adaptive-icon.png", assets)));
+await copyFile(new URL("../node_modules/pretendard/dist/public/variable/PretendardVariable.ttf", import.meta.url), new URL("PretendardVariable.ttf", assets));
+await copyFile(new URL("../node_modules/pretendard/dist/LICENSE.txt", import.meta.url), new URL("PRETENDARD-LICENSE.txt", assets));
+await copyFile(new URL("../../public/RADIX-COLORS-LICENSE.txt", import.meta.url), new URL("RADIX-COLORS-LICENSE.txt", assets));
+console.log("Prepared native icons and licensed Pretendard font.");

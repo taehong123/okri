@@ -337,6 +337,13 @@
       "when": 1788751800000,
       "tag": "0053_slack_daily_checklist_repair",
       "breakpoints": true
+    },
+    {
+      "idx": 48,
+      "version": "6",
+      "when": 1788787000000,
+      "tag": "0054_native_sessions",
+      "breakpoints": true
     }
   ]
 }

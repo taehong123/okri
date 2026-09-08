@@ -114,6 +114,42 @@ export const users = sqliteTable(
   (table) => [uniqueIndex("idx_users_email_normalized").on(table.emailNormalized)],
 );
 
+export const nativeAuthCodes = sqliteTable("native_auth_codes", {
+  codeHash: text("code_hash").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  challenge: text("challenge").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+}, table => [index("native_auth_codes_expiry").on(table.expiresAt)]);
+
+export const nativeSessions = sqliteTable("native_sessions", {
+  tokenHash: text("token_hash").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  revokedAt: text("revoked_at"),
+}, table => [index("native_sessions_user").on(table.userId)]);
+
+export const nativeAppleNonces = sqliteTable("native_apple_nonces", {
+  nonceHash: text("nonce_hash").primaryKey().notNull(),
+  expiresAt: text("expires_at").notNull(),
+  usedAt: text("used_at"),
+});
+export const nativeAppleGrants = sqliteTable("native_apple_grants", {
+  userId: text("user_id").primaryKey().notNull().references(() => users.id, { onDelete: "cascade" }),
+  subject: text("subject").notNull(),
+  encryptedToken: text("encrypted_token").notNull(),
+});
+export const nativeIdentityRevocations = sqliteTable("native_identity_revocations", {
+  identityHash: text("identity_hash").primaryKey().notNull(),
+  deletedAt: integer("deleted_at").notNull(),
+});
+
+export const nativeAccountDeletionGuards = sqliteTable("native_account_deletion_guards", {
+  id: text("id").primaryKey().notNull(),
+  valid: integer("valid").notNull(),
+}, table => [check("native_account_deletion_safe", sql`${table.valid} = 1`)]);
+
 export const authIdentities = sqliteTable(
   "auth_identities",
   {

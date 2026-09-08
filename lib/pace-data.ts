@@ -2447,6 +2447,22 @@ export async function authorizeRequest(
     ?? (env as RuntimeEnv).OKITA_API_TOKEN
     ?? (env as RuntimeEnv).PACE_API_TOKEN;
   const suppliedToken = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (suppliedToken?.startsWith("okri_native_")) {
+    const { readNativeIdentity } = await import("@/lib/native-session");
+    const identity = await readNativeIdentity(env.DB, suppliedToken);
+    if (!identity) return Response.json({ error: "Sign in again", code: "native_session_expired" }, { status: 401 });
+    const requested = requestedWorkspaceId(request);
+    const membership = await resolveWorkspaceMembership(identity.id, identity.email, identity.displayName, requested);
+    if (!membership || membership.status !== "active" || (requested && membership.workspaceId !== requested)) {
+      return Response.json({ error: "Workspace access denied" }, { status: 403 });
+    }
+    const role = membership.role as TeamRole;
+    if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
+      if (role === "viewer") return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
+      if (!(await memberCanWrite(membership.workspaceId, identity.id, role))) return Response.json({ error: "Read-only access", code: "editor_read_only" }, { status: 403 });
+    }
+    return { ownerId: membership.workspaceId, userId: identity.id, email: identity.email, displayName: membership.displayName, role, apiToken: false };
+  }
   if (suppliedToken && (suppliedToken.startsWith("okri_") || suppliedToken.startsWith("okrptr_"))) {
     const [tokenRow] = await getDb()
       .select({ token: integrationTokens })
@@ -2511,7 +2527,7 @@ export async function authorizeRequest(
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
   if (googleSession) {
     try {
-      const canonicalUserId = await canonicalUserIdForGoogle(googleSession.sub, googleSession.email, googleSession.name, request);
+      const canonicalUserId = await canonicalUserIdForVerifiedIdentity(googleSession.sub, googleSession.email, googleSession.name, request, "google", googleSession.expiresAt - 7 * 24 * 60 * 60);
       const membership = await resolveWorkspaceMembership(canonicalUserId, googleSession.email, googleSession.name, requestedWorkspaceId(request));
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
@@ -2526,6 +2542,7 @@ export async function authorizeRequest(
       return { ownerId: membership.workspaceId, userId: canonicalUserId, email: googleSession.email, displayName: membership.displayName, role, apiToken: false };
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unable to resolve Google workspace access.";
+      if (message === "Sign in again") return Response.json({ error: message }, { status: 401 });
       return Response.json({ error: message }, { status: 500 });
     }
   }
@@ -2536,9 +2553,13 @@ export async function authorizeRequest(
   );
 }
 
-async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string, request: Request) {
+export async function canonicalUserIdForVerifiedIdentity(subject: string, emailInput: string, displayNameInput: string, request: Request, provider: "google" | "apple" = "google", issuedAt?: number) {
+  await ensureSchema();
+  const { digest } = await import("@/lib/native-session");
+  const deleted = await env.DB.prepare("SELECT deleted_at FROM native_identity_revocations WHERE identity_hash = ?").bind(await digest(provider + ":" + subject)).first<{ deleted_at: number }>();
+  if (deleted && (!issuedAt || issuedAt <= deleted.deleted_at)) throw new Error("Sign in again");
   const email = normalizeEmail(emailInput);
-  if (!email) throw new Error("A verified Google email is required");
+  if (!email) throw new Error("A verified email is required");
   const now = new Date().toISOString();
   const displayName = cleanDisplayName(displayNameInput) || email.split("@")[0];
   const [linkedIdentity] = await getDb()
@@ -2546,7 +2567,7 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
     .from(authIdentities)
     .innerJoin(users, eq(authIdentities.userId, users.id))
     .where(and(
-      eq(authIdentities.provider, "google"),
+      eq(authIdentities.provider, provider),
       eq(authIdentities.providerSubject, subject),
     ))
     .limit(1);
@@ -2570,18 +2591,24 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
   await getDb().insert(authIdentities).values({
     id: crypto.randomUUID(),
     userId,
-    provider: "google",
+    provider,
     providerSubject: subject,
     email,
     createdAt: now,
     lastUsedAt: now,
   }).onConflictDoNothing();
   const [linked] = await getDb().select().from(authIdentities).where(and(
-    eq(authIdentities.provider, "google"),
+    eq(authIdentities.provider, provider),
     eq(authIdentities.providerSubject, subject),
   )).limit(1);
-  if (!linked) throw new Error("Google identity could not be linked");
+  if (!linked) throw new Error("Identity could not be linked");
   return linked.userId;
+}
+
+// Keep the original Google-specific export for internal callers and migration tests.
+// New providers use the verified-identity entry point above.
+export async function canonicalUserIdForGoogle(subject: string, emailInput: string, displayNameInput: string, request: Request, issuedAt?: number) {
+  return canonicalUserIdForVerifiedIdentity(subject, emailInput, displayNameInput, request, "google", issuedAt);
 }
 
 async function ensureWorkspaceShell(ownerId: string, email: string | null = null, displayName = "Workspace Owner") {
@@ -2897,6 +2924,42 @@ async function permanentlyDeleteWorkspace(id: string) {
     } catch {
       // The workspace is already gone. A missed object is safe to clean up later.
     }
+  }
+}
+
+export async function deleteNativeUserAccount(userId: string) {
+  await ensureSchema();
+  const runtime = env as unknown as import("./apple-native").AppleNativeEnv;
+  const { revokeAppleGrant } = await import("./apple-native");
+  const { digest } = await import("./native-session");
+  const { accountDeletionStatements } = await import("./native-account");
+  const owned = await env.DB.prepare("SELECT w.id,w.avatar_key FROM workspaces w WHERE w.owner_user_id = ?").bind(userId).all<{ id: string; avatar_key: string | null }>();
+  for (const workspace of owned.results) {
+    const other = await env.DB.prepare("SELECT id FROM workspace_members WHERE workspace_id = ? AND status = 'active' AND (user_id IS NULL OR user_id != ?) LIMIT 1")
+      .bind(workspace.id, userId).first();
+    if (other) throw new Error("transfer_workspace_ownership");
+  }
+  // Keep the account available for retry if cancellation or provider revocation fails.
+  for (const workspace of owned.results) await cancelSubscription(workspace.id);
+  await revokeAppleGrant(runtime, userId);
+  const { decryptSecret } = await import("./google-oauth");
+  const connections = await env.DB.prepare("SELECT encrypted_refresh_token FROM google_connections WHERE user_id=?").bind(userId).all<{ encrypted_refresh_token: string }>();
+  for (const connection of connections.results) {
+    const token = await decryptSecret(connection.encrypted_refresh_token, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!);
+    const response = await fetch("https://oauth2.googleapis.com/revoke", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded" }, body: new URLSearchParams({ token }), signal: AbortSignal.timeout(15000) });
+    if (!response.ok && response.status !== 400) throw new Error("Google authorization could not be revoked");
+  }
+  const identities = await env.DB.prepare("SELECT provider, provider_subject FROM auth_identities WHERE user_id = ?").bind(userId).all<{ provider: string; provider_subject: string }>();
+  const revocations = await Promise.all(identities.results.map(async identity =>
+    env.DB.prepare("INSERT INTO native_identity_revocations(identity_hash,deleted_at) VALUES(?,?) ON CONFLICT(identity_hash) DO UPDATE SET deleted_at=excluded.deleted_at")
+      .bind(await digest(identity.provider + ":" + identity.provider_subject), Math.floor(Date.now() / 1000))));
+  await env.DB.batch([
+    ...revocations,
+    ...accountDeletionStatements(env.DB, userId, owned.results.map(workspace => workspace.id)),
+  ]);
+  for (const workspace of owned.results) if (workspace.avatar_key) {
+    try { await (env as RuntimeEnv).WORKSPACE_AVATARS?.delete(workspace.avatar_key); }
+    catch { /* Account deletion already committed; object retention cleanup is separate. */ }
   }
 }
 

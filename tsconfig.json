@@ -26,5 +26,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "dist", "work", "outputs", "test-results", ".wrangler", ".vinext", ".deploy-*", ".sites-*", ".validate-*", ".verify-*"]
+  "exclude": ["node_modules", "mobile", "dist", "work", "outputs", "test-results", ".wrangler", ".vinext", ".deploy-*", ".sites-*", ".validate-*", ".verify-*"]
 }
