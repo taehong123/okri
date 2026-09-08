@@ -804,6 +804,33 @@ test("keeps the latest Slack connection while enforcing one team per OKRI worksp
   db.close();
 });
 
+test("creates private Project image metadata with ownership and cascade guards", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [itemsMigration, workspaceMigration, imageMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0000_eminent_mandroid.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0056_project_images.sql", import.meta.url), "utf8"),
+  ]);
+  assert.ok(!imageMigration.includes("\r"));
+  db.exec(itemsMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(imageMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`
+    INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO items (id, owner_id, kind, title) VALUES ('project', 'workspace', 'project', 'Visual fix');
+    INSERT INTO project_images (id, owner_id, project_id, name, mime_type, byte_size, object_key, source_ref)
+      VALUES ('image', 'workspace', 'project', 'error.png', 'image/png', 12, 'project-images/image.png', 'F1');
+  `);
+  assert.equal(db.prepare("SELECT name FROM project_images WHERE project_id = 'project'").get().name, "error.png");
+  assert.throws(() => db.exec(`INSERT INTO project_images
+    (id, owner_id, project_id, name, mime_type, byte_size, object_key, source_ref)
+    VALUES ('duplicate', 'workspace', 'project', 'copy.png', 'image/png', 12, 'project-images/copy.png', 'F1')`), /UNIQUE/i);
+  db.exec("DELETE FROM items WHERE id = 'project'");
+  assert.equal(db.prepare("SELECT count(*) AS count FROM project_images").get().count, 0);
+  db.close();
+});
+
 test("creates revocable workspace-scoped integration tokens", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");

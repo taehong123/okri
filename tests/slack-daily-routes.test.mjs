@@ -126,7 +126,7 @@ test("summary settings and onboarding preserve OFF/time and validate input under
 test("daily settings do not require channel message history or mention access", () => {
   const loaded = { exports: {} };
   new Function("require", "module", "exports", oauthOutput)(() => ({}), loaded, loaded.exports);
-  for (const scope of ["channels:history", "groups:history", "app_mentions:read"]) {
+  for (const scope of ["channels:history", "groups:history", "app_mentions:read", "files:read"]) {
     assert.ok(!loaded.exports.slackDailyScopes.includes(scope));
     assert.ok(loaded.exports.slackScopes.includes(scope));
   }

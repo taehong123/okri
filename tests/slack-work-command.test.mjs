@@ -77,10 +77,13 @@ test("Slack channel events, private responses, permissions, and request idempote
   assert.match(pace, /INSERT INTO ai_usage_events[\s\S]+WHERE \(SELECT count\(\*\)/);
   assert.match(pace, /source LIKE 'pending:%'/);
   assert.match(interactions, /dailyMemberBySlack/);
-  for (const scope of ["channels:history", "groups:history"]) {
+  for (const scope of ["channels:history", "groups:history", "files:read"]) {
     assert.match(oauth, new RegExp(scope));
     assert.match(manifest, new RegExp(scope));
   }
   for (const event of ["message.channels", "message.groups"]) assert.match(manifest, new RegExp(event.replace(".", "\\.")));
   assert.match(schema, /slack_work_command_operations/);
+  assert.match(domain, /saveSlackProjectImages/);
+  assert.match(domain, /sourceThread/);
+  assert.match(schema, /project_images/);
 });

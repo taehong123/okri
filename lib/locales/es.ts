@@ -2200,5 +2200,12 @@ const messages = {
 "생성할 업무를 확인하지 못했습니다. 만들고 싶은 결과를 한 문장으로 적어 주세요.": "No se identificó el trabajo a crear. Describe el resultado deseado en una frase.",
 "AI 업무 생성 요청이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요.": "Las solicitudes de creación con IA son demasiado frecuentes. Inténtalo de nuevo en breve.",
 "오늘의 AI 업무 생성 한도에 도달했습니다. 사용량 화면에서 남은 한도를 확인해 주세요.": "Se alcanzó el límite diario de creación con IA. Consulta el saldo en Uso.",
+"이미지 {count}개 · 생성 후 Project에 저장": "{count} imágenes · se guardan en el Project después de crearlo",
+"이미지는 Task가 연결된 Project에 저장됩니다. Routine을 선택하면 저장되지 않습니다.": "Las imágenes se guardan en el Project vinculado al Task. No se guardan si se elige una Routine.",
+"Slack 연결이 변경되어 이미지는 저장하지 못했습니다.": "La conexión de Slack cambió, así que no se pudieron guardar las imágenes.",
+"이미지는 Project에만 저장됩니다. 이번 이미지는 저장하지 않았습니다.": "Las imágenes solo se pueden guardar en un Project. Estas imágenes no se guardaron.",
+"이미지 {count}개를 Project에 저장했습니다.": "Se guardaron {count} imágenes en el Project.",
+"형식·크기 또는 Slack 권한 때문에 이미지 {count}개는 저장하지 못했습니다.": "No se pudieron guardar {count} imágenes por su formato, tamaño o permisos de Slack.",
+"Project 생성은 완료됐지만 이미지를 읽지 못했습니다. Slack 연결 권한을 갱신한 뒤 다시 시도해 주세요.": "El Project se creó, pero no se pudieron leer las imágenes. Actualiza los permisos de la conexión de Slack e inténtalo de nuevo.",
 } satisfies Catalog;
 export default messages;

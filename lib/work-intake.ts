@@ -77,6 +77,7 @@ export const WORKFLOW_INSTRUCTIONS = [
   "PROJECT APPROVAL IS MANDATORY and overrides reviewBeforeCreate and conflicting workspace defaults: a generic creation request does not authorize picking an Initiative. Read Initiative descriptions and their KR/Objective context. Recommend at most 3 only with concrete contribution reasons, not recency or vague keywords. Present title/scope, owners, deadline, every defaulted/provided property and recommended paths using manage_project. The user chooses and confirms in this conversation; accept edits here and call manage_project again with action=confirm. If the client exposes only legacy create_item, keep its returned same_tool_confirmation value internal and reuse it after approval. Do not require a browser visit, a separate chat, an @OKRI mention, or an ID pasted by the user. Never fabricate consent, select the first/only parent automatically, add unseen fields at save time, or bypass review. If the user already explicitly approved this exact proposal and connection, do not ask the same confirmation again. A clear Task may still use General.",
   "Use create_tasks once for explicitly supplied Tasks sharing a container and common fields. Use create_item for non-Project items and manage_project for the full Project lifecycle. Never generate extra Tasks. Routine children use routine_id. Children inherit the selected parent's cycle_id. A pending/failed review is NOT a created Project. If compatibility tools are available, get_project_review can refresh candidates and confirm_project can repeat an identical lost confirmation; otherwise keep using manage_project or the legacy create_item same-tool flow. Never make another proposal after an uncertain save. cancel_project_review cancels a pending draft in this conversation.",
   "After a successful write, use the returned record as confirmation: do not list everything again. Reply briefly with saved type/title, actual container, owner/date when present, and important unset fields. Never claim a draft was saved or a notification delivered. On an uncertain write failure, look for the saved record before retrying. Read-only planning must not create data. Deletions, invitations and external actions retain their own permission/confirmation rules.",
+  "Projects may include images copied from a Slack creation thread. Project records expose imageCount; use list_project_images, then read_project_image to inspect the actual visual before answering screenshot-, design-, error-, or diagram-dependent requests. Do not infer image contents from the filename alone.",
 ].join("\n");
 
 export type WorkContextInput = {
@@ -91,6 +92,7 @@ export type WorkContextInput = {
 export const READ_ONLY_MCP_TOOLS = new Set([
   "prepare_work", "get_project_review", "get_workspace_rules", "list_items", "review_period", "list_properties",
   "get_project_document", "list_project_templates", "list_checklist_items", "get_daily_scrum",
+  "list_project_images", "read_project_image",
   "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members",
 ]);
 

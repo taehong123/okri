@@ -318,6 +318,8 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(mcpOAuth, /sha256Base64Url/);
   assert.match(mcpRoute, /resource_metadata/);
   assert.match(mcpRoute, /"manage_project"/);
+  assert.match(mcpRoute, /"list_project_images"/);
+  assert.match(mcpRoute, /"read_project_image"/);
   assert.match(mcpRoute, /MCP_CREATE_ITEM_CONFIRM_PREFIX/);
   assert.match(googleSession, /slice\(0, 4000\)/);
   assert.match(slackAuthRoute, /canManageTeam/);
@@ -926,7 +928,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(skipMigration, /skip_note/);
   assert.match(isolationMigration, /CREATE UNIQUE INDEX `idx_slack_connections_owner`/);
   assert.match(schema, /onboardingCompletedAt: text\("onboarding_completed_at"\)/);
-  for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "channels:join", "groups:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
+  for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "channels:join", "groups:read", "files:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
   assert.match(interactions, /view_submission/);
   assert.match(interactions, /skip_reason/);
   assert.match(slackDaily, /오늘 데일리 스킵/);

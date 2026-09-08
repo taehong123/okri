@@ -11,6 +11,7 @@ import {
   type RequestAuthorization,
 } from "@/lib/pace-data";
 import { slackApi } from "@/lib/slack-daily";
+import type { SlackImageFile } from "@/lib/project-images";
 import { readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
 
 type RuntimeEnv = typeof env & {
@@ -58,6 +59,8 @@ export type SlackWorkDraft = {
   priority: ItemPriority;
   typeReason: string;
   threadTruncated: boolean;
+  imageCount: number;
+  imagesTruncated: boolean;
 };
 
 type ModelDraft = {
@@ -76,13 +79,28 @@ type ModelDraft = {
 
 type SlackThreadResult = {
   ok?: boolean;
-  messages?: Array<{ user?: string; text?: string; bot_id?: string; ts?: string }>;
+  messages?: Array<{
+    user?: string;
+    text?: string;
+    bot_id?: string;
+    ts?: string;
+    files?: Array<{
+      id?: string;
+      name?: string;
+      title?: string;
+      mimetype?: string;
+      size?: number;
+      url_private?: string;
+      url_private_download?: string;
+    }>;
+  }>;
   response_metadata?: { next_cursor?: string; messages?: string[] };
 } & Record<string, unknown>;
 
 const maxOutputTokens = 900;
 const maxThreadMessages = 200;
 const maxThreadChars = 24_000;
+const maxThreadImages = 10;
 
 const draftSchema = {
   type: "object",
@@ -151,6 +169,7 @@ export async function prepareSlackWorkDraft(input: {
     actorMemberId: input.memberId,
     workspaceRules: rules,
     referenceContext: context,
+    threadImageCount: thread.imageFiles.length,
   };
   const inputChars = JSON.stringify(requestPayload).length + systemInstruction().length;
   const reservedCost = estimateCostWonMicros(runtime, estimateTokensFromChars(inputChars) + 200, maxOutputTokens);
@@ -207,7 +226,8 @@ export async function prepareSlackWorkDraft(input: {
     try { proposed = JSON.parse(output) as ModelDraft; }
     catch { throw new SlackWorkIntakeError("AI가 생성 초안을 완성하지 못했습니다. 다시 요청해 주세요.", "invalid_openai_response"); }
     if (proposed.kind === "none") throw new SlackWorkIntakeError("생성할 업무를 확인하지 못했습니다. 만들고 싶은 결과를 한 문장으로 적어 주세요.", "no_work_detected");
-    return normalizeSlackWorkDraft(proposed, context, input.memberId, thread.truncated, rules.defaultPriority);
+    return normalizeSlackWorkDraft(proposed, context, input.memberId, thread.truncated, rules.defaultPriority,
+      thread.imageFiles.length, thread.imagesTruncated);
   } finally {
     if (!finalized) await releaseAiUsageReservation(reservationId);
   }
@@ -216,12 +236,18 @@ export async function prepareSlackWorkDraft(input: {
 export async function readSlackThread(token: string, event: SlackWorkIntakeEvent) {
   const rootTs = event.threadTs || event.ts;
   if (!rootTs) {
-    return { messages: [{ user: event.user, text: cleanSlackText(event.text) }], truncated: false };
+    return { messages: [{ user: event.user, text: cleanSlackText(event.text) }], truncated: false,
+      imageFiles: [] as SlackImageFile[], imagesTruncated: false };
   }
   const collected: Array<{ user: string; text: string }> = [];
+  const imageFiles: SlackImageFile[] = [];
+  const imageIds = new Set<string>();
   let cursor = "";
   let truncated = false;
+  let imagesTruncated = false;
+  let pages = 0;
   do {
+    pages += 1;
     const result = await slackApi<SlackThreadResult>(token, "conversations.replies", {
       channel: event.channel,
       ts: rootTs,
@@ -229,13 +255,32 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       ...(cursor ? { cursor } : {}),
     });
     for (const message of result.messages ?? []) {
+      for (const file of message.files ?? []) {
+        if (!file.id || imageIds.has(file.id) || !String(file.mimetype ?? "").startsWith("image/")) continue;
+        imageIds.add(file.id);
+        if (imageFiles.length >= maxThreadImages) {
+          imagesTruncated = true;
+          continue;
+        }
+        imageFiles.push({
+          id: file.id,
+          name: file.name || file.title || "Slack image",
+          mimeType: file.mimetype || "",
+          size: Number(file.size) || 0,
+          urlPrivateDownload: file.url_private_download || file.url_private || "",
+        });
+      }
       const text = cleanSlackText(message.text ?? "");
       if (!text) continue;
       collected.push({ user: message.user ?? "", text });
       if (collected.length >= maxThreadMessages) { truncated = Boolean(result.response_metadata?.next_cursor); break; }
     }
     cursor = result.response_metadata?.next_cursor ?? "";
-  } while (cursor && collected.length < maxThreadMessages);
+  } while (cursor && collected.length < maxThreadMessages && pages < 2);
+  if (cursor) {
+    truncated = true;
+    imagesTruncated = true;
+  }
   if (!collected.length) collected.push({ user: event.user, text: cleanSlackText(event.text) });
 
   let chars = 0;
@@ -248,7 +293,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     chars += text.length;
     if (text.length < message.text.length) truncated = true;
   }
-  return { messages: bounded.reverse(), truncated };
+  return { messages: bounded.reverse(), truncated, imageFiles, imagesTruncated };
 }
 
 export function normalizeSlackWorkDraft(
@@ -257,6 +302,8 @@ export function normalizeSlackWorkDraft(
   actorMemberId: string,
   threadTruncated: boolean,
   defaultPriority: string,
+  imageCount = 0,
+  imagesTruncated = false,
 ): SlackWorkDraft {
   const kind = value.kind === "project" ? "project" : "task";
   const contextMembers = context.members as Array<{ id?: unknown; displayName?: unknown; isCurrent: boolean }>;
@@ -296,6 +343,8 @@ export function normalizeSlackWorkDraft(
     priority,
     typeReason: clean(value.typeReason, 180),
     threadTruncated,
+    imageCount: Math.max(0, Math.min(maxThreadImages, Math.trunc(imageCount))),
+    imagesTruncated,
   };
 }
 

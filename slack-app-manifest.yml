@@ -30,6 +30,7 @@ oauth_config:
       - channels:history
       - groups:history
       - app_mentions:read
+      - files:read
 settings:
   interactivity:
     is_enabled: true

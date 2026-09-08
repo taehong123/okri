@@ -221,7 +221,7 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
       return json(route, { slack: {
         connected, state,
         statusMessage: state === "service_unavailable" ? "Slack 연결을 잠시 사용할 수 없습니다. 서비스가 준비되면 이 화면에서 바로 연결할 수 있습니다." : state === "workspace_disconnected" ? "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 직접 선택하고 승인할 수 있습니다." : state === "reauthorization_required" ? "새 데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요." : state === "setup_required" ? "고객 Slack A 연결을 마쳤습니다. 데일리 발송 설정을 완료해 주세요." : "고객 Slack A와 연결되어 데일리 알림을 설정할 수 있습니다.",
-        missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
+        missingScopes: state === "reauthorization_required" ? ["im:write"] : [], teamName: connected ? "테스트 Slack" : null, teamId: connected ? "T123" : null, botUserId: connected ? "U-BOT" : null, scope: connected ? "commands,chat:write,im:write,im:history,users:read,users:read.email,channels:read,groups:read,channels:history,groups:history,app_mentions:read,files:read" : "", connectedAt: connected ? now : null, updatedAt: connected ? now : null,
         connectionScope: "workspace", distributionMode: "direct_oauth", connectedTeam: connected ? { id: "T123", name: "고객 Slack A" } : null,
         redirectUrl: "https://okri.ai/api/slack/callback", commandUrl: "https://okri.ai/api/slack/commands", interactionUrl: "https://okri.ai/api/slack/interactions", eventsUrl: "https://okri.ai/api/slack/events",
       } });

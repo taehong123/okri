@@ -2199,6 +2199,13 @@ const messages = {
 "생성할 업무를 확인하지 못했습니다. 만들고 싶은 결과를 한 문장으로 적어 주세요.": "No work to create was identified. Describe the intended result in one sentence.",
 "AI 업무 생성 요청이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요.": "AI work creation requests are arriving too quickly. Try again shortly.",
 "오늘의 AI 업무 생성 한도에 도달했습니다. 사용량 화면에서 남은 한도를 확인해 주세요.": "Today's AI work creation limit has been reached. Check the remaining allowance in Usage.",
+"이미지 {count}개 · 생성 후 Project에 저장": "{count} images · saved to the Project after creation",
+"이미지는 Task가 연결된 Project에 저장됩니다. Routine을 선택하면 저장되지 않습니다.": "Images are saved to the Project linked to the Task. They are not saved when a Routine is selected.",
+"Slack 연결이 변경되어 이미지는 저장하지 못했습니다.": "The Slack connection changed, so the images could not be saved.",
+"이미지는 Project에만 저장됩니다. 이번 이미지는 저장하지 않았습니다.": "Images can only be saved to a Project. These images were not saved.",
+"이미지 {count}개를 Project에 저장했습니다.": "Saved {count} images to the Project.",
+"형식·크기 또는 Slack 권한 때문에 이미지 {count}개는 저장하지 못했습니다.": "Could not save {count} images because of their format, size, or Slack permissions.",
+"Project 생성은 완료됐지만 이미지를 읽지 못했습니다. Slack 연결 권한을 갱신한 뒤 다시 시도해 주세요.": "The Project was created, but its images could not be read. Refresh the Slack connection permissions and try again.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

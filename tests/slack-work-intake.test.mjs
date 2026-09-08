@@ -10,19 +10,35 @@ const compiled = ts.transpileModule(source, {
   compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.CommonJS },
 }).outputText;
 
-function load() {
-  const module = { exports: {} };
+function load(slackApi = async () => ({ messages: [] })) {
+  const loaded = { exports: {} };
   const dependencies = {
     "cloudflare:workers": { env: {} },
     "@/lib/billing": { BillingLimitError: class BillingLimitError extends Error {}, assertAiBudget: async () => ({ limitWon: 500, spentWonMicros: 0 }) },
     "@/lib/language-preferences": { readLanguagePreferences: async () => ({ resolvedLanguage: "ko" }) },
     "@/lib/pace-data": { getAiUsageSummary: async () => ({}), getWorkspaceRules: async () => ({}), recordAiUsageEvent: async () => {} },
-    "@/lib/slack-daily": { slackApi: async () => ({ messages: [] }) },
+    "@/lib/slack-daily": { slackApi },
     "@/lib/work-intake": { readWorkContext: async () => ({}), WORK_CLASSIFICATION: {} },
   };
-  new Function("require", "module", "exports", compiled)((name) => dependencies[name] ?? require(name), module, module.exports);
-  return module.exports;
+  new Function("require", "module", "exports", compiled)((name) => dependencies[name] ?? require(name), loaded, loaded.exports);
+  return loaded.exports;
 }
+
+test("Slack thread reading keeps image-only messages as bounded Project attachments", async () => {
+  const { readSlackThread } = load(async () => ({
+    messages: [
+      { user: "member-a", text: "", files: [{ id: "file-a", name: "error.png", mimetype: "image/png", size: 321, url_private_download: "https://files.slack.test/a" }] },
+      { user: "member-a", text: "이 화면 오류 해결" },
+    ],
+  }));
+  const thread = await readSlackThread("token", { channel: "C1", channelType: "channel", user: "member-a", text: "", ts: "1.2" });
+  assert.equal(thread.imageFiles.length, 1);
+  assert.deepEqual(thread.imageFiles[0], {
+    id: "file-a", name: "error.png", mimeType: "image/png", size: 321, urlPrivateDownload: "https://files.slack.test/a",
+  });
+  assert.equal(thread.messages.length, 1);
+  assert.equal(thread.messages[0].text, "이 화면 오류 해결");
+});
 
 test("Slack work draft accepts only valid hierarchy IDs and falls back to General", () => {
   const { normalizeSlackWorkDraft } = load();

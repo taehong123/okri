@@ -18,6 +18,7 @@ import {
   type RequestAuthorization,
 } from "@/lib/pace-data";
 import { createSlackMemberLinkUrl, dailyMemberBySlack, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import { saveSlackProjectImages } from "@/lib/project-images";
 import { readLanguagePreferences, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
 import {
@@ -27,6 +28,7 @@ import {
 } from "@/lib/slack-work-command-parser";
 import {
   prepareSlackWorkDraft,
+  readSlackThread,
   SlackWorkIntakeError,
   type SlackWorkDraft,
 } from "@/lib/slack-work-intake";
@@ -52,6 +54,7 @@ type CommandMetadata = {
   memberId: string;
   createdAt: number;
   draft?: SlackWorkDraft;
+  sourceThread?: { channel: string; ts: string };
 };
 
 type SlackState = Record<string, Record<string, {
@@ -133,6 +136,7 @@ export async function handleSlackWorkCommandEvent(
     slackUserId: event.user,
     memberId: linked.memberId,
     createdAt: Date.now(),
+    ...(isCreateCommand(parsed.command) && sourceThread(event) ? { sourceThread: sourceThread(event)! } : {}),
   };
   const label = commandLabel(parsed.command, t);
   await postPrivate(token, event, `${label}${parsed.query ? ` · ${parsed.query}` : ""}`, [
@@ -212,7 +216,8 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
     const workers = selectedValues(state, "work_workers");
     await replaceItemAssignmentRole(authorization.ownerId, item.id, "project_dri", [dri]);
     if (workers.length) await replaceItemAssignmentRole(authorization.ownerId, item.id, "project_worker", workers);
-    return { id: item.id, message: `${t("Project를 생성했습니다.")}\n${item.title}` };
+    const imageNote = await attachSlackThreadImages(authorization, metadata, item.id, t);
+    return { id: item.id, message: `${t("Project를 생성했습니다.")}\n${item.title}${imageNote}` };
   }
   if (command === "task_create") {
     const title = textValue(state, "work_title").trim();
@@ -226,7 +231,8 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
       dueDate: dateValue(state, "work_due") || null, source: "slack", createdByUserId: authorization.userId,
     });
     await replaceItemAssignmentRole(authorization.ownerId, item.id, "task_assignee", [selectedValue(state, "work_assignee") || metadata.memberId]);
-    return { id: item.id, message: `${t("Task를 생성했습니다.")}\n${item.title}` };
+    const imageNote = await attachSlackThreadImages(authorization, metadata, parentKind === "project" ? parentId : null, t);
+    return { id: item.id, message: `${t("Task를 생성했습니다.")}\n${item.title}${imageNote}` };
   }
   const targetId = selectedValue(state, "work_target", targetAction(command));
   const current = await getItem(authorization.ownerId, targetId);
@@ -441,6 +447,8 @@ function parseCommandMetadata(raw: string, authorization: RequestAuthorization, 
     || metadata.teamId !== teamId
     || metadata.slackUserId !== slackUserId) throw new Error("다른 사용자 또는 워크스페이스의 명령은 실행할 수 없습니다.");
   if (!metadata.createdAt || Date.now() - metadata.createdAt > 15 * 60_000) throw new Error("명령 정보가 만료되었습니다. 다시 입력해 주세요.");
+  if (metadata.sourceThread && (!/^[A-Z0-9]{1,32}$/i.test(metadata.sourceThread.channel)
+    || !/^\d{1,16}\.\d{1,16}$/.test(metadata.sourceThread.ts))) throw new Error("Slack 스레드 정보가 올바르지 않습니다.");
   return metadata;
 }
 async function claimOperation(metadata: CommandMetadata) {
@@ -501,6 +509,7 @@ function commandMetadata(connection: SlackConnection, event: WorkMessageEvent, m
     memberId,
     createdAt: Date.now(),
     draft,
+    ...(draft.imageCount && sourceThread(event) ? { sourceThread: sourceThread(event)! } : {}),
   };
 }
 
@@ -552,7 +561,61 @@ function reviewDraftText(draft: SlackWorkDraft, t: Translator) {
     `${t(draft.kind === "project" ? "책임자" : "담당자")}: ${escapeSlack(draft.responsibleLabel)}`,
     `${t("기한")}: ${draft.dueDate || "-"}`,
     `${t("우선순위")}: ${t(priorityLabel(draft.priority))}`,
+    draft.imageCount ? t("이미지 {count}개 · 생성 후 Project에 저장", { count: `${draft.imageCount}${draft.imagesTruncated ? "+" : ""}` }) : "",
+    draft.kind === "task" && draft.imageCount ? t("이미지는 Task가 연결된 Project에 저장됩니다. Routine을 선택하면 저장되지 않습니다.") : "",
     draft.threadTruncated ? t("긴 스레드의 최근 내용 중심으로 초안을 만들었습니다.") : "",
     `_${t("아직 저장되지 않았습니다. 검토 후 생성해 주세요.")}_`,
   ].filter(Boolean).join("\n");
+}
+
+async function attachSlackThreadImages(
+  authorization: RequestAuthorization,
+  metadata: CommandMetadata,
+  projectId: string | null,
+  t: Translator,
+) {
+  if (!metadata.sourceThread) return "";
+  try {
+    const connection = await getSlackConnection(authorization.ownerId);
+    if (!connection || connection.teamId !== metadata.teamId) {
+      return `\n${t("Slack 연결이 변경되어 이미지는 저장하지 못했습니다.")}`;
+    }
+    const token = await slackTokenForConnection(connection);
+    const thread = await readSlackThread(token, {
+      channel: metadata.sourceThread.channel,
+      channelType: "channel",
+      user: metadata.slackUserId,
+      text: "",
+      threadTs: metadata.sourceThread.ts,
+    });
+    if (!thread.imageFiles.length) return "";
+    if (!projectId) return `\n${t("이미지는 Project에만 저장됩니다. 이번 이미지는 저장하지 않았습니다.")}`;
+    const result = await saveSlackProjectImages({
+      ownerId: authorization.ownerId,
+      projectId,
+      createdByUserId: authorization.userId,
+      teamId: metadata.teamId,
+      token,
+      files: thread.imageFiles,
+      imagesTruncated: thread.imagesTruncated,
+    });
+    const stored = result.saved + result.reused;
+    const notStored = result.skipped + result.failed;
+    return [
+      stored ? `\n${t("이미지 {count}개를 Project에 저장했습니다.", { count: stored })}` : "",
+      notStored ? `\n${t("형식·크기 또는 Slack 권한 때문에 이미지 {count}개는 저장하지 못했습니다.", { count: notStored })}` : "",
+    ].join("");
+  } catch (error) {
+    console.error("Slack thread image attachment failed", error);
+    return `\n${t("Project 생성은 완료됐지만 이미지를 읽지 못했습니다. Slack 연결 권한을 갱신한 뒤 다시 시도해 주세요.")}`;
+  }
+}
+
+function sourceThread(event: WorkMessageEvent) {
+  const ts = event.threadTs || event.ts;
+  return ts ? { channel: event.channel, ts } : null;
+}
+
+function isCreateCommand(command: SlackWorkCommand) {
+  return command === "project_create" || command === "task_create";
 }

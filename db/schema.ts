@@ -572,6 +572,28 @@ export const projectDocuments = sqliteTable(
   ],
 );
 
+export const projectImages = sqliteTable(
+  "project_images",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    objectKey: text("object_key").notNull(),
+    source: text("source").notNull().default("slack"),
+    sourceRef: text("source_ref").notNull(),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_project_images_object_key").on(table.objectKey),
+    uniqueIndex("idx_project_images_source").on(table.ownerId, table.projectId, table.source, table.sourceRef),
+    index("idx_project_images_project_created").on(table.ownerId, table.projectId, table.createdAt),
+  ],
+);
+
 export const projectTemplates = sqliteTable(
   "project_templates",
   {
@@ -1371,6 +1393,7 @@ export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
 export type ProjectHiddenProperty = typeof projectHiddenProperties.$inferSelect;
 export type ProjectDocument = typeof projectDocuments.$inferSelect;
+export type ProjectImage = typeof projectImages.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
