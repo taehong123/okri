@@ -285,7 +285,10 @@ export async function saveDailyDraft(
     WHERE owner_id = ? AND member_id = ? AND scrum_date = ? LIMIT 1`)
     .bind(authorization.ownerId, member.id, date).first<{ id: string; work_status?: string }>();
   const skipReason = normalizeDailySkipReason(input.skipReason);
-  const workStatus = skipReason ? "skip" : normalizeDailyWorkStatus(input.workStatus ?? existing?.work_status);
+  const existingWorkStatus = normalizeDailyWorkStatus(existing?.work_status);
+  const workStatus = skipReason ? "skip"
+    : input.workStatus !== undefined ? normalizeDailyWorkStatus(input.workStatus)
+      : input.skipReason === null && existingWorkStatus === "skip" ? "office" : existingWorkStatus;
   const skipping = workStatus === "skip";
   const noPlannedTasks = skipping ? false : Boolean(input.noPlannedTasks);
   const skipNote = skipReason ? cleanSkipNote(input.skipNote) : "";

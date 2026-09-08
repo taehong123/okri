@@ -234,6 +234,20 @@ test("skip clears work; old task-only clients retain selected project and routin
   assert.deepEqual(submitted.work, []); assert.deepEqual(submitted.tasks, []);
 });
 
+test("legacy clients can leave a new skip while preserving an existing remote status", async (t) => {
+  const { db, api } = fixture(t);
+  await api.saveDailyDraft(authorization, { date, workStatus: "skip" }, false);
+  await api.saveDailyDraft(authorization, { date, todayNote: "partial save" }, false);
+  assert.equal(db.prepare("SELECT work_status FROM daily_scrums").get().work_status, "skip");
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"], skipReason: null }, false);
+  assert.equal(db.prepare("SELECT work_status FROM daily_scrums").get().work_status, "office");
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.selectedTaskIds, ["task"]);
+
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"], workStatus: "remote" }, false);
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"], skipReason: null }, false);
+  assert.equal(db.prepare("SELECT work_status FROM daily_scrums").get().work_status, "remote");
+});
+
 test("work parsing bounds selection and rejects forged kinds", () => {
   for (const input of ['"bad"', ["owner:me"], ["project:"], Array.from({ length: 51 }, (_, i) => `project:${i}`)]) assert.throws(() => work.parseDailyWorkKeys(input));
   assert.deepEqual(work.parseDailyWorkKeys(["task:t", "task:t"]), ["task:t"]);
