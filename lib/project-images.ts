@@ -61,11 +61,8 @@ export async function readSlackImagesForAgent(token: string, files: SlackImageFi
       if (!file || file.size <= 0 || file.size > maxImageBytes) return null;
       const downloadUrl = slackDownloadUrl(file.urlPrivateDownload);
       if (!downloadUrl) return null;
-      const response = await fetch(downloadUrl, {
-        headers: { Authorization: `Bearer ${token}` },
-        redirect: "error",
-        signal: AbortSignal.timeout(15_000),
-      });
+      const response = await fetchSlackFile(token, downloadUrl);
+      if (!response) return null;
       if (!response.ok || Number(response.headers.get("content-length") || 0) > maxImageBytes) return null;
       const bytes = new Uint8Array(await response.arrayBuffer());
       const mimeType = verifiedImageType(bytes);
@@ -158,11 +155,8 @@ export async function saveSlackProjectImages(input: {
       }
       const downloadUrl = slackDownloadUrl(file.urlPrivateDownload);
       if (!downloadUrl) throw new Error("Slack file URL is not allowed");
-      const response = await fetch(downloadUrl, {
-        headers: { Authorization: `Bearer ${input.token}` },
-        redirect: "error",
-        signal: AbortSignal.timeout(15_000),
-      });
+      const response = await fetchSlackFile(input.token, downloadUrl);
+      if (!response) throw new Error("Slack file download redirect is not allowed");
       if (!response.ok) throw new Error(`Slack file download failed: ${response.status}`);
       const declaredLength = Number(response.headers.get("content-length") || 0);
       if (declaredLength > maxImageBytes) {
@@ -208,6 +202,12 @@ export async function saveSlackProjectImages(input: {
 }
 
 async function hydrateSlackFile(token: string, reference: SlackImageFile): Promise<SlackImageFile | null> {
+  if (reference.id
+    && reference.mimeType.startsWith("image/")
+    && reference.size > 0
+    && slackDownloadUrl(reference.urlPrivateDownload)) {
+    return reference;
+  }
   const result = await slackApi<SlackFileInfoResult>(token, "files.info", { file: reference.id });
   const file = result.file;
   if (!file?.id || !String(file.mimetype ?? "").startsWith("image/")) return null;
@@ -223,11 +223,44 @@ async function hydrateSlackFile(token: string, reference: SlackImageFile): Promi
 function slackDownloadUrl(value: string) {
   try {
     const url = new URL(value);
-    if (url.protocol !== "https:" || (url.hostname !== "slack.com" && !url.hostname.endsWith(".slack.com"))) return null;
+    if (url.protocol !== "https:" || !isSlackFileHost(url.hostname)) return null;
     return url.toString();
   } catch {
     return null;
   }
+}
+
+async function fetchSlackFile(token: string, value: string) {
+  const initial = slackDownloadUrl(value);
+  if (!initial) return null;
+  let current: string = initial;
+  for (let redirects = 0; redirects <= 3; redirects += 1) {
+    const response: Response = await fetch(current, {
+      headers: { Authorization: `Bearer ${token}` },
+      redirect: "manual",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status < 300 || response.status >= 400) return response;
+    const location: string | null = response.headers.get("location");
+    if (!location) return null;
+    try {
+      const next: URL = new URL(location, current);
+      if (next.protocol !== "https:" || !isSlackFileHost(next.hostname)) return null;
+      current = next.toString();
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
+
+function isSlackFileHost(hostname: string) {
+  return hostname === "slack.com"
+    || hostname.endsWith(".slack.com")
+    || hostname === "slack-files.com"
+    || hostname.endsWith(".slack-files.com")
+    || hostname === "slack-edge.com"
+    || hostname.endsWith(".slack-edge.com");
 }
 
 async function assertProject(ownerId: string, projectId: string) {
