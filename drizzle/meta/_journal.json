@@ -358,6 +358,13 @@
       "when": 1788923908538,
       "tag": "0057_work_documents",
       "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1788933600000,
+      "tag": "0058_local_agent",
+      "breakpoints": true
     }
   ]
 }

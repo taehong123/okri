@@ -98,6 +98,7 @@ import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
 import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
+import { LocalAgentLauncher } from "./local-agent-launcher";
 import { GuideDraft } from "./guide-draft";
 import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
@@ -3299,6 +3300,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             <button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button>
           </div>
         </header>
+        <LocalAgentLauncher targetKind="project" targetId={project.id} targetTitle={project.title} readOnly={readOnly} onNotice={onNotice} />
         <div className="project-detail-content">
           <aside className="project-context-column" aria-label={t("Project 정보")}>
         <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
@@ -3827,7 +3829,10 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
         </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label={t("담당자")} members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></section>}
         </>}</DocumentProperties>
-        <button type="button" disabled={readOnly} className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
+        <div className="task-work-actions">
+          <button type="button" disabled={readOnly} className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
+          <LocalAgentLauncher targetKind="task" targetId={task.id} targetTitle={task.title} readOnly={readOnly} onNotice={onNotice} />
+        </div>
         <details className="document-related"><summary>{t("상위 맵핑")} · Google Calendar</summary>
         <section className="task-lineage">
           <header><b>{t("상위 맵핑")}</b><span>{routine ? t("Routine 기반 Task") : project ? t("OKR 실행 구조") : t("아직 연결 전")}</span></header>
