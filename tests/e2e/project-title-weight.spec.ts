@@ -21,12 +21,12 @@ test("Project item names are regular across views without changing hierarchy or 
   await project.focus();
   await page.keyboard.press("Enter");
   await expect(page.locator(".project-title-input")).toHaveValue("모바일 사용성 개선");
-  await expect(page.locator(".project-title-input")).toHaveCSS("font-weight", "600");
+  await expect(page.locator(".project-title-input")).toHaveCSS("font-weight", "650");
   await page.goto("/?view=okr");
   await page.locator("button.okr-tree-kr-row").first().click();
   await page.locator("button.okr-tree-initiative-row").first().click();
   await expect(page.locator(".okr-tree-project-main .project-item-title").first()).toHaveCSS("font-weight", "400");
-  await expect(page.locator(".okr-tree-kr-row strong").first()).toHaveCSS("font-weight", "600");
+  await expect(page.locator(".okr-tree-kr-row strong").first()).toHaveCSS("font-weight", "400");
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 });
 

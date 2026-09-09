@@ -65,7 +65,9 @@ test("working views share document layout and stable typography from 320px to 4K
       await expect(page.locator(".page-header h1")).toBeVisible();
       await pageFits(page, `${width}/${view}`);
       expect(await page.locator(".page-header h1").evaluate((node) => getComputedStyle(node).fontSize)).toBe("24px");
-      expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+      // OKR deliberately starts at Objective without repeating a page subtitle.
+      if (view === "okr") await expect(page.locator(".page-header p")).toHaveCount(0);
+      else expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
       expect((await page.locator(".page-body").boundingBox())!.width).toBeLessThanOrEqual(1200);
       if (view === "work") {
         expect(await page.locator(".project-workspace").evaluate((node) => {

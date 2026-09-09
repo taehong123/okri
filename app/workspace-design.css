@@ -33,12 +33,26 @@
 .app-shell .project-tabs { padding: 0; gap: var(--space-4); background: transparent; }
 .app-shell .project-tabs button { border-radius: 0; padding: var(--space-2) 0; }
 .app-shell .project-tabs button.active { box-shadow: inset 0 -2px var(--text-primary); background: transparent; }
+.app-shell .project-tabs button span { padding-inline: var(--space-1); background: transparent; font-weight: 400; font-variant-numeric: tabular-nums; }
 .app-shell :is(.database-section, .database-toolbar, .task-table-head) { background: transparent; }
 .app-shell .database-toolbar { flex-wrap: wrap; gap: var(--space-2); padding-block: var(--space-2); }
+.app-shell .task-table-row > * { border-right: 0; }
+.app-shell .task-table-head { font-size: var(--type-label); font-weight: 400; }
+.app-shell .task-table-row :is(.relation-cell, .assignment-cell) { color: var(--text-secondary); font-size: var(--type-label); font-weight: 400; }
+.app-shell .task-table-row:not(.task-table-head) { min-height: calc(var(--row-height) + var(--space-2)); }
+.app-shell .task-table-row .name-open-button { font-weight: 400; }
+.app-shell .task-list-row { padding-block: var(--space-2); }
+.app-shell .task-list-open b { font-weight: 400; line-height: 1.6; }
 .app-shell :is(.project-card-list, .board-column > div) { gap: var(--space-3); padding: var(--space-4) 0; }
 .app-shell :is(.project-card, .board-item, .routine-card) { border-radius: var(--radius-control); box-shadow: none; }
 .app-shell :is(.project-card-open, .routine-card) { padding: var(--space-4); gap: var(--space-4); }
-.app-shell .project-card-properties > span { padding: var(--space-2) 0; border-radius: 0; background: transparent; border-top: 1px solid var(--border-default); }
+.app-shell .project-card { border-width: 1px 0 0; border-radius: 0; background: transparent; }
+.app-shell .project-card-open { padding: var(--space-4) var(--space-2); }
+.app-shell .project-card-properties { gap: var(--space-4); }
+.app-shell .project-card-properties > span { padding: 0; border: 0; border-radius: 0; background: transparent; }
+.app-shell .project-card-properties small { font-size: var(--type-label); }
+.app-shell .project-card-properties b { font-weight: 400; }
+.app-shell .project-card-progress b { font-size: var(--type-label); font-weight: 500; color: var(--progress-text); }
 .app-shell :is(.project-card-open > header b, .project-card-relation span, .routine-card b, .scrum-task-list b, .trash-record h3) { white-space: normal; overflow-wrap: anywhere; }
 .app-shell .board { background: transparent; }
 .app-shell .board-item:hover { box-shadow: none; }
@@ -90,12 +104,20 @@
 
 .app-shell .kr-data-guide { padding: var(--space-4) 0; border-width: 0 0 1px; border-radius: 0; background: transparent; }
 .app-shell .kr-data-list { gap: var(--space-3); }
-.app-shell .kr-data-card { padding: var(--space-4); border-radius: var(--radius-control); box-shadow: none; }
-.app-shell .kr-data-card dl { border-width: 1px 0; border-radius: 0; }
+.app-shell .kr-data-card { padding: var(--space-4) 0 var(--space-4) var(--space-3); border: 0; border-left: 2px solid var(--kr-rail); border-radius: 0; background: transparent; box-shadow: none; }
+.app-shell .kr-data-card:has(.type-project) { border-left-color: var(--project-badge-text); }
+.app-shell .kr-data-card > header h2 { font-size: var(--type-body); font-weight: 400; line-height: 1.6; }
+.app-shell .kr-data-card dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--space-4); border: 0; border-radius: 0; background: transparent; }
+.app-shell .kr-data-card dl > div { padding: 0; border: 0; }
 .app-shell .kr-data-unconnected { padding-inline: 0; border-top: 1px solid var(--border-default); border-radius: 0; background: transparent; }
 .app-shell :is(.kr-data-guide p, .kr-data-card dt, .kr-data-card dd,
   .kr-data-unconnected p, .recommendation-row p, .recommendation-row small,
   .review-progress > div, .review-list > span) { font-size: var(--type-label); line-height: 1.6; }
+.app-shell .kr-data-card dd { margin-top: var(--space-1); font-weight: 400; white-space: normal; overflow-wrap: anywhere; }
+.app-shell .kr-data-progress { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+.app-shell .kr-data-progress > span { flex: 1 1 8rem; }
+.app-shell .kr-data-progress > b { max-width: 100%; white-space: normal; overflow-wrap: anywhere; font-size: var(--type-section); font-weight: 650; font-variant-numeric: tabular-nums; }
+.app-shell .kr-data-card > footer { flex-wrap: wrap; }
 .app-shell .recommendation-row { gap: var(--space-3); padding: var(--space-4) 0; grid-template-columns: 2rem minmax(0, 1fr) var(--control-height); }
 .app-shell .recommendation-row h3 { overflow-wrap: anywhere; }
 .app-shell .review-progress { padding-block: var(--space-6); }
@@ -215,7 +237,10 @@
   .app-shell .workspace-topbar .workspace-mobile-home > svg { display: block; flex: 0 0 auto; }
 }
 @media (max-width: 640px) {
-  .app-shell .page-header p { font-size: var(--type-label); line-height: 1.5; }
+  .app-shell .kr-data-card > header { grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); }
+  .app-shell .kr-data-card > header .type-icon { justify-self: start; }
+  .app-shell .kr-data-card > header > strong { grid-column: 2; grid-row: 1; }
+  .app-shell .kr-data-card > header > div { grid-column: 1 / -1; grid-row: 2; }
   .app-shell .mobile-navigation .nav-item span { font-size: var(--type-meta); line-height: 1.2; }
   .app-shell .scrum-toolbar { display: grid; grid-template-columns: minmax(0, 1fr); align-items: stretch; gap: var(--space-2); padding: var(--space-3) 0; }
   .app-shell .scrum-toolbar > label { width: 100%; min-height: var(--control-height); display: grid; grid-template-columns: 1rem minmax(0, 1fr); gap: var(--space-2); }
@@ -226,9 +251,6 @@
   .app-shell :is(.daily-editor, .daily-rollup) { padding-block: var(--space-4); }
   .app-shell :is(.daily-editor, .daily-rollup) > header { margin-bottom: var(--space-4); }
   .app-shell :is(.daily-task-picker, .daily-new-task) { margin-top: var(--space-4); }
-  .app-shell :is(.daily-editor > header p, .daily-rollup > header p, .daily-skip-toggle small,
-    .daily-task-picker > summary small, .daily-task-option small, .daily-member-card p,
-    .daily-member-card > header small, .daily-empty, .daily-dri-alert p) { font-size: var(--type-meta); line-height: 1.5; }
   .app-shell .daily-project-heading { align-items: flex-start; }
   .app-shell .daily-project-heading h3 { align-items: flex-start; line-height: 1.45; }
   .app-shell .daily-container-kind { padding-top: 1px; line-height: 1.5; }

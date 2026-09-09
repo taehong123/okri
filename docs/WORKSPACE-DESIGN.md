@@ -54,6 +54,28 @@ proxy rendered My Work without runtime errors and rejected all four write verbs.
 
 ## Integration
 
+### Landing-to-workspace alignment (2026-09-09)
+
+The native landing example is the visual reference for reading OKRs: one quiet
+Objective icon, a KR rail, a 14px role label, a regular 16px title, and separate
+14px metric labels with 18px tabular values. Keep the reading measure at 44rem;
+do not spread related values across the full workspace. The live KR shows its
+stored progress and Initiative count, not inferred current/target metric values.
+Disclosure, project-detail navigation and keyboard operation remain unchanged.
+Initiatives retain their themed rail without repeating a letter badge beside
+the role label. Child Project and Task rows use indentation, not nested frames.
+
+Project tables use row separators without vertical cell rules. Project cards
+use one top separator and open metric groups. Connected KR data uses the same
+rail and label/value rhythm. Retain visible boundaries on editable controls and
+the shared semantic palette; removing passive frames is not a reason to lower
+control contrast. Project context sections keep a valid shared inset and a
+transparent surface. Body and secondary text do not shrink on mobile.
+
+Check `landing-alignment.spec.ts`, `design-system.spec.ts`,
+`workspace-design.spec.ts` and `item-editor.spec.ts` with one worker and mocked
+API writes before publishing.
+
 This follows landing commit `b0adfb7` in the isolated `.sites-landing` checkout,
 on `codex/design-unification`. Preserve other tasks' API/default-property/daily-bot
 changes during later integration. Do not copy the unrelated shared dirty checkout.
