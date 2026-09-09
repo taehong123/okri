@@ -82,7 +82,8 @@ test('Project create and edit share fields, preserve values and use separate hid
   await page.screenshot({ path: info.outputPath('project-create.png') });
   await page.keyboard.press('Escape');
   await page.goto('/?view=work&project=project-1');
-  const panel = page.locator('.project-detail-panel');
+  await page.locator('.document-properties').getByRole('button', { name: '변경', exact: true }).click();
+  const panel = page.locator('.document-properties-editor');
   const budget = panel.getByLabel('예산 Budget 2026', { exact: true });
   await expect(budget).toHaveValue('1200.5');
   expect(await fieldStyle(budget)).toEqual(createStyle);
@@ -106,9 +107,11 @@ test('Project create and edit share fields, preserve values and use separate hid
   ]);
   await panel.getByRole('combobox', { name: '상위 Initiative', exact: true }).selectOption('initiative-2');
   await expect.poll(() => writes.some(write => write.path === '/api/items' && write.data.parentId === 'initiative-2')).toBe(true);
-  await panel.getByRole('button', { name: '오버레이 동작 점검', exact: true }).click();
+  await page.keyboard.press('Escape');
+  await page.locator('.project-detail-panel').getByRole('button', { name: '오버레이 동작 점검', exact: true }).click();
   await expect(page.locator('.task-detail-panel')).toBeVisible();
-  await expect(page.locator('.task-detail-panel').getByRole('combobox', { name: '연결 대상', exact: true })).toHaveValue('project:project-1');
+  await page.locator('.task-detail-panel .document-properties').getByRole('button', { name: '변경', exact: true }).click();
+  await expect(page.locator('.document-properties-editor').getByRole('combobox', { name: '연결 대상', exact: true })).toHaveValue('project:project-1');
   expect(duplicateKeys).toEqual([]);
 });
 
@@ -116,11 +119,12 @@ test('Viewer sees a consistent read-only Project without interactive assignment 
   const writes = await fixture(page, true);
   await page.goto('/?view=work&project=project-1');
   const panel = page.locator('.project-detail-panel');
-  await expect(panel.getByLabel('Project 이름')).toHaveAttribute('readonly', '');
-  await expect(panel.getByLabel('예산 Budget 2026', { exact: true })).toBeDisabled();
-  await expect(panel.locator('.member-chip')).toBeDisabled();
-  await expect(panel.locator('.member-mention-input input')).toBeDisabled();
-  await expect(panel.locator('.hidden-property-list button')).toBeDisabled();
+  await expect(panel.getByRole('heading', { name: '모바일 사용성 개선', exact: true })).toBeVisible();
+  await panel.getByRole('button', { name: '속성', exact: true }).click();
+  await expect(panel.locator('.document-property-list')).toContainText('1200.5');
+  await expect(panel.locator('.document-property-list')).not.toContainText('위험도');
+  await expect(panel.locator('.document-properties-change')).toHaveCount(0);
+  await expect(page.locator('.document-properties-editor')).toHaveCount(0);
   await expect(panel.getByRole('button', { name: /숨기기$/ })).toHaveCount(0);
   await expect(panel.getByRole('button', { name: 'Project 휴지통으로 이동' })).toHaveCount(0);
   await editorFits(page, panel);
@@ -133,9 +137,11 @@ test('Project progress bot stays conservative and applies only a confirmed sugge
   const panel = page.locator('.project-detail-panel');
 
   await expect(panel.getByRole('heading', { name: '진행 상황' })).toBeVisible();
-  await expect(panel.getByRole('checkbox', { name: '진행사항 봇 사용' })).not.toBeChecked();
-  await panel.getByRole('button', { name: '진행사항 봇 켜기' }).click();
-  await expect(panel.getByRole('checkbox', { name: '진행사항 봇 사용' })).toBeChecked();
+  await expect(panel.getByRole('button', { name: '진행사항 봇 켜기' })).toHaveCount(0);
+  await panel.locator('.document-properties').getByRole('button', { name: '변경', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: '진행사항 봇 사용' })).not.toBeChecked();
+  await page.getByRole('checkbox', { name: '진행사항 봇 사용' }).check();
+  await page.keyboard.press('Escape');
   await expect(panel.getByText('Task 완료율과 Project 진행률이 다릅니다.')).toBeVisible();
   expect(writes.filter(write => write.path === '/api/items' && write.data.progress !== undefined)).toEqual([]);
   const contrast = await new AxeBuilder({ page: page as never }).include('.project-progress-section').withRules(['color-contrast']).analyze();
@@ -197,7 +203,8 @@ for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
     await fixture(page);
     await page.setViewportSize({ width, height: 1000 });
     await page.goto('/?view=work&project=project-1');
-    const panel = page.locator('.project-detail-panel');
+    await page.locator('.document-properties').getByRole('button', { name: '변경', exact: true }).click();
+    const panel = page.locator('.document-properties-editor');
     await expect(panel).toBeVisible();
     await panel.getByLabel('Project 이름').fill('고객 경험과 운영 품질을 개선하는 Project 2026 '.repeat(8));
     for (const scale of [100, 200]) {
@@ -218,7 +225,8 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   test.setTimeout(120_000);
   await fixture(page);
   await page.goto('/?view=work&project=project-1');
-  const panel = page.locator('.project-detail-panel');
+  await page.locator('.document-properties').getByRole('button', { name: '변경', exact: true }).click();
+  const panel = page.locator('.document-properties-editor');
   await expect(panel).toBeVisible();
   await page.evaluate(() => document.fonts.ready);
   const cdp = await page.context().newCDPSession(page);
@@ -241,6 +249,7 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await expect(panel.getByLabel('기한', { exact: true })).toHaveCount(0);
   await page.keyboard.press('Escape');
   await expect(panel).toHaveCount(0);
+  await page.keyboard.press('Escape');
 
   await installApiMocks(page, { withRoutine: true });
   await page.goto('/?view=inbox&task=task-1');
@@ -248,13 +257,16 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await expect(task).toBeVisible();
   await expect(task.getByRole('combobox', { name: '상태', exact: true })).toHaveCount(0);
   await expect(task.locator('input[type="range"]')).toHaveCount(0);
-  const taskStyle = await fieldStyle(task.getByRole('combobox', { name: '우선순위', exact: true }));
   await expect(task.getByRole('button', { name: '완료', exact: true })).toBeVisible();
+  await task.locator('.document-properties').getByRole('button', { name: '변경', exact: true }).click();
+  const taskStyle = await fieldStyle(page.locator('.document-properties-editor').getByRole('combobox', { name: '우선순위', exact: true }));
   await page.goto('/?view=routines');
   await page.locator('.routine-expand').click();
+  await page.locator('.routine-details .document-properties').getByRole('button', { name: '변경', exact: true }).click();
   await expect(page.locator('.routine-guide-grid')).toBeVisible();
   await expect(page.getByText('Routine 문서', { exact: true })).toBeVisible();
   await expect(page.locator('.routine-details .work-document-section .bn-editor')).toContainText('Routine playbook');
+  await page.locator('.document-properties-editor > header h2').click();
   const routineStyle = await fieldStyle(page.locator('.routine-guide-grid').getByLabel('트리거 포인트', { exact: true }));
   expect(routineStyle).toEqual(taskStyle);
   await page.screenshot({ path: info.outputPath('routine-edit.png') });

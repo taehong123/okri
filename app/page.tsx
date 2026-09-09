@@ -3300,7 +3300,38 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           </div>
         </header>
         <div className="project-detail-content">
+          <aside className="project-context-column" aria-label={t("Project 정보")}>
+        <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
+        <form className="property-form project-detail-form" onSubmit={event => event.preventDefault()}>
+          <label><span>{t("Project 이름")}</span><textarea aria-label={t("Project 이름")} defaultValue={project.title} rows={2} onBlur={event => { const title = event.target.value.trim(); if (title && title !== project.title) void onPatch(project.id, { title }); }} /></label>
+          {systemPropertyVisible("parent_id") && <ProjectSystemPropertySlot property={systemProperty("parent_id")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("parent_id"), t, "상위 Initiative")}</span><select disabled={readOnly} value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">{t("선택")}</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label></ProjectSystemPropertySlot>}
+          <div className="project-field-grid">
+            {systemPropertyVisible("priority") && <ProjectSystemPropertySlot property={systemProperty("priority")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("priority"), t, "우선순위")}</span><select disabled={readOnly} className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
+            {systemPropertyVisible("status") && <ProjectSystemPropertySlot property={systemProperty("status")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("status"), t, "상태")}</span><select disabled={readOnly} value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
+            {systemPropertyVisible("due_date") && <ProjectSystemPropertySlot property={systemProperty("due_date")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("due_date"), t, "기한")}</span><input disabled={readOnly} type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label></ProjectSystemPropertySlot>}
+          </div>
+          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemPropertyLabel(systemProperty("project_dri"), t, "책임자")} members={teamMembers} selectedIds={driIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></ProjectSystemPropertySlot>}
+          {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemPropertyLabel(systemProperty("project_workers"), t, "하위 업무자")} members={teamMembers} selectedIds={workerIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder={t("@실명으로 여러 명 태그")} /></ProjectSystemPropertySlot>}
+        </form>
+        <section className="project-custom-properties">
+          <header><b>{t("Project 속성")}</b><span>{readOnly ? t("읽기 전용") : t("변경 즉시 저장")}</span></header>
+          {visibleProperties.length ? <div className="project-field-grid">{visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />)}</div> : <EmptyState icon={Settings2} title={t("표시 중인 커스텀 속성이 없습니다")} />}
+          {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>{t("숨긴 속성")}{hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button type="button" disabled={readOnly} key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{systemPropertyLabel(property, t)}</button>)}</div>}
+        </section>
+        <div className="project-progress-bot-control"><span><Bot size={15} />{t("진행사항 봇")}</span><label className="project-bot-switch"><input type="checkbox" checked={progressBotEnabled} onChange={event => setProgressBot(event.target.checked)} aria-label={t("진행사항 봇 사용")} /><span aria-hidden="true" /></label></div>
+        </>}</DocumentProperties>
+        <details className="document-related"><summary>{t("상위 OKR")} · {t("연결 데이터")}</summary>
+        <ProjectDataSection key={`data:${project.id}`} project={project} />
+        <section className="task-lineage project-lineage-compact">
+          <header><b>{t("상위 OKR")}</b><span>Objective → KR → Initiative</span></header>
+          <LineageRow label={t("Objective")} value={objective?.title ?? "미연결"} />
+          <LineageRow label={t("Key Result")} value={keyResult?.title ?? "미연결"} />
+          <LineageRow label={t("Initiative")} value={initiative?.title ?? "미연결"} />
+        </section>
+        </details>
+          </aside>
           <main className="project-primary-column">
+            <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
             <ProjectProgressSection
               project={project}
               tasks={linkedTasks}
@@ -3334,38 +3365,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
                 {!linkedTasks.length && <div className="project-task-empty">{t("연결된 Task가 없습니다.")}</div>}
               </div>
             </section>
-            <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
           </main>
-          <aside className="project-context-column" aria-label={t("Project 정보")}>
-        <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
-        <form className="property-form project-detail-form" onSubmit={event => event.preventDefault()}>
-          <label><span>{t("Project 이름")}</span><textarea aria-label={t("Project 이름")} defaultValue={project.title} rows={2} onBlur={event => { const title = event.target.value.trim(); if (title && title !== project.title) void onPatch(project.id, { title }); }} /></label>
-          {systemPropertyVisible("parent_id") && <ProjectSystemPropertySlot property={systemProperty("parent_id")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("parent_id"), t, "상위 Initiative")}</span><select disabled={readOnly} value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">{t("선택")}</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label></ProjectSystemPropertySlot>}
-          <div className="project-field-grid">
-            {systemPropertyVisible("priority") && <ProjectSystemPropertySlot property={systemProperty("priority")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("priority"), t, "우선순위")}</span><select disabled={readOnly} className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
-            {systemPropertyVisible("status") && <ProjectSystemPropertySlot property={systemProperty("status")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("status"), t, "상태")}</span><select disabled={readOnly} value={project.status} onChange={(event) => void onPatch(project.id, { status: event.target.value as ItemStatus })}>{Object.entries(statusLabels).filter(([value]) => value !== "archived").map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
-            {systemPropertyVisible("due_date") && <ProjectSystemPropertySlot property={systemProperty("due_date")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("due_date"), t, "기한")}</span><input disabled={readOnly} type="date" value={project.dueDate ?? ""} onChange={(event) => void onPatch(project.id, { dueDate: event.target.value || null })} /></label></ProjectSystemPropertySlot>}
-          </div>
-          {teamMembers.length > 0 && systemPropertyVisible("project_dri") && <ProjectSystemPropertySlot property={systemProperty("project_dri")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemPropertyLabel(systemProperty("project_dri"), t, "책임자")} members={teamMembers} selectedIds={driIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_dri", ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></ProjectSystemPropertySlot>}
-          {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemPropertyLabel(systemProperty("project_workers"), t, "하위 업무자")} members={teamMembers} selectedIds={workerIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder={t("@실명으로 여러 명 태그")} /></ProjectSystemPropertySlot>}
-        </form>
-        <section className="project-custom-properties">
-          <header><b>{t("Project 속성")}</b><span>{readOnly ? t("읽기 전용") : t("변경 즉시 저장")}</span></header>
-          {visibleProperties.length ? <div className="project-field-grid">{visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />)}</div> : <EmptyState icon={Settings2} title={t("표시 중인 커스텀 속성이 없습니다")} />}
-          {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>{t("숨긴 속성")}{hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button type="button" disabled={readOnly} key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{systemPropertyLabel(property, t)}</button>)}</div>}
-        </section>
-        <div className="project-progress-bot-control"><span><Bot size={15} />{t("진행사항 봇")}</span><label className="project-bot-switch"><input type="checkbox" checked={progressBotEnabled} onChange={event => setProgressBot(event.target.checked)} aria-label={t("진행사항 봇 사용")} /><span aria-hidden="true" /></label></div>
-        </>}</DocumentProperties>
-        <details className="document-related"><summary>{t("상위 OKR")} · {t("연결 데이터")}</summary>
-        <ProjectDataSection key={`data:${project.id}`} project={project} />
-        <section className="task-lineage project-lineage-compact">
-          <header><b>{t("상위 OKR")}</b><span>Objective → KR → Initiative</span></header>
-          <LineageRow label={t("Objective")} value={objective?.title ?? "미연결"} />
-          <LineageRow label={t("Key Result")} value={keyResult?.title ?? "미연결"} />
-          <LineageRow label={t("Initiative")} value={initiative?.title ?? "미연결"} />
-        </section>
-        </details>
-          </aside>
         </div>
       </aside>}
     </OverlayDialog>

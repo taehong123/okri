@@ -7,16 +7,28 @@
 .document-properties-summary { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; min-height: var(--control-height); gap: var(--space-1) var(--space-3); color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
 .document-properties-summary > span { overflow-wrap: anywhere; }
 .document-properties-change { flex: 0 0 auto; }
+.document-properties-change,
+.project-document-section > header > button.secondary,
+.project-linked-tasks > button.secondary,
+.routine-toolbar > button.secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control); font: inherit; font-size: var(--type-label); cursor: pointer; }
+.project-linked-tasks > button.secondary { justify-self: start; }
 .document-property-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--space-3) var(--space-6); margin: var(--space-4) 0 0; padding: 0 0 var(--space-4); }
 .document-property-list[hidden] { display: none; }
 .document-property-list > div { display: grid; grid-template-columns: minmax(0, 7rem) minmax(0, 1fr); align-content: start; gap: var(--space-3); min-width: 0; }
 .document-property-list dt { color: var(--text-secondary); font-size: var(--type-label); overflow-wrap: anywhere; }
 .document-property-list dd { margin: 0; color: var(--text-primary); font-size: var(--type-label); overflow-wrap: anywhere; white-space: pre-wrap; }
 .property-panel.document-properties-editor { --editor-inset: var(--space-6); width: min(42rem, 100%); height: auto; max-height: 90dvh; overflow-y: auto; border: 1px solid var(--border-default); border-radius: var(--radius-overlay); background: var(--bg-page); }
-.document-properties-editor > header { position: sticky; top: 0; z-index: 2; background: var(--bg-page); }
+.document-properties-editor > header { display: flex; position: sticky; top: 0; z-index: 2; background: var(--bg-page); }
 .document-properties-editor .property-form { border: 0; }
+.document-properties-editor .member-mention-box { min-width: 0; max-width: 100%; }
+.document-properties-editor .member-chip { min-width: 0; }
+.document-properties-editor .member-chip b { white-space: normal; overflow-wrap: anywhere; }
+.document-properties-editor > header h2 { word-break: keep-all; }
 .document-properties-editor > footer { display: flex; justify-content: flex-end; gap: var(--space-3); padding: var(--space-4) var(--editor-inset); }
 .document-properties-editor .project-progress-bot-control { padding: var(--space-4) var(--editor-inset); justify-content: space-between; }
+.document-properties-editor .project-progress-bot-control { flex-wrap: wrap; }
+.document-properties-editor .project-progress-bot-control > span { white-space: normal; overflow-wrap: anywhere; }
+.project-detail-panel > header.project-page-head, .task-detail-panel > header { position: static; }
 .property-panel :is(h2.document-title, h3.document-title) { margin: var(--space-2) 0 0; color: var(--text-primary); font-size: var(--type-page); font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
 .project-detail-panel .project-detail-content { display: flex; flex-direction: column; }
 .project-detail-panel .project-primary-column { display: flex; flex-direction: column; width: 100%; }
@@ -50,6 +62,15 @@
 .project-detail-panel .project-document-section > header { border-bottom: 0; }
 .project-detail-panel .project-block-editor:not(:has([contenteditable="true"])) { min-height: 0; padding-bottom: var(--space-6); }
 .project-detail-panel .project-block-editor [contenteditable="false"] { min-height: 0; }
+.work-document-section .project-block-editor:not(:has([contenteditable="true"])) { min-height: 0; padding-bottom: var(--space-6); }
+.work-document-section .project-block-editor [contenteditable="false"] { min-height: 0; }
+.routine-details > .work-document-section { margin-inline: 0; }
+.routine-details > .work-document-section > header { padding-inline: 0; }
+.routine-details > .work-document-section .project-block-editor .bn-editor { padding-inline: 0; }
+.routine-card .work-document-section > header { display: flex; align-items: center; justify-content: space-between; }
+.routine-card .work-document-section > header > div { flex: 1; min-width: 0; }
+.routine-card .work-document-section > header > button { flex: 0 0 auto; }
+.routine-card .work-document-section > header b { white-space: normal; word-break: keep-all; }
 @media (max-width: 700px) {
   .property-panel.document-properties-editor { --editor-inset: var(--space-4); max-height: 94dvh; }
   .document-properties-summary { gap: var(--space-1) var(--space-2); }

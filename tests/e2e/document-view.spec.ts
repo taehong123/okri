@@ -20,7 +20,14 @@ async function fixture(page: Page, viewer = false) {
 }
 async function fits(page: Page, element: Locator) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
-  expect(await element.evaluate(node => node.scrollWidth - node.clientWidth)).toBeLessThanOrEqual(1);
+  const layout = await element.evaluate(node => {
+    const frame = node.getBoundingClientRect();
+    return { overflow: node.scrollWidth - node.clientWidth, outside: [...node.querySelectorAll('*')].filter(child => {
+      const rect = child.getBoundingClientRect();
+      return rect.width && (rect.left < frame.left - 1 || rect.right > frame.right + 1);
+    }).map(child => ({ tag: child.tagName, className: child.className })) };
+  });
+  expect(layout.overflow, JSON.stringify(layout.outside)).toBeLessThanOrEqual(1);
 }
 
 test("Project reads as a document; only Change opens property controls", async ({ page }, info) => {
@@ -71,9 +78,9 @@ test("Routine opens readable instructions, preserves drafts on cancel, and disca
   await page.goto("/?view=routines");
   await page.locator(".routine-expand").click();
   const routine = page.locator(".routine-card").filter({ has: page.locator(".routine-expand") });
-  await expect(routine.locator(".routine-document-body")).toContainText("고객 피드백 확인");
+  await expect(routine.locator(".work-document-section")).toBeVisible();
   await expect(routine.locator(".routine-guide-grid")).toHaveCount(0);
-  await routine.getByRole("button", { name: "변경", exact: true }).click();
+  await routine.locator(".document-properties").getByRole("button", { name: "변경", exact: true }).click();
   const editor = page.locator(".document-properties-editor");
   await editor.getByLabel("트리거 포인트", { exact: true }).fill("월요일 아침");
   await page.keyboard.press("Escape");
@@ -82,7 +89,7 @@ test("Routine opens readable instructions, preserves drafts on cancel, and disca
   await page.keyboard.press("Escape");
   await page.getByRole("button", { name: "변경사항 버리기", exact: true }).click();
   await expect(editor).toHaveCount(0);
-  await routine.getByRole("button", { name: "변경", exact: true }).click();
+  await routine.locator(".document-properties").getByRole("button", { name: "변경", exact: true }).click();
   await expect(editor.getByLabel("트리거 포인트", { exact: true })).toHaveValue("금요일 오후");
   expect(writes).toEqual([]);
   await page.keyboard.press("Escape");
@@ -139,6 +146,25 @@ test("document palette contrast and Korean/Latin/numeral fonts follow all themes
     expect(fonts.every(font => font.isCustomFont && /Pretendard/.test(font.familyName))).toBe(true);
   }
   await cdp.detach();
+});
+
+test("Task and Routine body changes are explicit and save through the shared editor", async ({ page }, info) => {
+  test.setTimeout(60_000);
+  const writes = await fixture(page);
+  for (const kind of ["task", "routine"]) {
+    await page.goto(kind === "task" ? "/?view=inbox&task=task-1" : "/?view=routines");
+    if (kind === "routine") await page.locator(".routine-expand").click();
+    const section = page.locator(".work-document-section");
+    await expect(section.locator(".bn-editor")).toBeVisible();
+    await expect(section.locator('[contenteditable="true"]')).toHaveCount(0);
+    await section.getByRole("button", { name: "변경", exact: true }).click();
+    await section.locator('.bn-editor[contenteditable="true"]').fill(`${kind} 문서 본문 2026`);
+    await expect.poll(() => writes.some(write => write.path === "/api/work-documents" && write.data.targetKind === kind && String(write.data.plainText).includes(`${kind} 문서 본문 2026`))).toBe(true);
+    await section.getByRole("button", { name: "닫기", exact: true }).click();
+    await expect(section.locator('[contenteditable="true"]')).toHaveCount(0);
+    await expect(section.locator(".bn-editor")).toContainText(`${kind} 문서 본문 2026`);
+    await page.screenshot({ path: info.outputPath(`${kind}-saved-document.png`) });
+  }
 });
 
 test("Viewers read Project, Task and Routine properties without editing controls", async ({ page }) => {

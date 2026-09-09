@@ -618,10 +618,6 @@ async function ensureSchema() {
           trigger_point TEXT NOT NULL DEFAULT '',
           action_place TEXT NOT NULL DEFAULT '',
           action_steps TEXT NOT NULL DEFAULT '',
-          document_content TEXT NOT NULL DEFAULT '[]',
-          document_plain_text TEXT NOT NULL DEFAULT '',
-          document_version INTEGER NOT NULL DEFAULT 0,
-          document_updated_at TEXT,
           cadence TEXT NOT NULL DEFAULT 'daily',
           active INTEGER NOT NULL DEFAULT 1,
           sort_order INTEGER NOT NULL DEFAULT 0,
@@ -766,10 +762,6 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN trigger_point TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_place TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN action_steps TEXT NOT NULL DEFAULT ''");
-      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN document_content TEXT NOT NULL DEFAULT '[]'");
-      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN document_plain_text TEXT NOT NULL DEFAULT ''");
-      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN document_version INTEGER NOT NULL DEFAULT 0");
-      await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN document_updated_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN system_key TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE routines ADD COLUMN assignee_member_id TEXT REFERENCES workspace_members(id) ON DELETE SET NULL");
       await addColumnIfMissing(d1, "ALTER TABLE okr_cycles ADD COLUMN department TEXT NOT NULL DEFAULT ''");
