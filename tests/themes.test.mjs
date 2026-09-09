@@ -91,6 +91,25 @@ test("first paint preserves every saved theme and tolerates missing, invalid or 
   assert.equal(root.dataset.theme, DEFAULT_THEME);
 });
 
+test("white chrome is strictly neutral while semantic status colors retain meaning", () => {
+  const white = THEMES.find((theme) => theme.mode === "white").tokens;
+  const roles = ["bg-page", "bg-sidebar", "bg-surface", "bg-subtle", "bg-hover", "bg-raised", "text-primary", "text-secondary", "text-tertiary", "text-link", "icon-default", "border-default", "border-control", "menu-bg", "menu-fg", "modal-bg", "input-bg", "input-fg", "selected-bg", "selected-fg", "initiative-badge-bg", "initiative-badge-text", "initiative-rail"];
+  for (const role of roles) {
+    const channels = white[role].slice(1).match(/../g).map((part) => parseInt(part, 16));
+    assert.equal(new Set(channels).size, 1, `${role} must have no color cast`);
+  }
+  assert.equal(white["bg-sidebar"], white["bg-page"]);
+  assert.notEqual(white["danger-fg"], white["text-primary"]);
+  assert.notEqual(white["success-fg"], white["text-primary"]);
+  assert.notEqual(white["info-fg"], white["text-primary"]);
+  assert.doesNotMatch(css, /var\(--blue\)/, "legacy blue must not style generic UI");
+  const rules = postcss.parse(css);
+  rules.walkRules((rule) => {
+    if (!/^\.(assistant-stage|assistant-example|chat-okr-context|general-routine-icon|system-badge|integration-service-icon|workspace-daily-bot-heading|integration-oauth-flow)/.test(rule.selector)) return;
+    rule.walkDecls((decl) => assert.doesNotMatch(decl.value, /var\(--info-(?:fg|bg)\)/, `${rule.selector} is not a status alert`));
+  });
+});
+
 test("readability uses scalable roles instead of per-screen font patches or CSS zoom", () => {
   const root = postcss.parse(css);
   const roles = { "--type-body": "1rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.125rem", "--type-page": "1.5rem" };
