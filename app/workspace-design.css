@@ -17,11 +17,12 @@
   padding: 0;
 }
 .app-shell .workspace-topbar .workspace-brand > svg { display: block; flex: 0 0 auto; }
-.app-shell .sidebar { padding: var(--space-3) var(--space-2); background: var(--bg-surface); }
+.app-shell .sidebar { padding: var(--space-3) var(--space-2); background: var(--bg-sidebar); }
 .app-shell .sidebar nav { gap: var(--space-1); margin-top: var(--space-4); }
 .app-shell :is(.workspace-switcher, .nav-item, .profile-row) { gap: var(--space-2); padding-inline: var(--space-3); }
 .app-shell :is(.workspace-switcher:hover, .workspace-switcher[aria-expanded="true"], .profile-row:hover, .nav-item.active) { box-shadow: none; background: var(--bg-hover); }
 .app-shell .nav-item.active { font-weight: 600; }
+.app-shell .nav-item:not(.active):hover { background: var(--bg-subtle); }
 .app-shell .workspace-settings-trigger { border-color: transparent; background: transparent; box-shadow: none; }
 .app-shell .workspace-settings-trigger:hover { background: var(--bg-hover); }
 .app-shell .assistant-sidebar-tab { border-color: transparent; background: transparent; font-weight: 600; }
@@ -143,7 +144,7 @@
 .workspace-settings-panel { grid-template-rows: auto minmax(0, 1fr); }
 .workspace-settings-layout { grid-template-columns: 12rem minmax(0, 1fr); }
 .workspace-settings-header p { white-space: normal; overflow-wrap: anywhere; }
-.workspace-settings-nav { padding: var(--space-4) var(--space-2); gap: var(--space-1); background: var(--bg-surface); }
+.workspace-settings-nav { padding: var(--space-4) var(--space-2); gap: var(--space-1); background: var(--bg-sidebar); }
 .workspace-settings-nav button.active { background: var(--bg-hover); box-shadow: none; }
 .workspace-settings-content { background: var(--bg-page); }
 .workspace-profile-card { margin: var(--space-6); padding: 0 0 var(--space-6); border-width: 0 0 1px; border-radius: 0; background: transparent; box-shadow: none; }

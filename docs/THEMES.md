@@ -60,7 +60,7 @@ Stronger text steps are selected when necessary to meet 4.5:1 WCAG contrast.
 
 | Theme | Neutral | KR and main accent | Initiative |
 | --- | --- | --- | --- |
-| White | Gray | Ink / Gray | Slate |
+| White | Gray | Ink / Gray | Gray |
 | Beige | Sand | Gold | Teal |
 | Gray | Slate | Teal | Violet |
 | Dark | Gray Dark | Blue Dark | Violet Dark |
@@ -69,6 +69,13 @@ Stronger text steps are selected when necessary to meet 4.5:1 WCAG contrast.
 
 Bright accents belong on controls, rails and badges, not large tinted panels.
 Status colors retain their meaning independently of the hierarchy palette.
+White navigation uses the same white canvas as the page, including the loading
+sidebar, mobile navigation and settings navigation. Hover and selection use
+neutral Gray steps. Generic guidance, default avatars, empty-state icons and
+setup steps use text/icon/surface roles, never the blue information-status role.
+White Initiative labels and rails are neutral Gray as well. Keep informational
+alerts, workflow statuses, user-chosen group colors and external brands distinct;
+do not desaturate them or replace a user's saved theme.
 Upstream licenses are retained with the font assets and in
 `public/RADIX-COLORS-LICENSE.txt`. Font reference:
 [Pretendard variable subsets](https://github.com/orioncactus/pretendard#%EA%B0%80%EB%B3%80-%EB%8B%A4%EC%9D%B4%EB%82%98%EB%AF%B9-%EC%84%9C%EB%B8%8C%EC%85%8B).

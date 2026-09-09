@@ -10,7 +10,7 @@
   align-items: center;
   padding: 0 var(--space-6);
   border-bottom: 1px solid var(--border-default);
-  background: var(--bg-surface);
+  background: var(--bg-page);
 }
 
 .back {
@@ -131,8 +131,8 @@
   flex: 0 0 auto;
   padding: var(--space-1) var(--space-2);
   border-radius: var(--radius-control);
-  background: var(--info-bg);
-  color: var(--info-fg);
+  background: var(--neutral-badge-bg);
+  color: var(--neutral-badge-fg);
   font-size: var(--type-meta);
   font-weight: 650;
 }
@@ -210,7 +210,7 @@
   color: var(--button-primary-hover-fg);
 }
 
-.install:disabled { opacity: .58; cursor: default; }
+.install:disabled { border-color: var(--button-disabled-bg); background: var(--button-disabled-bg); color: var(--button-disabled-fg); opacity: 1; cursor: default; }
 .help {
   border: 1px solid var(--border-control);
   background: var(--button-secondary-bg);
