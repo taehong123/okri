@@ -6,11 +6,10 @@
 .gantt-toolbar {
   min-width: 0;
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   gap: var(--space-4);
-  padding: var(--space-3) 0;
-  border-top: 1px solid var(--border-subtle);
+  padding: 0 0 var(--space-4);
   border-bottom: 1px solid var(--border-subtle);
 }
 
@@ -23,13 +22,14 @@
 
 .gantt-range-control {
   min-width: 0;
-  gap: var(--space-3);
+  gap: var(--space-2);
 }
 
 .gantt-range-control > strong {
+  order: -1;
   min-width: 0;
   color: var(--text-primary);
-  font-size: var(--type-label);
+  font-size: var(--type-body);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
@@ -37,11 +37,8 @@
 .gantt-range-navigation {
   flex: 0 0 auto;
   display: flex;
-  align-items: stretch;
-  overflow: hidden;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-control);
-  background: var(--bg-surface);
+  align-items: center;
+  gap: var(--space-1);
 }
 
 .gantt-range-navigation > button {
@@ -50,49 +47,54 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: var(--space-1);
   padding: 0 var(--space-2);
   border: 0;
-  background: transparent;
-  color: var(--text-secondary);
+  border-radius: var(--radius-control);
+  background: var(--button-ghost-bg);
+  color: var(--button-ghost-fg);
   font-size: var(--type-label);
+  font-weight: 500;
   cursor: pointer;
 }
 
 .gantt-range-navigation > button + button {
-  border-inline-start: 1px solid var(--border-subtle);
+  border-inline-start: 0;
 }
 
 .gantt-range-navigation > button:hover {
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  background: var(--button-ghost-hover-bg);
+  color: var(--button-ghost-hover-fg);
+}
+
+.gantt-range-navigation > button:active {
+  background: var(--button-ghost-active-bg);
+  color: var(--button-ghost-active-fg);
 }
 
 .gantt-range-navigation > .gantt-today {
-  padding-inline: var(--space-3);
+  min-width: auto;
+  padding-inline: var(--space-2);
 }
 
 .gantt-range-navigation > .gantt-today[aria-current="date"] {
-  background: var(--bg-subtle);
-  color: var(--text-primary);
-  font-weight: 650;
+  background: var(--button-ghost-bg);
+  color: var(--button-ghost-fg);
+  font-weight: 500;
 }
 
 .gantt-zoom {
   flex: 0 0 auto;
-  gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--border-control);
-  border-radius: var(--radius-control);
-  background: var(--bg-surface);
+  align-items: stretch;
+  gap: var(--space-3);
 }
 
 .gantt-zoom button {
-  min-width: 3.5rem;
-  min-height: calc(var(--control-height) - 4px);
-  padding-inline: var(--space-2);
-  border: 0;
-  border-radius: calc(var(--radius-control) - 2px);
+  min-height: var(--control-height);
+  padding-inline: var(--space-1);
+  border-width: 0 0 2px;
+  border-style: solid;
+  border-color: transparent;
+  border-radius: 0;
   background: transparent;
   color: var(--text-secondary);
   font-size: var(--type-label);
@@ -100,19 +102,19 @@
 }
 
 .gantt-zoom button:hover {
-  background: var(--bg-hover);
   color: var(--text-primary);
 }
 
 .gantt-zoom button.selected {
-  background: var(--button-primary-bg);
-  color: var(--button-primary-fg);
+  border-bottom-color: var(--text-primary);
+  background: transparent;
+  color: var(--text-primary);
+  font-weight: 650;
 }
 
 .gantt-summary {
-  min-height: var(--control-height);
   flex-wrap: wrap;
-  gap: var(--space-2) var(--space-4);
+  gap: var(--space-2);
   color: var(--text-secondary);
   font-size: var(--type-label);
 }
@@ -124,8 +126,15 @@
 }
 
 .gantt-summary > span + span {
-  padding-inline-start: var(--space-4);
-  border-inline-start: 1px solid var(--border-subtle);
+  padding-inline-start: 0;
+  border-inline-start: 0;
+}
+
+.gantt-summary > span + span::before {
+  content: "·";
+  margin-inline-end: var(--space-2);
+  color: var(--text-tertiary);
+  font-weight: 400;
 }
 
 .gantt-summary .danger {
@@ -161,9 +170,8 @@
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
-  border: 1px solid var(--border-default);
-  border-radius: var(--radius-container);
-  background: var(--bg-surface);
+  border-block: 1px solid var(--border-default);
+  background: transparent;
   scrollbar-gutter: stable;
 }
 
@@ -514,11 +522,13 @@
   }
 
   .gantt-zoom {
-    width: 100%;
+    width: max-content;
+    max-width: 100%;
+    align-self: flex-start;
   }
 
   .gantt-zoom button {
-    flex: 1;
+    flex: 0 0 auto;
   }
 
   .gantt-summary {

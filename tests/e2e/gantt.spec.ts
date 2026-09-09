@@ -26,6 +26,12 @@ test("Gantt is a real menu view with Project bars and expandable Task milestones
   await expect(schedule).toBeVisible();
   await expect(dateNavigation.getByRole("button")).toHaveCount(3);
   await expect(dateNavigation.getByRole("button", { name: "오늘", exact: true })).toHaveAttribute("aria-current", "date");
+  const dateButtonStyles = await dateNavigation.getByRole("button").evaluateAll((buttons) => buttons.map((button) => {
+    const style = getComputedStyle(button);
+    return { color: style.color, backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
+  }));
+  expect(new Set(dateButtonStyles.map((style) => JSON.stringify(style))).size).toBe(1);
+  await expect(page.locator(".gantt-scroll")).toHaveCSS("border-radius", "0px");
   await dateNavigation.getByRole("button", { name: "다음", exact: true }).click();
   await expect(dateNavigation.getByRole("button", { name: "오늘", exact: true })).not.toHaveAttribute("aria-current", "date");
   await dateNavigation.getByRole("button", { name: "오늘", exact: true }).click();

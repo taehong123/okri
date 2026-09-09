@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Diamond, FolderKanban } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Diamond, FolderKanban } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 import { displayDate, getClientLocale, messageValue, t, useLanguage } from "@/lib/client-language";
 
@@ -156,7 +156,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
         <div className="gantt-range-control">
           <div className="gantt-range-navigation" role="group" aria-label={t("날짜")}>
             <button type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
-            <button className="gantt-today" type="button" aria-current={isoDate(anchor) === todayIso ? "date" : undefined} onClick={() => setAnchor(today)}><CalendarDays size={14} />{t("오늘")}</button>
+            <button className="gantt-today" type="button" aria-current={isoDate(anchor) === todayIso ? "date" : undefined} onClick={() => setAnchor(today)}>{t("오늘")}</button>
             <button type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
           </div>
           <strong>{rangeLabel(start, end, locale)}</strong>
@@ -168,9 +168,9 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
       </header>
 
       <div className="gantt-summary" aria-label={t("일정 요약")}>
-        <span><FolderKanban size={15} />{t("Project {count}개", { count: projects.length })}</span>
-        <span className={overdueCount ? "danger" : ""}><CircleAlert size={15} />{t("기한 초과")} {messageValue(overdueCount)}</span>
-        <span><CalendarDays size={15} />{t("기한 없음")} {messageValue(undatedCount)}</span>
+        <span>{t("Project {count}개", { count: projects.length })}</span>
+        <span className={overdueCount ? "danger" : ""}>{t("기한 초과")} {messageValue(overdueCount)}</span>
+        <span>{t("기한 없음")} {messageValue(undatedCount)}</span>
       </div>
 
       {!projects.length ? (
