@@ -234,6 +234,20 @@ test("skip clears work; old task-only clients retain selected project and routin
   assert.deepEqual(submitted.work, []); assert.deepEqual(submitted.tasks, []);
 });
 
+test("legacy clients can leave a new skip while preserving an existing remote status", async (t) => {
+  const { db, api } = fixture(t);
+  await api.saveDailyDraft(authorization, { date, workStatus: "skip" }, false);
+  await api.saveDailyDraft(authorization, { date, todayNote: "partial save" }, false);
+  assert.equal(db.prepare("SELECT work_status FROM daily_scrums").get().work_status, "skip");
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"], skipReason: null }, false);
+  assert.equal(db.prepare("SELECT work_status FROM daily_scrums").get().work_status, "office");
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.selectedTaskIds, ["task"]);
+
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"], workStatus: "remote" }, false);
+  await api.saveDailyDraft(authorization, { date, selectedTaskIds: ["task"], skipReason: null }, false);
+  assert.equal(db.prepare("SELECT work_status FROM daily_scrums").get().work_status, "remote");
+});
+
 test("work parsing bounds selection and rejects forged kinds", () => {
   for (const input of ['"bad"', ["owner:me"], ["project:"], Array.from({ length: 51 }, (_, i) => `project:${i}`)]) assert.throws(() => work.parseDailyWorkKeys(input));
   assert.deepEqual(work.parseDailyWorkKeys(["task:t", "task:t"]), ["task:t"]);
@@ -899,6 +913,41 @@ test("Task buttons acknowledge before slow identity lookups and use block_action
   assert.equal(updates.length, 1);
 });
 
+test("published Daily completion acknowledges before identity lookup and updates in the background", async () => {
+  const pending = [], completions = [];
+  let release;
+  const lookup = new Promise((resolve) => { release = resolve; });
+  const route = compile(await read("../app/api/slack/interactions/route.ts"), {
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
+    "@/lib/pace-data": { getSlackConnectionByTeam: async () => lookup },
+    "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+    "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
+    "@/lib/server-language": serverLanguage,
+    "@/lib/slack-daily": {
+      dailyMemberBySlack: async () => ({ authorization, memberId: "me" }),
+      completePublishedDailyTask: async (input) => completions.push(input),
+    },
+    "@/lib/slack-management-actions": {}, "@/lib/slack-daily-checklist": {},
+    "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
+  });
+  const response = await Promise.race([
+    route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
+      type: "block_actions", team: { id: "T" }, user: { id: "U" },
+      container: { channel_id: "C", message_ts: "1.001" },
+      actions: [{ action_id: "daily_publication_complete", action_ts: "2.002", value: '{"publicationId":"p","taskId":"task"}' }],
+    }) }) })),
+    new Promise((resolve) => { const timer = setTimeout(() => resolve(null), 1000); timer.unref(); }),
+  ]);
+  assert.ok(response, "Slack must receive an acknowledgement while identity lookup is pending");
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "");
+  release({ ownerId: "w", teamId: "T" });
+  while (pending.length) await Promise.all(pending.splice(0));
+  assert.equal(completions.length, 1);
+  assert.deepEqual({ channelId: completions[0].channelId, messageTs: completions[0].messageTs, actionTs: completions[0].actionTs },
+    { channelId: "C", messageTs: "1.001", actionTs: "2.002" });
+});
+
 test("failed Slack view recovery is logged without payload data and displays a minimal error", async (t) => {
   const pending = [], updates = [], logs = [];
   t.mock.method(console, "error", (...args) => logs.push(args));
@@ -1178,25 +1227,29 @@ test("signed Slack submission passes every personal checklist and rejects other-
   state.signature = false; assert.equal((await route.POST(request())).status, 401);
 });
 
-test("Slack slash commands use the linked member language and preserve authored Task titles", async () => {
-  const created = [];
+test("Slack slash commands use the linked member language and preserve authored work in a review draft", async () => {
+  const pending = [];
+  let handled;
   const route = compile(await read("../app/api/slack/commands/route.ts"), {
-    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} } },
+    "cloudflare:workers": { env: { SLACK_SIGNING_SECRET: "mock", DB: {} }, waitUntil: (promise) => pending.push(promise) },
     "@/lib/pace-data": {
       ensureWorkspace: async () => {}, getSlackConnectionByTeam: async () => ({ ownerId: "w", userId: "creator" }),
-      createItem: async (_ownerId, input) => { created.push(input); return { title: input.title }; }, serializeItem: (item) => item,
     },
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), reconcileDailyReminders: async () => {} },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
     "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "ko" },
     "@/lib/server-language": serverLanguage,
+    "@/lib/slack-work-command": { handleSlackWorkCommandEvent: async (...args) => { handled = args; } },
   });
   const request = (text) => new Request("https://example.test/api/slack/commands", { method: "POST", body: new URLSearchParams({
     team_id: "T", user_id: "U", user_name: "Me", channel_id: "C", channel_name: "general", text,
   }) });
   const help = await (await route.POST(request("help"))).json();
-  assert.match(help.text, /How to use/);
+  assert.match(help.text, /Usage/);
   const task = await (await route.POST(request("고객 인터뷰 정리"))).json();
-  assert.equal(task.text, "Saved as a Task: 고객 인터뷰 정리");
-  assert.equal(created[0].title, "고객 인터뷰 정리");
+  assert.match(task.text, /Preparing a work creation draft/);
+  await Promise.all(pending);
+  assert.equal(handled[2].text, "고객 인터뷰 정리");
+  assert.deepEqual(handled[3], { command: "work_create", query: "고객 인터뷰 정리" });
+  assert.deepEqual(handled[4], { preparingNotice: false });
 });

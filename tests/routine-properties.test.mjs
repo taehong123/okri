@@ -13,6 +13,7 @@ function fixture(t) {
   db.exec(`CREATE TABLE routines(id TEXT PRIMARY KEY, owner_id TEXT, system_key TEXT);
     CREATE TABLE workspace_members(id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
     CREATE TABLE workspace_backup_state(owner_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE app_migrations(id TEXT PRIMARY KEY, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
     INSERT INTO routines VALUES('r','w',NULL),('other-r','other',NULL),('general','w','general');
     INSERT INTO workspace_members VALUES('m','w','active'),('gone','w','removed'),('foreign','other','active');`);
   db.exec(migration);
@@ -22,7 +23,21 @@ function fixture(t) {
     first: async () => db.prepare(sql).get(...args) ?? null,
     run: async () => db.prepare(sql).run(...args),
   });
-  const d1 = { prepare: statement };
+  const d1 = {
+    prepare: statement,
+    batch: async (statements) => {
+      db.exec("BEGIN");
+      try {
+        const results = [];
+        for (const entry of statements) results.push(await entry.run());
+        db.exec("COMMIT");
+        return results;
+      } catch (error) {
+        db.exec("ROLLBACK");
+        throw error;
+      }
+    },
+  };
   const create = async (name, type, extra = {}) => (await lib.saveRoutineProperty(d1, "w", { name, type, ...extra }, true)).property;
   return { db, d1, create };
 }
@@ -95,6 +110,62 @@ test("strict dates, limits, field merges and clearing do not corrupt unrelated s
   assert.deepEqual(lib.parseRoutineProperties(db.prepare("SELECT properties_json FROM routines WHERE id='r'").get().properties_json), { legacy: "보존" });
 });
 
+test("default Routine classification is editable, backfills existing routines once and skips General", async (t) => {
+  const { db, d1 } = fixture(t);
+  await lib.ensureDefaultRoutineClassification(d1, "w");
+
+  const [classification] = await lib.listRoutineProperties(d1, "w", true);
+  assert.deepEqual(
+    {
+      name: classification.name,
+      type: classification.type,
+      options: classification.options,
+      defaultValue: classification.defaultValue,
+      active: classification.active,
+    },
+    {
+      name: "분류",
+      type: "select",
+      options: ["운영", "고객지원(CS)", "품질관리(QA)", "재무", "인사(HR)"],
+      defaultValue: "운영",
+      active: true,
+    },
+  );
+  assert.equal(lib.parseRoutineProperties(db.prepare("SELECT properties_json FROM routines WHERE id='r'").get().properties_json)[classification.id], "운영");
+  assert.deepEqual(lib.parseRoutineProperties(db.prepare("SELECT properties_json FROM routines WHERE id='general'").get().properties_json), {});
+  assert.deepEqual(await lib.prepareRoutineProperties(d1, "w", {}, true), { [classification.id]: "운영" });
+
+  await lib.saveRoutineProperty(d1, "w", {
+    id: classification.id,
+    name: "백오피스",
+    options: ["운영", "법무"],
+    defaultValue: "법무",
+  });
+  await lib.ensureDefaultRoutineClassification(d1, "w");
+  const definitions = await lib.listRoutineProperties(d1, "w", true);
+  assert.equal(definitions.length, 1);
+  assert.equal(definitions[0].name, "백오피스");
+  assert.deepEqual(definitions[0].options, ["운영", "법무"]);
+  assert.equal(definitions[0].defaultValue, "법무");
+  assert.equal(lib.parseRoutineProperties(db.prepare("SELECT properties_json FROM routines WHERE id='r'").get().properties_json)[classification.id], "운영");
+});
+
+test("an existing user classification wins and is never recreated after a later rename", async (t) => {
+  const { db, d1, create } = fixture(t);
+  const existing = await create("분류", "select", { options: ["직접 설정"], defaultValue: "직접 설정" });
+
+  await lib.ensureDefaultRoutineClassification(d1, "w");
+  assert.equal((await lib.listRoutineProperties(d1, "w", true)).length, 1);
+  assert.deepEqual(lib.parseRoutineProperties(db.prepare("SELECT properties_json FROM routines WHERE id='r'").get().properties_json), {});
+
+  await lib.saveRoutineProperty(d1, "w", { id: existing.id, name: "업무 영역" });
+  await lib.ensureDefaultRoutineClassification(d1, "w");
+  const definitions = await lib.listRoutineProperties(d1, "w", true);
+  assert.equal(definitions.length, 1);
+  assert.equal(definitions[0].name, "업무 영역");
+  assert.deepEqual(definitions[0].options, ["직접 설정"]);
+});
+
 test("routes preserve authorization, General protection, atomic routine writes and old snapshots", async () => {
   const route = await readFile(new URL("../app/api/routine-properties/route.ts", import.meta.url), "utf8");
   const data = await readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8");
@@ -104,6 +175,8 @@ test("routes preserve authorization, General protection, atomic routine writes a
   assert.match(update, /General routine is protected/);
   assert.ok(update.indexOf("prepareRoutineProperties") < update.indexOf(".update(routines)"));
   assert.match(update, /json_patch/); assert.match(update, /eq\(routines.ownerId, ownerId\)/);
+  assert.match(data, /ensureDefaultRoutineClassification\(\(env as RuntimeEnv\)\.DB, ownerId\)/);
+  assert.match(data, /defaultRoutineClassificationMigrationId\(ownerId\)/);
   const js = ts.transpileModule(backupSource, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
   const backups = await import(`data:text/javascript;base64,${Buffer.from(js).toString("base64")}`);
   const tables = Object.fromEntries(backups.BACKUP_TABLES.filter((name) => name !== "routine_property_definitions").map((name) => [name, []]));

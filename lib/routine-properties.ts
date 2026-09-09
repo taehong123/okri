@@ -1,8 +1,67 @@
 export type RoutinePropertyValue = string | number | boolean | string[] | null;
 type Row = { id: string; owner_id: string; name: string; type: string; options: string; default_value: string; active: number; sort_order: number; updated_at: string };
 const types = ["text", "number", "select", "date", "checkbox", "member", "members"];
+export const DEFAULT_ROUTINE_CLASSIFICATION = {
+  name: "분류",
+  options: ["운영", "고객지원(CS)", "품질관리(QA)", "재무", "인사(HR)"],
+  defaultValue: "운영",
+} as const;
+const defaultRoutineClassificationMigration = "routine_default_classification_v1";
 export class RoutinePropertyError extends Error {
   constructor(message: string, public status = 400) { super(message); }
+}
+
+export function defaultRoutineClassificationMigrationId(ownerId: string) {
+  return `${defaultRoutineClassificationMigration}:${ownerId}`;
+}
+
+/**
+ * Add the editable back-office classification once per workspace. An existing
+ * user-created `분류` property wins, and the marker prevents later user edits,
+ * removal or renaming from being overwritten by initialization.
+ */
+export async function ensureDefaultRoutineClassification(db: D1Database, ownerId: string) {
+  const migrationId = defaultRoutineClassificationMigrationId(ownerId);
+  if (await db.prepare("SELECT id FROM app_migrations WHERE id = ?").bind(migrationId).first()) return;
+
+  const defaultId = `routine-classification-${ownerId}`;
+  type Existing = { id: string };
+  let existing = await db.prepare(`SELECT id FROM routine_property_definitions
+    WHERE owner_id = ? AND (id = ? OR lower(name) = lower(?)) LIMIT 1`)
+    .bind(ownerId, defaultId, DEFAULT_ROUTINE_CLASSIFICATION.name).first<Existing>();
+  if (!existing) {
+    const now = new Date().toISOString();
+    await db.prepare(`INSERT OR IGNORE INTO routine_property_definitions
+      (id,owner_id,name,type,options,default_value,active,sort_order,created_at,updated_at)
+      VALUES (?,?,?,'select',?,?,1,
+        COALESCE((SELECT MAX(sort_order) FROM routine_property_definitions WHERE owner_id = ?), 0) + 10,?,?)`)
+      .bind(
+        defaultId,
+        ownerId,
+        DEFAULT_ROUTINE_CLASSIFICATION.name,
+        JSON.stringify(DEFAULT_ROUTINE_CLASSIFICATION.options),
+        JSON.stringify(DEFAULT_ROUTINE_CLASSIFICATION.defaultValue),
+        ownerId,
+        now,
+        now,
+      ).run();
+    existing = await db.prepare(`SELECT id FROM routine_property_definitions
+      WHERE owner_id = ? AND (id = ? OR lower(name) = lower(?)) LIMIT 1`)
+      .bind(ownerId, defaultId, DEFAULT_ROUTINE_CLASSIFICATION.name).first<Existing>();
+  }
+  if (!existing) throw new Error("Default Routine classification could not be initialized");
+
+  const statements = existing.id === defaultId ? [
+    db.prepare(`UPDATE routines
+      SET properties_json = json_patch(properties_json, json_object(?, ?))
+      WHERE owner_id = ? AND system_key IS NULL
+        AND NOT EXISTS (SELECT 1 FROM json_each(routines.properties_json) WHERE key = ?)`)
+      .bind(defaultId, DEFAULT_ROUTINE_CLASSIFICATION.defaultValue, ownerId, defaultId),
+  ] : [];
+  statements.push(
+    db.prepare("INSERT OR IGNORE INTO app_migrations (id, applied_at) VALUES (?, CURRENT_TIMESTAMP)").bind(migrationId),
+  );
+  await db.batch(statements);
 }
 
 export function parseRoutineProperties(json: string | null | undefined): Record<string, RoutinePropertyValue> {

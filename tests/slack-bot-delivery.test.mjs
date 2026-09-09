@@ -50,7 +50,8 @@ function harness(t) {
       work_snapshot_json TEXT DEFAULT '[]', yesterday_work_snapshot_json TEXT DEFAULT '[]');
     CREATE TABLE daily_task_snapshots(id TEXT, submission_id TEXT, sort_order INTEGER);
     CREATE TABLE slack_daily_publications(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, submission_id TEXT, scrum_date TEXT, channel_id TEXT,
-      slack_message_ts TEXT, status TEXT DEFAULT 'pending', error TEXT DEFAULT '', attempts INTEGER DEFAULT 0, updated_at TEXT);`);
+      slack_message_ts TEXT, status TEXT DEFAULT 'pending', error TEXT DEFAULT '', attempts INTEGER DEFAULT 0, updated_at TEXT);
+    CREATE UNIQUE INDEX idx_slack_daily_publications_submission_channel ON slack_daily_publications(submission_id, channel_id);`);
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
   for (const team of ["a", "b"]) {
     db.prepare("INSERT INTO workspaces VALUES(?,?,NULL)").run(team, `팀 ${team}`);
@@ -80,7 +81,7 @@ function harness(t) {
       throw error;
     }
   } };
-  const calls = [], behavior = { code: {}, loseResponse: false, beforeDecrypt: null };
+  const calls = [], behavior = { code: {}, updateCode: null, loseResponse: false, beforeDecrypt: null };
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, request) => {
     assert.ok(["https://slack.com/api/chat.postMessage", "https://slack.com/api/chat.update"].includes(url));
@@ -88,7 +89,7 @@ function harness(t) {
     const payload = JSON.parse(request.body), token = request.headers.Authorization;
     calls.push({ payload, token, method: url.split("/").at(-1) });
     if (behavior.loseResponse) throw new Error("lost response after send");
-    const code = behavior.code[token];
+    const code = url.endsWith("chat.update") && behavior.updateCode ? behavior.updateCode : behavior.code[token];
     if (code === "ratelimited") return new Response("rate limited", { status: 429, headers: { "Retry-After": "180" } });
     if (code) return Response.json({ ok: false, error: code });
     return Response.json({ ok: true, ts: payload.ts || `${calls.length}.000001` });
@@ -388,6 +389,43 @@ test("daily sharing claims concurrent submissions once and edits the existing me
   assert.equal(calls[1].method, "chat.update");
   assert.equal(calls[1].payload.ts, "1.000001");
   assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "sent");
+});
+
+test("daily sharing recreates a card deleted from Slack and updates that replacement next time", async (t) => {
+  const { daily, publication, calls, behavior, db } = harness(t);
+  const first = publication("a");
+  await daily.publishDailySubmission("a", first.submissionId);
+  behavior.updateCode = "message_not_found";
+  const second = publication("a", 2);
+  await daily.publishDailySubmission("a", second.submissionId);
+  assert.deepEqual(calls.map((call) => call.method), ["chat.postMessage", "chat.update", "chat.postMessage"]);
+  assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE id=?").get(second.id).status, "sent");
+  assert.equal(db.prepare("SELECT slack_message_ts FROM slack_daily_publications WHERE id=?").get(second.id).slack_message_ts, "3.000001");
+
+  behavior.updateCode = null;
+  const third = publication("a", 3);
+  await daily.publishDailySubmission("a", third.submissionId);
+  assert.equal(calls.at(-1).method, "chat.update");
+  assert.equal(calls.at(-1).payload.ts, "3.000001");
+});
+
+test("an admin can republish the latest submission when its publication was never created", async (t) => {
+  const { daily, publication, calls, behavior, db } = harness(t);
+  const first = publication("a");
+  await daily.publishDailySubmission("a", first.submissionId);
+  db.prepare(`INSERT INTO daily_submissions(id,owner_id,member_id,scrum_date,version,member_name,member_email,today_note,submitted_at)
+    VALUES('submission-a-2','a','member-a','2026-09-03',2,'멤버 a','a@example.com','latest work',?)`).run(NOW.toISOString());
+  behavior.updateCode = "message_not_found";
+  const requestId = "11111111-1111-4111-8111-111111111111";
+  const result = await daily.republishLatestDailySubmission("a", "member-a", requestId);
+  assert.equal(result.submissionId, "submission-a-2");
+  assert.equal(result.version, 2);
+  assert.deepEqual(calls.map((call) => call.method), ["chat.postMessage", "chat.update", "chat.postMessage"]);
+  assert.equal(db.prepare("SELECT status FROM slack_daily_publications WHERE submission_id='submission-a-2'").get().status, "sent");
+  const sent = calls.length;
+  await daily.republishLatestDailySubmission("a", "member-a", requestId);
+  assert.equal(calls.length, sent, "the same recovery request must be idempotent");
+  await assert.rejects(daily.republishLatestDailySubmission("b", "member-a", requestId), /찾을 수 없습니다/);
 });
 
 test("daily sharing labels completed Tasks with their Project or Routine", async (t) => {

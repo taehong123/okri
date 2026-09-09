@@ -63,11 +63,11 @@ for (const id of ["ko", "en", "ja", "zh", "es"] as const) {
 test("all bot types, management signals and recommended automations follow the selected language", async ({ page }, info) => {
   test.skip(info.project.name !== "desktop-chromium", "Run the bot language matrix once in the desktop project.");
   const copy = {
-    ko: { daily: "데일리 봇", management: "관리 봇", work: "업무 관리 봇", automation: "Task 변동 알림 봇", signal: "활성 Project·Task 중 마감일이 비어 있는 항목", completed: "Task 완료 알림", created: "새 Task 알림" },
-    en: { daily: "Daily bot", management: "Management bot", work: "Work management bot", automation: "Task change notification bot", signal: "Active Projects and Tasks with no due date", completed: "Task completion alert", created: "New Task alert" },
-    ja: { daily: "デイリーボット", management: "管理ボット", work: "業務管理ボット", automation: "Task変更通知ボット", signal: "期限が設定されていない進行中のProject・Task", completed: "Task完了通知", created: "新しいTaskの通知" },
-    zh: { daily: "日报机器人", management: "管理机器人", work: "工作管理机器人", automation: "Task 变更通知机器人", signal: "没有截止日期的活跃 Project 和 Task", completed: "Task 完成提醒", created: "新 Task 提醒" },
-    es: { daily: "Bot diario", management: "Bot de gestión", work: "Bot de gestión del trabajo", automation: "Bot de avisos de cambios de Task", signal: "Projects y Tasks activos sin fecha límite", completed: "Aviso de Task completada", created: "Alerta de nueva Task" },
+    ko: { daily: "데일리 봇", management: "관리 봇", work: "업무 생성 관리 봇", automation: "Task 변동 알림 봇", signal: "활성 Project·Task 중 마감일이 비어 있는 항목", completed: "Task 완료 알림", created: "새 Task 알림" },
+    en: { daily: "Daily bot", management: "Management bot", work: "Work creation bot", automation: "Task change notification bot", signal: "Active Projects and Tasks with no due date", completed: "Task completion alert", created: "New Task alert" },
+    ja: { daily: "デイリーボット", management: "管理ボット", work: "業務作成管理ボット", automation: "Task変更通知ボット", signal: "期限が設定されていない進行中のProject・Task", completed: "Task完了通知", created: "新しいTaskの通知" },
+    zh: { daily: "日报机器人", management: "管理机器人", work: "工作创建管理机器人", automation: "Task 变更通知机器人", signal: "没有截止日期的活跃 Project 和 Task", completed: "Task 完成提醒", created: "新 Task 提醒" },
+    es: { daily: "Bot diario", management: "Bot de gestión", work: "Bot de creación de trabajo", automation: "Bot de avisos de cambios de Task", signal: "Projects y Tasks activos sin fecha límite", completed: "Aviso de Task completada", created: "Alerta de nueva Task" },
   } as const;
   const state = { preferences: { language: "ko", resolvedLanguage: "ko", revision: 0 } as LanguagePreferences, slackState: "connected" as const, slackSetupComplete: true, teamWorkspace: true };
   await fixture(page, state);

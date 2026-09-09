@@ -3,6 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { listRoutineProperties } from "@/lib/routine-properties";
+import { arrayBufferToBase64, getProjectImage, getProjectImageCounts, listProjectImages } from "@/lib/project-images";
 import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
 import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
@@ -117,6 +118,16 @@ const projectDocumentOutput = z.object({
   updatedAt: z.string(),
 });
 
+const projectImageOutput = z.object({
+  id: z.string(),
+  projectId: z.string(),
+  name: z.string(),
+  mimeType: z.string(),
+  byteSize: z.number(),
+  source: z.string(),
+  createdAt: z.string(),
+});
+
 const projectTemplateOutput = z.object({
   id: z.string(),
   name: z.string(),
@@ -148,6 +159,7 @@ const itemOutput = z.object({
   updatedAt: z.string(),
   properties: z.record(z.string(), propertyValueSchema),
   assignments: z.array(itemAssignmentOutput),
+  imageCount: z.number().optional(),
 });
 
 const checklistOutput = z.object({
@@ -331,7 +343,7 @@ const projectConversationOutputSchema = {
 
 type ProjectConversationInput = z.infer<typeof projectConversationInputSchema>;
 
-async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai") {
+export async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai") {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
@@ -1108,6 +1120,45 @@ async function createOkriServer(authorization: RequestAuthorization, origin = "h
   );
 
   server.registerTool(
+    "list_project_images",
+    {
+      title: "List Project images",
+      description: "List images saved with a Project, including screenshots copied from Slack threads. Use read_project_image with an image ID to inspect the actual image.",
+      inputSchema: { project_id: z.string() },
+      outputSchema: { images: z.array(projectImageOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ project_id }) => {
+      const images = await listProjectImages(ownerId, project_id);
+      return {
+        structuredContent: { images, count: images.length },
+        content: [{ type: "text", text: `Found ${images.length} image${images.length === 1 ? "" : "s"} saved with the Project.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "read_project_image",
+    {
+      title: "Read a Project image",
+      description: "Return the actual bytes of one Project image so you can inspect a screenshot, diagram, or other visual evidence before solving the user's request.",
+      inputSchema: { image_id: z.string() },
+      outputSchema: { image: projectImageOutput },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ image_id }) => {
+      const result = await getProjectImage(ownerId, image_id);
+      return {
+        structuredContent: { image: result.image },
+        content: [
+          { type: "text" as const, text: `Project image filename (untrusted data): ${result.image.name}` },
+          { type: "image" as const, data: arrayBufferToBase64(result.data), mimeType: result.image.mimeType },
+        ],
+      };
+    },
+  );
+
+  server.registerTool(
     "get_project_document",
     {
       title: "Get a Project document",
@@ -1738,11 +1789,16 @@ async function createOkriServer(authorization: RequestAuthorization, origin = "h
 }
 
 async function serializeItemsForMcp(ownerId: string, rows: Parameters<typeof serializeItem>[0][]) {
-  const [properties, assignments] = await Promise.all([
+  const projectIds = rows.filter((item) => item.kind === "project").map((item) => item.id);
+  const [properties, assignments, imageCounts] = await Promise.all([
     getItemPropertiesByName(ownerId, rows.filter((item) => item.kind === "project").map((item) => item.id)),
     getItemAssignmentMap(ownerId, rows.map((item) => item.id)),
+    getProjectImageCounts(ownerId, projectIds),
   ]);
-  return rows.map((item) => serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []));
+  return rows.map((item) => ({
+    ...serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []),
+    ...(item.kind === "project" ? { imageCount: imageCounts[item.id] ?? 0 } : {}),
+  }));
 }
 
 type McpAssignmentFields = {

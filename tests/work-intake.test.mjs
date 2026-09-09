@@ -185,6 +185,12 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/routine-properties": routineProperties,
+    "@/lib/project-images": {
+      arrayBufferToBase64: () => "iVBORw==",
+      getProjectImage: async () => ({ image: { id: "image", projectId: "p", name: "error.png", mimeType: "image/png", byteSize: 8, source: "slack", createdAt: "now" }, data: new Uint8Array(8) }),
+      getProjectImageCounts: async () => ({ p: 1 }),
+      listProjectImages: async () => [{ id: "image", projectId: "p", name: "error.png", mimeType: "image/png", byteSize: 8, source: "slack", createdAt: "now" }],
+    },
     "@/lib/work-intake": intake,
     "@/lib/project-review": reviewCore,
     "@/lib/project-review-mcp": compile(reviewMcpSource, {
@@ -317,6 +323,10 @@ test("MCP contracts expose the single-read preparation, optional Routine/cycle, 
     const result = await f.call("prepare_work", { kind: "project" });
     assert.equal(result.context.parents[0].id, "ini");
     assert.equal(f.calls.length, 0);
+    const images = await f.call("list_project_images", { project_id: "p" });
+    assert.equal(images.count, 1);
+    const image = await f.tools.get("read_project_image").callback({ image_id: "image" });
+    assert.deepEqual(image.content[1], { type: "image", data: "iVBORw==", mimeType: "image/png" });
     for (const [name, { definition }] of f.tools) {
       assert.equal(intake.READ_ONLY_MCP_TOOLS.has(name), definition.annotations.readOnlyHint === true, name);
     }

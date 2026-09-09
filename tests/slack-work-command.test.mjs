@@ -12,6 +12,9 @@ test("Slack work commands accept Task spelling and whitespace variants", () => {
     ["!task Customer interview", "task_create", "Customer interview"],
     ["!project create Onboarding", "project_create", "Onboarding"],
     ["!project view Mobile", "project_view", "Mobile"],
+    ["!work create Launch page", "work_create", "Launch page"],
+    ["!업무생성 온보딩 개선", "work_create", "온보딩 개선"],
+    ["업무 생성 고객 인터뷰", "work_create", "고객 인터뷰"],
     ["!my work", "my_work", ""],
     ["!okri", "help", ""],
     ["!메뉴얼", "help", ""],
@@ -37,18 +40,26 @@ test("Slack work command query is bounded for interaction metadata", () => {
 });
 
 test("Slack channel events, private responses, permissions, and request idempotency stay wired", async () => {
-  const [events, interactions, domain, oauth, manifest, schema] = await Promise.all([
+  const [events, commands, interactions, domain, intake, pace, oauth, manifest, schema] = await Promise.all([
     readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/slack/commands/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/slack/interactions/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/slack-work-intake.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/pace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
     readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
     readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
   ]);
   assert.match(events, /event\.user !== connection\.botUserId/);
   assert.match(events, /const commandMessage = Boolean/);
+  assert.match(events, /command: "work_create" as const/);
+  assert.match(events, /ts: commandEvent\.ts/);
   assert.ok(events.indexOf("const commandMessage") < events.indexOf("INSERT OR IGNORE INTO slack_event_receipts"));
   assert.match(domain, /chat\.postEphemeral/);
+  assert.match(domain, /prepareSlackWorkDraft/);
+  assert.match(domain, /검토 후 생성/);
+  assert.match(domain, /selectedValue\(state, "work_target", targetAction\(command\)\)/);
   assert.ok(domain.indexOf('parsed.command === "help"') < domain.indexOf("if (!linked)"));
   for (const command of ["/okri daily", "!내 업무", "!프로젝트 생성 [이름]", "!태스크 완료 [검색어]", "!메뉴얼"]) assert.ok(domain.includes(command));
   assert.match(domain, /authorization\.role === "viewer"/);
@@ -56,11 +67,25 @@ test("Slack channel events, private responses, permissions, and request idempote
   assert.match(domain, /metadata\.slackUserId !== slackUserId/);
   assert.match(domain, /Date\.now\(\) - metadata\.createdAt > 15 \* 60_000/);
   assert.match(domain, /INSERT OR IGNORE INTO slack_work_command_operations/);
+  assert.match(commands, /command: "work_create"/);
+  assert.doesNotMatch(commands, /createItem\(/);
+  assert.match(intake, /conversations\.replies/);
+  assert.match(intake, /source: "slack_work"/);
+  assert.match(intake, /workspaceRequestsThisMinute/);
+  assert.match(intake, /workspaceRequestsToday/);
+  assert.match(pace, /export async function reserveAiUsageEvent/);
+  assert.match(pace, /INSERT INTO ai_usage_events[\s\S]+WHERE \(SELECT count\(\*\)/);
+  assert.match(pace, /source LIKE 'pending:%'/);
   assert.match(interactions, /dailyMemberBySlack/);
-  for (const scope of ["channels:history", "groups:history"]) {
+  for (const scope of ["channels:history", "groups:history", "files:read"]) {
     assert.match(oauth, new RegExp(scope));
     assert.match(manifest, new RegExp(scope));
   }
   for (const event of ["message.channels", "message.groups"]) assert.match(manifest, new RegExp(event.replace(".", "\\.")));
   assert.match(schema, /slack_work_command_operations/);
+  assert.match(domain, /saveSlackProjectImages/);
+  assert.match(domain, /sourceThread/);
+  assert.match(domain, /conversations\.join/);
+  assert.match(domain, /conversations\.open/);
+  assert.match(schema, /project_images/);
 });

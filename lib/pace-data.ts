@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
 import { newAccountLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
 import { serverTranslator } from "./server-language";
-import { parseRoutineProperties, prepareRoutineProperties } from "./routine-properties";
+import {
+  defaultRoutineClassificationMigrationId,
+  ensureDefaultRoutineClassification,
+  parseRoutineProperties,
+  prepareRoutineProperties,
+} from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -150,6 +155,8 @@ export type AiUsageSummary = {
   spentWonMicros: number;
   requestsToday: number;
   requestsThisMinute: number;
+  workspaceRequestsToday: number;
+  workspaceRequestsThisMinute: number;
 };
 
 export type OkrPlanInput = {
@@ -1150,6 +1157,7 @@ export async function ensureWorkspace(ownerId: string) {
       await migrateLegacyHierarchy(ownerId);
       await removeLegacySeedWorkspaceData(ownerId);
       await seedProjectExecutionProperties(ownerId);
+      await ensureDefaultRoutineClassification((env as RuntimeEnv).DB, ownerId);
       await migrateLegacyItemAssignments(ownerId);
       await ensureActiveOkrCycle(ownerId);
       const general = await ensureGeneralRoutine(ownerId);
@@ -1251,6 +1259,8 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
         WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ITEM_TITLES)})) AS seed_item_exists,
       EXISTS(SELECT 1 FROM routines
         WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ROUTINE_TITLES)})) AS seed_routine_exists,
+      EXISTS(SELECT 1 FROM app_migrations
+        WHERE id = ?) AS routine_classification_current,
       EXISTS(SELECT 1
       FROM items AS current_item
       WHERE current_item.owner_id = ? AND (
@@ -1271,18 +1281,21 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
     ...LEGACY_SEED_ITEM_TITLES,
     ownerId,
     ...LEGACY_SEED_ROUTINE_TITLES,
+    defaultRoutineClassificationMigrationId(ownerId),
     ownerId,
   ).first<{
     property_count: number;
     general_exists: number;
     seed_item_exists: number;
     seed_routine_exists: number;
+    routine_classification_current: number;
     legacy_hierarchy_exists: number;
   }>();
   return Number(row?.property_count ?? 0) === executionPropertyNames.length
     && Boolean(row?.general_exists)
     && !row?.seed_item_exists
     && !row?.seed_routine_exists
+    && Boolean(row?.routine_classification_current)
     && !row?.legacy_hierarchy_exists;
 }
 
@@ -1739,27 +1752,23 @@ export function serializeWorkspaceRules(rule: WorkspaceRule) {
 
 export async function getAiUsageSummary(ownerId: string, userId: string): Promise<AiUsageSummary> {
   await ensureSchema();
-  const ownerAndUser = and(eq(aiUsageEvents.ownerId, ownerId), eq(aiUsageEvents.userId, userId));
-  const [lifetime] = await getDb()
-    .select({ spentWonMicros: sql<number>`coalesce(sum(${aiUsageEvents.estimatedCostWonMicros}), 0)` })
-    .from(aiUsageEvents)
-    .where(ownerAndUser);
-  const [today] = await getDb()
-    .select({ requestsToday: sql<number>`count(*)` })
-    .from(aiUsageEvents)
-    .where(and(ownerAndUser, sql`${aiUsageEvents.createdAt} >= datetime('now', 'start of day')`));
-  const [minute] = await getDb()
-    .select({ requestsThisMinute: sql<number>`count(*)` })
-    .from(aiUsageEvents)
-    .where(and(ownerAndUser, sql`${aiUsageEvents.createdAt} >= datetime('now', '-1 minute')`));
+  const [summary] = await getDb().select({
+    spentWonMicros: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} then ${aiUsageEvents.estimatedCostWonMicros} else 0 end), 0)`,
+    requestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
+    requestsThisMinute: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.createdAt} >= datetime('now', '-1 minute') then 1 else 0 end), 0)`,
+    workspaceRequestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
+    workspaceRequestsThisMinute: sql<number>`coalesce(sum(case when ${aiUsageEvents.createdAt} >= datetime('now', '-1 minute') then 1 else 0 end), 0)`,
+  }).from(aiUsageEvents).where(eq(aiUsageEvents.ownerId, ownerId));
   return {
-    spentWonMicros: Number(lifetime?.spentWonMicros ?? 0),
-    requestsToday: Number(today?.requestsToday ?? 0),
-    requestsThisMinute: Number(minute?.requestsThisMinute ?? 0),
+    spentWonMicros: Number(summary?.spentWonMicros ?? 0),
+    requestsToday: Number(summary?.requestsToday ?? 0),
+    requestsThisMinute: Number(summary?.requestsThisMinute ?? 0),
+    workspaceRequestsToday: Number(summary?.workspaceRequestsToday ?? 0),
+    workspaceRequestsThisMinute: Number(summary?.workspaceRequestsThisMinute ?? 0),
   };
 }
 
-export async function recordAiUsageEvent(input: {
+export type AiUsageEventInput = {
   ownerId: string;
   userId: string;
   model: string;
@@ -1768,7 +1777,16 @@ export async function recordAiUsageEvent(input: {
   inputTokens: number;
   outputTokens: number;
   estimatedCostWonMicros: number;
-}) {
+};
+
+export type AiUsageRateLimits = {
+  userMinute: number;
+  userDay: number;
+  workspaceMinute: number;
+  workspaceDay: number;
+};
+
+export async function recordAiUsageEvent(input: AiUsageEventInput) {
   await ensureSchema();
   await getDb().insert(aiUsageEvents).values({
     id: crypto.randomUUID(),
@@ -1781,6 +1799,54 @@ export async function recordAiUsageEvent(input: {
     outputTokens: Math.max(0, Math.round(input.outputTokens)),
     estimatedCostWonMicros: Math.max(0, Math.round(input.estimatedCostWonMicros)),
   });
+}
+
+/**
+ * Claims a request slot in one SQL statement so concurrent web, Slack and image
+ * requests cannot all pass the same company-wide counter before usage is saved.
+ */
+export async function reserveAiUsageEvent(input: AiUsageEventInput & { limits: AiUsageRateLimits }) {
+  await ensureSchema();
+  const d1 = (env as RuntimeEnv).DB;
+  await d1.prepare("DELETE FROM ai_usage_events WHERE owner_id = ? AND source LIKE 'pending:%' AND created_at < datetime('now', '-10 minutes')")
+    .bind(input.ownerId).run();
+  const id = crypto.randomUUID();
+  const source = `pending:${input.source ?? "web"}`;
+  const result = await d1.prepare(`INSERT INTO ai_usage_events
+    (id, owner_id, user_id, model, source, input_chars, input_tokens, output_tokens, estimated_cost_won_micros, created_at)
+    SELECT ?, ?, ?, ?, ?, ?, 0, 0, ?, CURRENT_TIMESTAMP
+    WHERE (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND created_at >= datetime('now', '-1 minute')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND created_at >= datetime('now', 'start of day')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at >= datetime('now', '-1 minute')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at >= datetime('now', 'start of day')) < ?`)
+    .bind(
+      id, input.ownerId, input.userId, input.model, source,
+      Math.max(0, Math.round(input.inputChars)), Math.max(0, Math.round(input.estimatedCostWonMicros)),
+      input.ownerId, input.userId, input.limits.userMinute,
+      input.ownerId, input.userId, input.limits.userDay,
+      input.ownerId, input.limits.workspaceMinute,
+      input.ownerId, input.limits.workspaceDay,
+    ).run();
+  return result.meta.changes ? id : null;
+}
+
+export async function finalizeAiUsageEvent(reservationId: string, input: AiUsageEventInput) {
+  await ensureSchema();
+  const result = await (env as RuntimeEnv).DB.prepare(`UPDATE ai_usage_events
+    SET model = ?, source = ?, input_chars = ?, input_tokens = ?, output_tokens = ?, estimated_cost_won_micros = ?
+    WHERE id = ? AND owner_id = ? AND user_id = ? AND source = ?`)
+    .bind(
+      input.model, input.source ?? "web", Math.max(0, Math.round(input.inputChars)),
+      Math.max(0, Math.round(input.inputTokens)), Math.max(0, Math.round(input.outputTokens)),
+      Math.max(0, Math.round(input.estimatedCostWonMicros)), reservationId, input.ownerId, input.userId,
+      `pending:${input.source ?? "web"}`,
+    ).run();
+  if (!result.meta.changes) throw new Error("AI usage reservation is no longer available");
+}
+
+export async function releaseAiUsageReservation(reservationId: string) {
+  await ensureSchema();
+  await (env as RuntimeEnv).DB.prepare("DELETE FROM ai_usage_events WHERE id = ? AND source LIKE 'pending:%'").bind(reservationId).run();
 }
 
 export async function createGoogleOAuthState(ownerId: string, userId: string, returnTo = "/") {

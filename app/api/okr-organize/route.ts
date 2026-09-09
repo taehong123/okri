@@ -1,5 +1,13 @@
 import { env } from "cloudflare:workers";
-import { authorizeRequest, ensureWorkspace, getAiUsageSummary, getWorkspaceRules, recordAiUsageEvent } from "@/lib/pace-data";
+import {
+  authorizeRequest,
+  ensureWorkspace,
+  finalizeAiUsageEvent,
+  getAiUsageSummary,
+  getWorkspaceRules,
+  releaseAiUsageReservation,
+  reserveAiUsageEvent,
+} from "@/lib/pace-data";
 import { BillingLimitError, assertAiBudget } from "@/lib/billing";
 import { CONVERSATION_POLICY, readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
 import { readLanguagePreferences } from "@/lib/language-preferences";
@@ -15,6 +23,10 @@ type RuntimeEnv = typeof env & {
   OKRPTR_AI_MAX_REQUESTS_PER_DAY?: string;
   OKRI_AI_MAX_REQUESTS_PER_MINUTE?: string;
   OKRPTR_AI_MAX_REQUESTS_PER_MINUTE?: string;
+  OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_DAY?: string;
+  OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_DAY?: string;
+  OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE?: string;
+  OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE?: string;
   OKRI_AI_MIN_CALL_COST_WON?: string;
   OKRPTR_AI_MIN_CALL_COST_WON?: string;
   OKRI_AI_INPUT_WON_PER_1K_TOKENS?: string;
@@ -203,9 +215,22 @@ export async function POST(request: Request) {
     const model = runtime.OKRI_OPENAI_MODEL || runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
     const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length + JSON.stringify(referenceContext).length + JSON.stringify(workspaceRules).length + systemInstruction(mode).length;
     const limit = await checkAiUsageLimit(runtime, authorization.ownerId, authorization.userId, inputChars);
-    if (limit) return limit;
-
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    if (limit instanceof Response) return limit;
+    const reservationId = await reserveAiUsageEvent({
+      ownerId: authorization.ownerId,
+      userId: authorization.userId,
+      model,
+      source: "web",
+      inputChars,
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostWonMicros: limit.reservedCostWonMicros,
+      limits: limit.rateLimits,
+    });
+    if (!reservationId) return Response.json({ error: "AI 호출이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요.", code: "ai_rate_limited" }, { status: 429 });
+    let finalized = false;
+    try {
+      const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
@@ -248,28 +273,32 @@ export async function POST(request: Request) {
         },
         max_output_tokens: maxOutputTokens,
       }),
-    });
+      });
 
-    if (!response.ok) {
-      return Response.json({ error: "OpenAI semantic organizer failed", code: "openai_error" }, { status: 502 });
+      if (!response.ok) {
+        return Response.json({ error: "OpenAI semantic organizer failed", code: "openai_error" }, { status: 502 });
+      }
+
+      const data = await response.json() as Record<string, unknown>;
+      const usage = extractUsage(data, inputChars);
+      await finalizeAiUsageEvent(reservationId, {
+        ownerId: authorization.ownerId,
+        userId: authorization.userId,
+        model,
+        source: "web",
+        inputChars,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        estimatedCostWonMicros: estimateCostWonMicros(runtime, usage.inputTokens, usage.outputTokens),
+      });
+      finalized = true;
+      const text = extractOutputText(data);
+      if (!text) return Response.json({ error: "OpenAI response was empty", code: "empty_openai_response" }, { status: 502 });
+
+      return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode, currentPlan, targetContext?.kind) });
+    } finally {
+      if (!finalized) await releaseAiUsageReservation(reservationId);
     }
-
-    const data = await response.json() as Record<string, unknown>;
-    const usage = extractUsage(data, inputChars);
-    await recordAiUsageEvent({
-      ownerId: authorization.ownerId,
-      userId: authorization.userId,
-      model,
-      source: "web",
-      inputChars,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      estimatedCostWonMicros: estimateCostWonMicros(runtime, usage.inputTokens, usage.outputTokens),
-    });
-    const text = extractOutputText(data);
-    if (!text) return Response.json({ error: "OpenAI response was empty", code: "empty_openai_response" }, { status: 502 });
-
-    return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode, currentPlan, targetContext?.kind) });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unexpected error";
     const status = /required|not configured/i.test(message) ? 400 : 500;
@@ -353,6 +382,8 @@ function systemInstruction(mode: ConversationMode) {
 async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: string, inputChars: number) {
   const dailyLimit = Math.max(1, Math.round(envNumber(runtime.OKRI_AI_MAX_REQUESTS_PER_DAY ?? runtime.OKRPTR_AI_MAX_REQUESTS_PER_DAY, 40)));
   const minuteLimit = Math.max(1, Math.round(envNumber(runtime.OKRI_AI_MAX_REQUESTS_PER_MINUTE ?? runtime.OKRPTR_AI_MAX_REQUESTS_PER_MINUTE, 5)));
+  const workspaceDailyLimit = Math.max(dailyLimit, Math.round(envNumber(runtime.OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_DAY ?? runtime.OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_DAY, 120)));
+  const workspaceMinuteLimit = Math.max(minuteLimit, Math.round(envNumber(runtime.OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE ?? runtime.OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE, 12)));
   const summary = await getAiUsageSummary(ownerId, userId);
   let planBudget: Awaited<ReturnType<typeof assertAiBudget>>;
   try {
@@ -364,14 +395,14 @@ async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: s
     throw error;
   }
 
-  if (summary.requestsThisMinute >= minuteLimit) {
+  if (summary.requestsThisMinute >= minuteLimit || (summary.workspaceRequestsThisMinute ?? 0) >= workspaceMinuteLimit) {
     return Response.json({
       error: "AI 호출이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요.",
       code: "ai_rate_limited",
     }, { status: 429 });
   }
 
-  if (summary.requestsToday >= dailyLimit) {
+  if (summary.requestsToday >= dailyLimit || (summary.workspaceRequestsToday ?? 0) >= workspaceDailyLimit) {
     return Response.json({
       error: "오늘의 무료 AI 정리 횟수를 모두 사용했습니다.",
       code: "ai_daily_limit_reached",
@@ -395,7 +426,15 @@ async function checkAiUsageLimit(runtime: RuntimeEnv, ownerId: string, userId: s
     }, { status: 402 });
   }
 
-  return null;
+  return {
+    reservedCostWonMicros,
+    rateLimits: {
+      userMinute: minuteLimit,
+      userDay: dailyLimit,
+      workspaceMinute: workspaceMinuteLimit,
+      workspaceDay: workspaceDailyLimit,
+    },
+  };
 }
 
 function usagePayload(spentWonMicros: number, budgetWonMicros: number, requestsToday: number) {

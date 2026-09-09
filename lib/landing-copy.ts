@@ -57,7 +57,7 @@ export function getLandingCopy(translate: (key: string) => string, language: Lan
       proposal: translate("Project 제안"), review: translate("등록 전 검토"),
       daily: translate("데일리 봇"), dailyDetail: translate("오늘 할 일과 완료한 일"),
       management: translate("관리 봇"), managementDetail: translate("누락된 담당자·기한 확인"),
-      work: translate("업무 관리 봇"), changes: translate("Task 변동 알림 봇"), changesDetail: translate("Task의 변경사항 알림"),
+      work: translate("업무 생성 관리 봇"), changes: translate("Task 변동 알림 봇"), changesDetail: translate("Task의 변경사항 알림"),
     },
     slides: [
       {

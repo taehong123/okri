@@ -99,7 +99,7 @@ export function normalizeSlackChannelId(value: string) {
 }
 
 export class SlackMessageError extends Error {
-  constructor(message: string, public outcome: "rejected" | "uncertain", public retryAfterSeconds = 0) {
+  constructor(message: string, public outcome: "rejected" | "uncertain", public retryAfterSeconds = 0, public code?: string) {
     super(message);
   }
 }
@@ -126,7 +126,7 @@ export async function postSlackMessage(token: string, channel: string, text: str
   if (response.status >= 500 || ["internal_error", "fatal_error", "request_timeout"].includes(result.error ?? "")) {
     throw new SlackMessageError(`${slackErrorMessage(result.error)} · 처리 결과 확인 필요`, "uncertain");
   }
-  if (!response.ok || !result.ok) throw new SlackMessageError(slackErrorMessage(result.error), "rejected", result.error === "ratelimited" ? 60 : 0);
+  if (!response.ok || !result.ok) throw new SlackMessageError(slackErrorMessage(result.error), "rejected", result.error === "ratelimited" ? 60 : 0, result.error);
   if (!result.ts) throw new SlackMessageError("Slack 전송 영수증이 없습니다. 처리 결과 확인이 필요합니다.", "uncertain");
   return { timestamp: result.ts };
 }
