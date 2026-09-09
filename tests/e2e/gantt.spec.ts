@@ -41,6 +41,18 @@ test("Gantt is a real menu view with Project bars and expandable Task milestones
   await expect(schedule.locator(".gantt-bar")).toHaveCount(1);
   await expect(schedule.locator(".gantt-milestone")).toHaveCount(0);
   await expect(page.locator(".gantt-project-row")).toHaveClass(/overdue/);
+  const barVisual = await schedule.locator(".gantt-bar").evaluate((bar) => {
+    const style = getComputedStyle(bar);
+    const progress = getComputedStyle(bar.querySelector(".gantt-bar-progress")!);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderTopWidth: style.borderTopWidth,
+      progressHeight: Number.parseFloat(progress.height),
+    };
+  });
+  expect(barVisual.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+  expect(barVisual.borderTopWidth).toBe("0px");
+  expect(barVisual.progressHeight).toBeLessThanOrEqual(2.1);
 
   const expander = schedule.locator(".gantt-project-label .gantt-expand");
   await expect(expander).toHaveAccessibleName(/모바일 사용성 개선 · 펼치기/);
@@ -49,6 +61,7 @@ test("Gantt is a real menu view with Project bars and expandable Task milestones
   await expect(expander).toHaveAttribute("aria-expanded", "true");
   await expect(taskTitle).toBeVisible();
   await expect(schedule.locator(".gantt-milestone")).toHaveCount(1);
+  await expect(schedule.locator(".gantt-milestone svg")).toHaveCount(0);
   await expander.click();
   await expect(taskTitle).toHaveCount(0);
 
