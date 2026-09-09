@@ -2500,36 +2500,51 @@ html, body, .app-shell, .app-loading-shell, .workspace { background: var(--paper
 .okr-file-editor button.primary { border-color: var(--button-primary-bg); background: var(--button-primary-bg); color: var(--button-primary-fg); }
 .okr-file-editor button.primary:hover:not(:disabled) { background: var(--button-primary-hover-bg); color: var(--button-primary-hover-fg); }
 .okr-file-editor button:disabled { cursor: default; }
-.okr-file-read-tree { padding: 0 0 var(--space-4); }
-.okr-file-read-objective { min-width: 0; display: grid; grid-template-columns: 1.75rem minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding: 0 0 var(--space-4); border-bottom: 1px solid var(--line); }
-.okr-file-read-objective small, .okr-file-read-kr small, .okr-file-read-initiative small { display: block; margin-bottom: var(--space-1); color: var(--muted); font-size: var(--type-meta); font-weight: 500; }
-.okr-file-read-objective h3 { margin: 0; font-size: var(--type-section); font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
-.okr-file-read-kr { margin: var(--space-4) 0 0; border-left: 2px solid var(--kr-rail); background: transparent; }
-.okr-tree-row { width: 100%; min-width: 0; min-height: var(--row-height); display: grid; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--ink); font: inherit; text-align: left; }
+.okr-file-read-tree { max-width: 44rem; padding: var(--space-4) 0 var(--space-8); }
+.okr-file-read-objective { min-width: 0; display: grid; grid-template-columns: 1.5rem minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); padding: 0 0 var(--space-6); }
+.okr-read-objective-icon { margin-top: var(--space-1); color: var(--icon-default); }
+.okr-file-read-objective small, .okr-file-read-kr small, .okr-file-read-initiative small { display: block; margin-bottom: var(--space-1); color: var(--text-secondary); font-size: var(--type-label); font-weight: 400; line-height: 1.6; }
+.okr-file-read-objective h3 { margin: 0; font-size: var(--type-section); font-weight: 600; line-height: 1.6; overflow-wrap: anywhere; }
+.okr-file-read-kr { margin: 0 0 var(--space-6); border-left: 2px solid var(--kr-rail); background: transparent; }
+.okr-tree-row { width: 100%; min-width: 0; min-height: var(--row-height); display: grid; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-3); border: 0; border-radius: 0 var(--radius-control) var(--radius-control) 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; }
 button.okr-tree-row { cursor: pointer; }
-button.okr-tree-row:hover { background: color-mix(in srgb, var(--surface-hover) 72%, transparent); }
-button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tree-task:focus-visible { outline: 2px solid var(--accent-strong); outline-offset: -2px; }
+button.okr-tree-row:hover { background: var(--bg-hover); }
+button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tree-task:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .okr-tree-row.static { cursor: default; }
-.okr-tree-kr-row { grid-template-columns: 1rem 1.75rem minmax(0, 1fr) 7.5rem 3.5rem; }
-.okr-tree-copy { min-width: 0; display: block; }
-.okr-tree-copy strong { display: block; font-size: var(--type-body); font-weight: 600; line-height: 1.5; white-space: normal; overflow-wrap: anywhere; }
+.okr-tree-kr-row { grid-template-columns: minmax(0, 1fr) 1rem; gap: var(--space-3); }
+.okr-tree-kr-row > .okr-tree-copy { grid-column: 1; grid-row: 1; }
+.okr-tree-kr-row > .okr-tree-chevron { grid-column: 2; grid-row: 1; align-self: start; margin-top: var(--space-1); }
+.okr-tree-kr-row > .okr-tree-copy small { color: var(--kr-badge-text); }
+.okr-tree-metrics { grid-column: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 8rem), 1fr)); gap: var(--space-3) var(--space-4); max-width: 24rem; }
+.okr-tree-metrics > span { min-width: 0; text-align: left; }
+.okr-tree-metrics b { display: block; font-size: var(--type-section); font-weight: 650; line-height: 1.6; font-variant-numeric: tabular-nums; color: var(--text-primary); }
+.okr-tree-metrics .okr-tree-progress { color: var(--progress-text); }
+.okr-tree-copy { min-width: 0; display: block; overflow-wrap: anywhere; }
+.okr-tree-copy strong { display: block; font-size: var(--type-body); font-weight: 400; line-height: 1.6; white-space: normal; overflow-wrap: anywhere; }
 .okr-tree-chevron { color: var(--muted); }
 .okr-tree-chevron-placeholder { width: 14px; height: 14px; }
-.okr-tree-count { color: var(--muted); font-size: var(--type-meta); font-weight: 500; text-align: right; white-space: nowrap; }
-.okr-tree-count.empty { color: var(--faint); font-weight: 500; }
-.okr-tree-progress { color: var(--progress-text); font-size: var(--type-label); font-weight: 600; font-variant-numeric: tabular-nums; text-align: right; }
+.okr-tree-count { color: var(--text-secondary); font-size: var(--type-label); font-weight: 400; text-align: left; overflow-wrap: anywhere; }
+.okr-tree-count.empty { color: var(--text-tertiary); }
 .okr-tree-initiatives { padding: 0 0 var(--space-2) var(--tree-indent); }
-.okr-file-read-initiative { margin-top: var(--space-2); border-left: 2px solid var(--initiative-rail); background: transparent; }
-.okr-tree-initiative-row { grid-template-columns: 1rem 1.75rem minmax(0, 1fr) 7.5rem; min-height: var(--row-height); }
+.okr-file-read-initiative { margin-top: var(--space-3); border-left: 2px solid var(--initiative-rail); background: transparent; }
+.okr-tree-initiative-row { grid-template-columns: minmax(0, 1fr) 1rem; }
+.okr-tree-initiative-row > .okr-tree-copy { grid-column: 1; grid-row: 1; }
+.okr-tree-initiative-row > .okr-tree-copy small { color: var(--initiative-badge-text); }
+.okr-tree-initiative-row > :is(.okr-tree-chevron, .okr-tree-chevron-placeholder) { grid-column: 2; grid-row: 1; }
+.okr-tree-initiative-row > .okr-tree-count { grid-column: 1; }
 .okr-tree-projects { padding: 0 0 var(--space-2) var(--tree-indent); }
-.okr-tree-project { margin-top: var(--space-2); border-left: 1px solid var(--line); background: transparent; }
+.okr-tree-project { margin-top: var(--space-2); background: transparent; }
 .okr-tree-project-row { display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height); align-items: stretch; }
-.okr-tree-project-main { grid-template-columns: 1rem 1.75rem minmax(0, 1fr) 7.5rem; min-height: var(--row-height); }
+.okr-tree-project-main { grid-template-columns: 1rem minmax(0, 1fr) 1rem; }
+.okr-tree-project-main > :is(.okr-tree-chevron, .okr-tree-chevron-placeholder) { grid-column: 3; grid-row: 1; }
+.okr-tree-project-main > .okr-tree-kind-icon { grid-column: 1; grid-row: 1; }
+.okr-tree-project-main > .okr-tree-copy { grid-column: 2; grid-row: 1; }
+.okr-tree-project-main > .okr-tree-count { grid-column: 2; }
 .okr-tree-kind-icon { justify-self: center; color: var(--project-badge-text); }
-.okr-tree-open-detail { min-width: var(--control-height); border: 0; border-left: 1px solid var(--line); border-radius: 0 var(--radius-control) var(--radius-control) 0; background: transparent; color: var(--muted); cursor: pointer; }
+.okr-tree-open-detail { min-width: var(--control-height); min-height: var(--control-height); align-self: center; border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-secondary); cursor: pointer; }
 .okr-tree-open-detail:hover { background: var(--surface-hover); color: var(--ink); }
 .okr-tree-tasks { padding: 0 0 var(--space-2) var(--tree-indent); }
-.okr-tree-task { width: 100%; min-height: 44px; display: grid; grid-template-columns: 18px minmax(0, 1fr) 14px; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-top: 1px solid var(--line); background: transparent; color: var(--ink); font: inherit; font-size: var(--type-body); text-align: left; cursor: pointer; }
+.okr-tree-task { width: 100%; min-height: var(--row-height); display: grid; grid-template-columns: 1rem minmax(0, 1fr) 1rem; align-items: center; gap: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: transparent; color: var(--text-primary); font: inherit; font-size: var(--type-body); line-height: 1.6; text-align: left; cursor: pointer; }
 .okr-tree-task span { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
 .okr-tree-task svg { color: var(--muted); }
 .okr-tree-task:hover { background: var(--surface-hover); }
@@ -2727,21 +2742,19 @@ button.okr-tree-row:focus-visible, .okr-tree-open-detail:focus-visible, .okr-tre
   .okr-file-editor-body { padding: 12px; }
   .okr-file-metadata-editor { grid-template-columns: 1fr 1fr; }
   .okr-file-metadata-editor .wide { grid-column: 1 / -1; }
+  .okr-file-read-objective { grid-template-columns: 1.5rem minmax(0, 1fr) auto; align-items: center; }
+  .okr-file-read-objective > div { display: contents; }
+  .okr-file-read-objective small { grid-column: 2; grid-row: 1; margin: 0; overflow-wrap: anywhere; }
+  .okr-file-read-objective h3 { grid-column: 1 / -1; grid-row: 2; }
+  .okr-file-read-objective > button { grid-column: 3; grid-row: 1; }
   .okr-file-read-kr { margin-left: 0; }
   .okr-tree-row { min-height: var(--row-height); gap: var(--space-2); padding: var(--space-3) var(--space-2); }
-  .okr-tree-kr-row { grid-template-columns: 1rem 1.75rem minmax(0, 1fr) 3rem; }
-  .okr-tree-kr-row .okr-tree-count { grid-column: 3 / -1; text-align: left; }
-  .okr-tree-progress { grid-column: 4; grid-row: 1; }
   .okr-tree-copy strong { font-size: var(--type-body); white-space: normal; }
   .okr-tree-initiatives { padding: 0 0 var(--space-2) var(--tree-indent); }
-  .okr-tree-initiative-row { grid-template-columns: 1rem 1.75rem minmax(0, 1fr); }
-  .okr-tree-initiative-row .okr-tree-count { grid-column: 3; text-align: left; }
-  .okr-tree-projects { padding: 0 0 var(--space-2) var(--tree-indent); }
-  .okr-tree-project-main { grid-template-columns: 1rem 1.75rem minmax(0, 1fr); }
-  .okr-tree-project-main .okr-tree-count { grid-column: 3; text-align: left; }
-  .okr-tree-open-detail { min-width: 40px; }
-  .okr-tree-tasks { padding: 0 0 var(--space-2) var(--tree-indent); }
-  .okr-tree-task { min-height: 46px; font-size: var(--type-body); }
+  .okr-tree-projects, .okr-tree-tasks { padding: 0 0 var(--space-2); }
+  .okr-tree-project-row { display: flex; flex-wrap: wrap; }
+  .okr-tree-project-main { flex: 1 1 10rem; width: auto; }
+  .okr-tree-open-detail { margin-inline-start: auto; }
   .okr-file-objective-editor > header { grid-template-columns: 26px minmax(0, 1fr); }
   .okr-file-objective-editor > header > .okr-status-select { grid-column: 2; width: fit-content; }
   .okr-file-key-result-editor > header { grid-template-columns: 25px minmax(0, 1fr); }

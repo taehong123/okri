@@ -341,7 +341,9 @@
 .project-primary-column .project-task-title { font-weight: 400; }
 .project-primary-column .project-task-title:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: .15em; }
 .project-primary-column .project-document-section { background: transparent; }
-.project-context-column :is(.project-detail-form, .project-custom-properties, .project-linked-data, .project-lineage-compact) { padding: var(--space-5) var(--space-6); }
+.project-detail-panel .project-context-column :is(.project-detail-form, .project-custom-properties, .project-linked-data, .project-lineage-compact) { padding: var(--space-6) var(--editor-inset); background: transparent; }
+.project-progress-value span, .project-progress-overview dt { font-size: var(--type-label); }
+.project-progress-overview dd { font-size: var(--type-section); }
 .project-context-column .project-data-summary { grid-template-columns: minmax(0, 1fr); border: 0; border-top: 1px solid var(--border-default); border-radius: 0; background: transparent; }
 .project-context-column .project-data-summary > div { padding-inline: 0; border: 0; border-bottom: 1px solid var(--border-default); }
 .project-context-column .project-field-grid { grid-template-columns: minmax(0, 1fr); }
@@ -358,11 +360,10 @@
   .project-progress-header { align-items: stretch; flex-direction: column; }
   .project-progress-bot-control { justify-content: space-between; }
   .project-progress-overview { grid-template-columns: minmax(0, 1fr); }
-  .project-progress-overview dl { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .project-progress-overview dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 5rem), 1fr)); }
 }
 
 @media (max-width: 43.75rem) {
-  .project-progress-overview dl { grid-template-columns: minmax(0, 1fr); }
   .project-progress-overview dl > div { min-width: 0; }
   .project-bot-review-row { grid-template-columns: auto minmax(0, 1fr); }
   .project-bot-review-row > :is(select, input, button:not(.project-bot-task-link), .project-bot-inline-actions) { grid-column: 2; width: 100%; }

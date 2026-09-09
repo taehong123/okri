@@ -22,8 +22,8 @@ for (const theme of THEMES) {
     const colors = await page.evaluate(() => {
       const color = (selector: string, property: "color" | "borderLeftColor") => getComputedStyle(document.querySelector(selector)!)[property];
       return {
-        badge: color(".type-key_result", "color"), rail: color(".okr-file-read-kr", "borderLeftColor"),
-        initiativeBadge: color(".type-initiative", "color"), initiativeRail: color(".okr-file-read-initiative", "borderLeftColor"),
+        badge: color(".okr-tree-kr-row > .okr-tree-copy small", "color"), rail: color(".okr-file-read-kr", "borderLeftColor"),
+        initiativeBadge: color(".okr-tree-initiative-row > .okr-tree-copy small", "color"), initiativeRail: color(".okr-file-read-initiative", "borderLeftColor"),
         progress: color(".okr-tree-progress", "color"),
       };
     });
