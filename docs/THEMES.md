@@ -134,6 +134,18 @@ Do not apply desktop sidebar padding or navigation margins to the mobile bar.
   conversation contrast. All application requests use fictional fixtures.
 ### Create and edit surfaces
 
+Detail views are read-first documents. Project, Task and Routine properties use
+`DocumentProperties`: a compact summary, a collapsed read-only definition list,
+and a separate `변경` dialog for existing edit controls. Opening or expanding a
+document must not write data. Saved values, custom property names, hide/restore
+behavior, permissions and Routine draft/discard confirmation remain intact.
+`app/document-view.css` shares this layout after the existing field styles.
+Project content uses one column; the recent-update feed remains visible, while
+bot enable controls and template tools stay out of the default reading surface.
+Titles are headings, not permanent input fields. Completion stays a direct work
+action. The `document-view.spec.ts` checks read/edit separation, nested-dialog
+focus, Viewer access, six themes, actual fonts and 320–3840px/200% layouts.
+
 `app/item-editor.css` is the shared field/layout layer loaded after `globals.css`
 and `workspace-design.css`.
 Project creation, Project detail, property definitions, templates, Task detail,
