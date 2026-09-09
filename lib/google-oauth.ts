@@ -46,6 +46,15 @@ export function googleRedirectUri(runtime: GoogleRuntimeEnv, request: Request) {
   return runtime.GOOGLE_OAUTH_REDIRECT_URI || new URL("/api/google/callback", request.url).toString();
 }
 
+export function googleCanonicalSignInUrl(runtime: GoogleRuntimeEnv, request: Request, returnTo: string) {
+  const requestUrl = new URL(request.url);
+  const callbackOrigin = new URL(googleRedirectUri(runtime, request)).origin;
+  if (callbackOrigin === requestUrl.origin) return null;
+  const canonical = new URL("/api/auth/google", callbackOrigin);
+  canonical.searchParams.set("returnTo", returnTo);
+  return canonical.toString();
+}
+
 export function googleAuthorizationUrl(runtime: GoogleRuntimeEnv, request: Request, state: string) {
   const clientId = requireGoogleValue(runtime.GOOGLE_CLIENT_ID, "GOOGLE_CLIENT_ID");
   const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
