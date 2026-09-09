@@ -57,7 +57,7 @@ test("Slack thread reading keeps image-only messages as bounded Project attachme
   });
   const thread = await readSlackThread("token", { channel: "C1", channelType: "channel", user: "member-a", text: "", ts: "1.2" });
   assert.equal(requests.length, 1);
-  assert.deepEqual(requests[0], { method: "conversations.replies", body: { channel: "C1", ts: "1.2", limit: 15 } });
+  assert.deepEqual(requests[0], { method: "conversations.replies", body: { channel: "C1", ts: "1.2" } });
   assert.equal(thread.truncated, true);
   assert.equal(thread.imageFiles.length, 1);
   assert.deepEqual(thread.imageFiles[0], {
@@ -107,9 +107,24 @@ test("Slack thread reading recovers the root when replies returns only the curre
     channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 정리해줘", ts: "2.0", threadTs: "1.0",
   });
   assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "conversations.history"]);
-  assert.deepEqual(requests[1].body, { channel: "C1", latest: "1.0", inclusive: true, limit: 1 });
+  assert.deepEqual(requests[1].body, { channel: "C1", oldest: "1.0", inclusive: true, limit: 1 });
   assert.equal(thread.messages[0].text, "고객 문의를 확인하고 수정한다");
   assert.equal(thread.imageFiles[0].id, "root-image");
+});
+
+test("Slack thread reading keeps the root when replies rejects its arguments", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    if (method === "conversations.replies") throw Object.assign(new Error("invalid_arguments"), { code: "invalid_arguments" });
+    return { messages: [{ user: "member-b", text: "고객 문의 원문", ts: "1.0" }] };
+  });
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 정리해줘", ts: "2.0", threadTs: "1.0",
+  });
+  assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "conversations.history"]);
+  assert.equal(thread.messages[0].text, "고객 문의 원문");
+  assert.equal(thread.truncated, true);
 });
 
 test("Slack work draft retries a rejected structured response with JSON compatibility mode", async () => {
