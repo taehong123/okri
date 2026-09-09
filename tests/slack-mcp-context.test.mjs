@@ -26,6 +26,15 @@ test("Slack thread source detection accepts actual replies, inline work, and ima
   assert.equal(context.hasSlackCreationSource([`<@U123> ${query}`], query, 1), true);
 });
 
+test("Slack source messages exclude the current mention and OKRI bot replies", () => {
+  const messages = [
+    { user: "U1", ts: "1.0", text: "결제 오류를 수정한다" },
+    { user: "B1", ts: "1.1", text: "이전 OKRI 답변" },
+    { user: "U1", ts: "1.2", text: "<@B1> 이 내용으로 Task 만들어줘" },
+  ];
+  assert.deepEqual(context.slackThreadSourceMessages(messages, "1.2", "B1"), [messages[0]]);
+});
+
 test("missing Slack thread messages state that nothing was saved", () => {
   assert.match(context.missingSlackThreadSourceMessage(true), /아무 업무도 저장하지 않았습니다/);
   assert.match(context.missingSlackThreadSourceMessage(false), /원본 스레드의 답글 입력창/);

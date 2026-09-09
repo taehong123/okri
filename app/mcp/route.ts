@@ -347,7 +347,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okri", version: "0.9.1" },
+    { name: "okri", version: "0.9.2" },
     {
       instructions:
         [

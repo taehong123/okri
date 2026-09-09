@@ -26,6 +26,14 @@ export function hasSlackCreationSource(messages: string[], query: string, imageC
   });
 }
 
+export function slackThreadSourceMessages<T extends { user: string; text: string; ts?: string }>(
+  messages: T[],
+  eventTs: string,
+  botUserId: string,
+) {
+  return messages.filter((message) => message.ts !== eventTs && message.user !== botUserId);
+}
+
 export function missingSlackThreadSourceMessage(hasThreadTs: boolean) {
   return hasThreadTs
     ? "Slack에서 원본 스레드 내용을 받지 못해 아무 업무도 저장하지 않았습니다. 해당 채널에 OKRI가 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요."

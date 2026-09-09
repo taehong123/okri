@@ -12,7 +12,8 @@ import {
 } from "@/lib/pace-data";
 import { slackApi } from "@/lib/slack-daily";
 import type { SlackImageFile } from "@/lib/project-images";
-import { readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
+import { assertConcreteWorkInput, readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
+import { missingSlackThreadSourceMessage } from "@/lib/slack-mcp-context";
 
 type RuntimeEnv = typeof env & {
   OPENAI_API_KEY?: string;
@@ -98,9 +99,11 @@ type SlackThreadResult = {
 } & Record<string, unknown>;
 
 const maxOutputTokens = 900;
-const maxThreadMessages = 200;
+// Slack caps this method at 15 messages for new commercially distributed apps.
+const maxThreadMessages = 15;
 const maxThreadChars = 24_000;
 const maxThreadImages = 10;
+const slackThreadPageSize = 15;
 
 const draftSchema = {
   type: "object",
@@ -151,7 +154,7 @@ export async function prepareSlackWorkDraft(input: {
   const [thread, context, rules, language, authors] = await Promise.all([
     readSlackThread(input.token, input.event).catch((error) => {
       logPreparationFailure("thread", error);
-      return fallbackSlackThread(input.event, input.query);
+      throw new SlackWorkIntakeError(missingSlackThreadSourceMessage(Boolean(input.event.threadTs)), "slack_thread_unavailable");
     }),
     readWorkContext(env.DB, input.authorization.ownerId, input.authorization.userId, { kind: "unsure", limit: 12 }),
     getWorkspaceRules(input.authorization.ownerId),
@@ -243,21 +246,13 @@ export async function prepareSlackWorkDraft(input: {
       proposed = fallbackCreationDraft(input, thread.messages, rules.defaultPriority);
     }
     if (proposed.kind === "none") throw new SlackWorkIntakeError("생성할 업무를 확인하지 못했습니다. 만들고 싶은 결과를 한 문장으로 적어 주세요.", "no_work_detected");
-    return normalizeSlackWorkDraft(proposed, context, input.memberId, thread.truncated, rules.defaultPriority,
+    const draft = normalizeSlackWorkDraft(proposed, context, input.memberId, thread.truncated, rules.defaultPriority,
       thread.imageFiles.length, thread.imagesTruncated);
+    assertConcreteWorkInput({ title: draft.title, description: draft.description });
+    return draft;
   } finally {
     if (!finalized) await releaseAiUsageReservation(reservationId);
   }
-}
-
-function fallbackSlackThread(event: SlackWorkIntakeEvent, query: string) {
-  const text = cleanSlackText(query || event.text);
-  return {
-    messages: text ? [{ user: event.user, text }] : [],
-    truncated: true,
-    imageFiles: [] as SlackImageFile[],
-    imagesTruncated: false,
-  };
 }
 
 function hasExplicitCreationIntent(value: string) {
@@ -364,7 +359,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     return { messages: [{ user: event.user, text: cleanSlackText(event.text) }], truncated: false,
       imageFiles: [] as SlackImageFile[], imagesTruncated: false };
   }
-  const collected: Array<{ user: string; text: string }> = [];
+  const collected: Array<{ user: string; text: string; botId?: string; ts?: string }> = [];
   const imageFiles: SlackImageFile[] = [];
   const imageIds = new Set<string>();
   let cursor = "";
@@ -376,7 +371,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     const result = await slackApi<SlackThreadResult>(token, "conversations.replies", {
       channel: event.channel,
       ts: rootTs,
-      limit: 100,
+      limit: slackThreadPageSize,
       ...(cursor ? { cursor } : {}),
     });
     for (const message of result.messages ?? []) {
@@ -397,11 +392,11 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       }
       const text = cleanSlackText(message.text ?? "");
       if (!text) continue;
-      collected.push({ user: message.user ?? "", text });
+      collected.push({ user: message.user ?? "", text, botId: message.bot_id, ts: message.ts });
       if (collected.length >= maxThreadMessages) { truncated = Boolean(result.response_metadata?.next_cursor); break; }
     }
     cursor = result.response_metadata?.next_cursor ?? "";
-  } while (cursor && collected.length < maxThreadMessages && pages < 2);
+  } while (cursor && collected.length < maxThreadMessages && pages < 1);
   if (cursor) {
     truncated = true;
     imagesTruncated = true;

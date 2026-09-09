@@ -2,7 +2,7 @@
 export const WORK_KINDS = ["task", "project", "routine", "objective", "key_result", "initiative", "unsure"] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
 
-const GENERIC_CONTEXT_PLACEHOLDER = /^(?:(?:원본|위|이)\s*)?(?:스레드|대화|메시지|채팅)\s*(?:업무\s*)?(?:내용\s*)?(?:확인|파악|읽기)(?:하기)?$|^(?:check|read|review)\s+(?:the\s+)?(?:original\s+)?(?:thread|conversation|message|context)$/iu;
+const GENERIC_CONTEXT_PLACEHOLDER = /^(?:(?:원본|위|이|해당|관련)\s*)?(?:Slack\s*)?(?:스레드|대화|메시지|채팅|원문)(?:(?:\s*(?:업무|작업|내용|원문|컨텍스트)){0,2})\s*(?:확인|파악|읽기|검토|조회|정리)(?:하기)?$|^(?:check|read|review|inspect)\s+(?:the\s+)?(?:original\s+)?(?:thread|conversation|message|context)(?:\s+(?:content|source))?$/iu;
 const KOREAN_MISSING_CONTEXT_REPORT = /(?:원본\s*)?(?:스레드|대화|원문|메시지)[\s\S]{0,120}(?:읽지\s*못|확인할\s*수\s*없|접근할\s*수\s*없|보이지\s*않|내용이?\s*(?:보이면|확인되면)|다시\s*정리)/iu;
 const ENGLISH_MISSING_CONTEXT_REPORT = /(?:(?:thread|conversation|context|message)[\s\S]{0,100}(?:not\s+(?:available|provided|visible)|becomes?\s+available)|(?:could(?:\s+not|n't)|unable\s+to)\s+(?:read|access|see)[\s\S]{0,60}(?:thread|conversation|context|message))/iu;
 const CONCRETE_REPAIR_WORK = /(?:수정|고치|해결|구현|지원|복구|조사|디버그|fix|resolve|implement|support|restore|investigate|debug)/iu;
