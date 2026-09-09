@@ -267,6 +267,7 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await expect(page.getByText('Routine 문서', { exact: true })).toBeVisible();
   await expect(page.locator('.routine-details .work-document-section .bn-editor')).toContainText('Routine playbook');
   await page.locator('.document-properties-editor > header h2').click();
+  await expect(page.locator('.routine-guide-grid').getByLabel('트리거 포인트', { exact: true })).toHaveCSS('border-top-color', taskStyle.border);
   const routineStyle = await fieldStyle(page.locator('.routine-guide-grid').getByLabel('트리거 포인트', { exact: true }));
   expect(routineStyle).toEqual(taskStyle);
   await page.screenshot({ path: info.outputPath('routine-edit.png') });
