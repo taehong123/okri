@@ -2366,7 +2366,7 @@ function WorkspaceApp() {
             aria-label={t("홈으로 이동")}
             aria-current={activeView === "okr" && !selectedProject && !selectedTask ? "page" : undefined}
           >
-            <House size={15} /><span>{t("홈")}</span>
+            <House size={18} /><span>{t("홈")}</span>
           </button>
           <button type="button" className="workspace-search-trigger" onClick={openSearch} aria-label={t("업무 또는 메뉴 검색")} aria-haspopup="dialog"><Search size={16} /><span>{t("업무 또는 메뉴 검색…")}</span><kbd>{typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘ K" : "Ctrl K"}</kbd></button>
           <div className="workspace-topbar-actions"><button className="mobile-assistant-trigger" aria-label={t("AI 대화 열기")} title={t("AI 대화 열기")} onClick={openAssistant}><span aria-hidden="true">🤖</span></button><button className="workspace-topbar-settings" aria-label={t("워크스페이스 설정")} title={t("워크스페이스 설정")} onClick={() => openWorkspaceSettings("general")}><Settings size={16} /></button><button aria-label={t("서비스 안내")} title={t("서비스 안내")} onClick={() => setOnboardingOpen(true)}><CircleHelp size={15} /></button></div>
@@ -2429,6 +2429,7 @@ function WorkspaceApp() {
 
           {selectedProject ? (
             <ProjectPageView
+              key={selectedProject.id}
               project={selectedProject}
               allItems={items}
               properties={properties}
@@ -2442,6 +2443,7 @@ function WorkspaceApp() {
               onPropertyVisibility={(propertyId, hidden) => void setProjectPropertyVisibility(selectedProject.id, propertyId, hidden)}
               onAssignmentsChange={updateItemAssignments}
               onTaskCreated={(created) => setItems((current) => [...current, created])}
+              onItemsRefresh={(freshItems) => setItems((current) => [...current.filter((entry) => !freshItems.some((fresh) => fresh.id === entry.id)), ...freshItems])}
               onOpenTask={openTaskDetail}
               readOnly={currentWorkspace?.role === "viewer"}
               onNotice={showNotice}
@@ -3119,7 +3121,7 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
-function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onBackToList, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
+function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onBackToList, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onItemsRefresh, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
   project: OkriItem;
   onBackToList: () => void;
   allItems: OkriItem[];
@@ -3133,6 +3135,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   onPropertyVisibility: (propertyId: string, hidden: boolean) => void;
   onAssignmentsChange: (itemId: string, assignments: ItemAssignment[]) => void;
   onTaskCreated: (task: OkriItem) => void;
+  onItemsRefresh: (items: OkriItem[]) => void;
   onOpenTask: (id: string) => void;
   readOnly: boolean;
   onNotice: (message: string) => void;
@@ -3144,6 +3147,11 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   const confirmAction = useAppConfirm();
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
+  const [progressBotEnabled, setProgressBotEnabled] = useState(false);
+  const [progressBotRefreshing, setProgressBotRefreshing] = useState(false);
+  const [progressBotCheckedAt, setProgressBotCheckedAt] = useState<string | null>(null);
+  const progressBotRefreshHandler = useRef(onItemsRefresh);
+  const progressBotNoticeHandler = useRef(onNotice);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
   const initiative = project.parentId ? byId.get(project.parentId) : undefined;
   const keyResult = initiative?.parentId ? byId.get(initiative.parentId) : undefined;
@@ -3158,6 +3166,54 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   const deletableLinkedTasks = linkedTasks.filter(canDeleteItem);
   const driIds = project.assignments.filter((entry) => entry.role === "project_dri").map((entry) => entry.memberId);
   const workerIds = project.assignments.filter((entry) => entry.role === "project_worker").map((entry) => entry.memberId);
+
+  useEffect(() => { progressBotRefreshHandler.current = onItemsRefresh; }, [onItemsRefresh]);
+  useEffect(() => { progressBotNoticeHandler.current = onNotice; }, [onNotice]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      try { setProgressBotEnabled(window.localStorage.getItem(`okri.project-progress-bot.${project.id}`) === "1"); }
+      catch { setProgressBotEnabled(false); }
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [project.id]);
+
+  const refreshProgressBot = useCallback(async (quiet = false) => {
+    if (!quiet) setProgressBotRefreshing(true);
+    try {
+      const [projectResponse, taskResponse] = await Promise.all([
+        fetch("/api/items?kind=project", { cache: "no-store" }),
+        fetch(`/api/items?kind=task&parentId=${encodeURIComponent(project.id)}`, { cache: "no-store" }),
+      ]);
+      if (!projectResponse.ok || !taskResponse.ok) throw new Error("refresh failed");
+      const [projectData, taskData] = await Promise.all([
+        projectResponse.json() as Promise<{ items: OkriItem[] }>,
+        taskResponse.json() as Promise<{ items: OkriItem[] }>,
+      ]);
+      const freshProject = projectData.items.find((entry) => entry.id === project.id);
+      progressBotRefreshHandler.current([...(freshProject ? [freshProject] : []), ...taskData.items]);
+      setProgressBotCheckedAt(new Date().toISOString());
+    } catch {
+      if (!quiet) progressBotNoticeHandler.current(t("최신 진행 상황을 확인하지 못했습니다."));
+    } finally {
+      if (!quiet) setProgressBotRefreshing(false);
+    }
+  }, [project.id]);
+
+  useEffect(() => {
+    if (!progressBotEnabled) return;
+    const initial = window.setTimeout(() => void refreshProgressBot(true), 0);
+    const interval = window.setInterval(() => {
+      if (document.visibilityState === "visible") void refreshProgressBot(true);
+    }, 30_000);
+    return () => { window.clearTimeout(initial); window.clearInterval(interval); };
+  }, [progressBotEnabled, refreshProgressBot]);
+
+  function setProgressBot(next: boolean) {
+    setProgressBotEnabled(next);
+    try { window.localStorage.setItem(`okri.project-progress-bot.${project.id}`, next ? "1" : "0"); } catch { /* Browser storage is optional. */ }
+    if (next) void refreshProgressBot(true);
+    onNotice(next ? t("진행사항 봇을 켰습니다.") : t("진행사항 봇을 껐습니다."));
+  }
 
   function systemProperty(key: string) {
     return systemProperties.get(key);
@@ -3228,6 +3284,45 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
             <button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button>
           </div>
         </header>
+        <div className="project-detail-content">
+          <main className="project-primary-column">
+            <ProjectProgressSection
+              project={project}
+              tasks={linkedTasks}
+              teamMembers={teamMembers}
+              botEnabled={progressBotEnabled}
+              botRefreshing={progressBotRefreshing}
+              botCheckedAt={progressBotCheckedAt}
+              readOnly={readOnly}
+              onToggleBot={setProgressBot}
+              onRefresh={() => void refreshProgressBot()}
+              onPatch={onPatch}
+              onSaveTaskAssignee={saveTaskAssignee}
+              onOpenTask={onOpenTask}
+            />
+            <section className="project-linked-tasks">
+              <header><div><b>{t("연결된 Task")}</b><span>{t("{count}개", { count: linkedTasks.length })}</span></div>{deletableLinkedTasks.length > 0 && <button onClick={() => deletableLinkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />{t("삭제 가능 Task 선택")}</button>}</header>
+              <form className="project-task-quick-add" onSubmit={createLinkedTask}>
+                <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} aria-label={t("새 Task 이름")} placeholder={t("새 Task 빠른 추가")} disabled={readOnly || creatingTask} />
+                <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label={t("Task 추가")} title={t("Task 추가")}><Plus size={15} /></button>
+              </form>
+              <div className="project-task-table">
+                <div className="project-task-row project-task-head"><span>{t("Task")}</span><span>{t("완료")}</span><span>{t("담당자")}</span><span>{t("마감일")}</span></div>
+                {linkedTasks.map((task) => {
+                  const assignee = task.assignments.find((assignment) => assignment.role === "task_assignee")?.memberId ?? "";
+                  return <div className="project-task-row" key={task.id}>
+                    <div className="project-task-title-cell">{canDeleteItem(task) && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
+                    <button type="button" disabled={readOnly} className={`project-task-completion ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} aria-label={`${task.title} ${isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}`} onClick={() => void onPatch(task.id, taskCompletionPatch(task.status))}><span><Check size={12} /></span></button>
+                    <select disabled={readOnly} value={assignee} onChange={(event) => void saveTaskAssignee(task, event.target.value)}><option value="">{t("미지정")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
+                    <input disabled={readOnly} type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch(task.id, { dueDate: event.target.value || null })} />
+                  </div>;
+                })}
+                {!linkedTasks.length && <div className="project-task-empty">{t("연결된 Task가 없습니다.")}</div>}
+              </div>
+            </section>
+            <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
+          </main>
+          <aside className="project-context-column" aria-label={t("Project 정보")}>
         <form className="property-form project-detail-form">
           {systemPropertyVisible("parent_id") && <ProjectSystemPropertySlot property={systemProperty("parent_id")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("parent_id"), t, "상위 Initiative")}</span><select disabled={readOnly} value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">{t("선택")}</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label></ProjectSystemPropertySlot>}
           <div className="project-field-grid">
@@ -3250,30 +3345,67 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           <LineageRow label={t("Key Result")} value={keyResult?.title ?? "미연결"} />
           <LineageRow label={t("Initiative")} value={initiative?.title ?? "미연결"} />
         </section>
-        <section className="project-linked-tasks">
-          <header><div><b>{t("연결된 Task")}</b><span>{t("{count}개", { count: linkedTasks.length })}</span></div>{deletableLinkedTasks.length > 0 && <button onClick={() => deletableLinkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />{t("삭제 가능 Task 선택")}</button>}</header>
-          <form className="project-task-quick-add" onSubmit={createLinkedTask}>
-            <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} aria-label={t("새 Task 이름")} placeholder={t("새 Task 빠른 추가")} disabled={readOnly || creatingTask} />
-            <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label={t("Task 추가")} title={t("Task 추가")}><Plus size={15} /></button>
-          </form>
-          <div className="project-task-table">
-            <div className="project-task-row project-task-head"><span>{t("Task")}</span><span>{t("완료")}</span><span>{t("담당자")}</span><span>{t("마감일")}</span></div>
-            {linkedTasks.map((task) => {
-              const assignee = task.assignments.find((assignment) => assignment.role === "task_assignee")?.memberId ?? "";
-              return <div className="project-task-row" key={task.id}>
-                <div className="project-task-title-cell">{canDeleteItem(task) && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
-                <button type="button" disabled={readOnly} className={`project-task-completion ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} aria-label={`${task.title} ${isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}`} onClick={() => void onPatch(task.id, taskCompletionPatch(task.status))}><span><Check size={12} /></span></button>
-                <select disabled={readOnly} value={assignee} onChange={(event) => void saveTaskAssignee(task, event.target.value)}><option value="">{t("미지정")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
-                <input disabled={readOnly} type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch(task.id, { dueDate: event.target.value || null })} />
-              </div>;
-            })}
-            {!linkedTasks.length && <div className="project-task-empty">{t("연결된 Task가 없습니다.")}</div>}
-          </div>
-        </section>
-        <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
+          </aside>
+        </div>
       </aside>}
     </OverlayDialog>
   );
+}
+
+function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onToggleBot, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
+  project: OkriItem;
+  tasks: OkriItem[];
+  teamMembers: TeamMember[];
+  botEnabled: boolean;
+  botRefreshing: boolean;
+  botCheckedAt: string | null;
+  readOnly: boolean;
+  onToggleBot: (enabled: boolean) => void;
+  onRefresh: () => void;
+  onPatch: (id: string, patch: Partial<OkriItem>) => Promise<unknown>;
+  onSaveTaskAssignee: (task: OkriItem, memberId: string) => Promise<void>;
+  onOpenTask: (id: string) => void;
+}) {
+  const today = new Date().toLocaleDateString("sv-SE");
+  const completed = tasks.filter((task) => isCompletedStatus(task.status));
+  const blocked = tasks.filter((task) => task.status === "blocked");
+  const taskProgress = tasks.length ? Math.round((completed.length / tasks.length) * 100) : project.progress;
+  const needsOwner = tasks.filter((task) => !isCompletedStatus(task.status) && !task.assignments.some((assignment) => assignment.role === "task_assignee"));
+  const needsDueDate = tasks.filter((task) => !isCompletedStatus(task.status) && !task.dueDate);
+  const overdue = tasks.filter((task) => !isCompletedStatus(task.status) && Boolean(task.dueDate && task.dueDate < today));
+  const progressDiffers = tasks.length > 0 && project.progress !== taskProgress;
+  const reviewCount = needsOwner.length + needsDueDate.length + overdue.length + (progressDiffers ? 1 : 0);
+  const recent = [...tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
+
+  return <section className="project-progress-section" aria-labelledby="project-progress-heading">
+    <header className="project-progress-header">
+      <div><h3 id="project-progress-heading">{t("진행 상황")}</h3><p>{t("Task의 상태와 변경이 시간순으로 쌓입니다.")}</p></div>
+      <div className="project-progress-bot-control">
+        <span><Bot size={15} />{t("진행사항 봇")}</span>
+        <label className="project-bot-switch"><input type="checkbox" checked={botEnabled} disabled={readOnly} onChange={(event) => onToggleBot(event.target.checked)} aria-label={t("진행사항 봇 사용")} /><span aria-hidden="true" /></label>
+      </div>
+    </header>
+    <div className="project-progress-overview">
+      <div className="project-progress-value"><strong>{project.progress}%</strong><span>{t("Project 진행률")}</span></div>
+      <div className="project-progress-track" aria-label={t("Project 진행률")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={project.progress} role="progressbar"><i style={{ width: `${project.progress}%` }} /></div>
+      <dl><div><dt>{t("완료")}</dt><dd>{completed.length} / {tasks.length}</dd></div><div><dt>{t("막힘")}</dt><dd>{blocked.length}</dd></div><div><dt>{t("확인 필요")}</dt><dd>{botEnabled ? reviewCount : "—"}</dd></div></dl>
+    </div>
+    {botEnabled ? <div className="project-bot-workspace">
+      <header><div><b>{reviewCount ? t("봇이 확인을 기다리고 있습니다") : t("정리할 항목이 없습니다")}</b><span>{t("애매한 값은 바꾸지 않고 먼저 묻습니다.")}</span></div><button type="button" className="icon-button" disabled={botRefreshing} aria-label={t("진행 상황 새로고침")} onClick={onRefresh}>{botRefreshing ? <LoaderCircle className="spinning" size={15} /> : <RefreshCw size={15} />}</button></header>
+      {reviewCount > 0 && <div className="project-bot-review-list">
+        {progressDiffers && <article className="project-bot-review-row"><AlertTriangle size={16} /><div><b>{t("Task 완료율과 Project 진행률이 다릅니다.")}</b><p>{t("Task 기준 {value1}%로 맞출까요?", { value1: messageValue(taskProgress) })}</p></div><button type="button" disabled={readOnly} onClick={() => void onPatch(project.id, { progress: taskProgress })}>{t("진행률 반영")}</button></article>}
+        {needsOwner.map((task) => <article className="project-bot-review-row" key={`owner:${task.id}`}><AlertTriangle size={16} /><div><button type="button" className="project-bot-task-link" onClick={() => onOpenTask(task.id)}>{task.title}</button><p>{t("담당자가 없습니다. 누가 맡을까요?")}</p></div><select aria-label={t("{value1} 담당자", { value1: messageValue(task.title) })} disabled={readOnly} defaultValue="" onChange={(event) => void onSaveTaskAssignee(task, event.target.value)}><option value="">{t("담당자 선택")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></article>)}
+        {needsDueDate.map((task) => <article className="project-bot-review-row" key={`due:${task.id}`}><CalendarDays size={16} /><div><button type="button" className="project-bot-task-link" onClick={() => onOpenTask(task.id)}>{task.title}</button><p>{t("기한이 없습니다. 언제까지 할까요?")}</p></div><input aria-label={t("{value1} 기한", { value1: messageValue(task.title) })} disabled={readOnly} type="date" onChange={(event) => event.target.value && void onPatch(task.id, { dueDate: event.target.value })} /></article>)}
+        {overdue.map((task) => <article className="project-bot-review-row overdue" key={`overdue:${task.id}`}><AlertTriangle size={16} /><div><button type="button" className="project-bot-task-link" onClick={() => onOpenTask(task.id)}>{task.title}</button><p>{t("기한이 지났습니다. 상태를 막힘으로 바꿀까요, 기한을 다시 잡을까요?")}</p></div><div className="project-bot-inline-actions"><button type="button" disabled={readOnly} onClick={() => void onPatch(task.id, { status: "blocked" })}>{t("막힘으로 변경")}</button><input aria-label={t("{value1} 새 기한", { value1: messageValue(task.title) })} disabled={readOnly} type="date" min={today} onChange={(event) => event.target.value && void onPatch(task.id, { dueDate: event.target.value })} /></div></article>)}
+      </div>}
+      <p className="project-bot-last-check">{botCheckedAt ? t("최근 확인 · {value1}", { value1: messageValue(formatDateTime(botCheckedAt)) }) : t("변경사항을 확인하고 있습니다.")}</p>
+    </div> : <button type="button" className="project-bot-empty" disabled={readOnly} onClick={() => onToggleBot(true)}><Bot size={18} /><span><b>{t("진행사항 봇 켜기")}</b><small>{t("누락·지연·진행률 차이를 찾아 이 자리에서 확인합니다.")}</small></span><ChevronRight size={16} /></button>}
+    <div className="project-update-feed">
+      <header><b>{t("최근 업데이트")}</b><span>{t("최신순")}</span></header>
+      {recent.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><span><b>{task.title}</b><small>{isCompletedStatus(task.status) ? t("완료됨") : statusLabels[task.status]} · {formatDateTime(task.updatedAt)}</small></span><ChevronRight size={15} /></button>)}
+      {!recent.length && <p className="project-update-empty">{t("아직 쌓인 Task 업데이트가 없습니다.")}</p>}
+    </div>
+  </section>;
 }
 
 function ProjectDataSection({ project }: { project: OkriItem }) {

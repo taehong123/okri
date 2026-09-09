@@ -7,6 +7,16 @@
 .app-shell .page-header p { margin-top: var(--space-2); font-size: var(--type-body); line-height: 1.6; color: var(--text-secondary); }
 .app-shell :is(.page-create-actions, .project-page-actions) { flex-wrap: wrap; gap: var(--space-2); }
 .app-shell .workspace-topbar { padding-inline: var(--space-8); background: var(--bg-page); font-size: var(--type-label); }
+.app-shell .workspace-topbar .workspace-brand {
+  width: var(--control-height);
+  min-width: var(--control-height);
+  min-height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.app-shell .workspace-topbar .workspace-brand > svg { display: block; flex: 0 0 auto; }
 .app-shell .sidebar { padding: var(--space-3) var(--space-2); background: var(--bg-surface); }
 .app-shell .sidebar nav { gap: var(--space-1); margin-top: var(--space-4); }
 .app-shell :is(.workspace-switcher, .nav-item, .profile-row) { gap: var(--space-2); padding-inline: var(--space-3); }
@@ -181,6 +191,7 @@
   .app-shell .page-body,
   .app-shell .page-body:has(.okr-document) { padding: var(--space-6) var(--space-4) calc(5.75rem + env(safe-area-inset-bottom)); }
   .app-shell .workspace-topbar { padding-inline: var(--space-4); }
+  .app-shell .workspace-topbar .workspace-brand { min-width: 2.75rem; min-height: 2.75rem; }
   .app-shell .sidebar { height: auto; padding: var(--space-1) var(--space-1) env(safe-area-inset-bottom); }
   .app-shell .sidebar .mobile-navigation { height: auto; min-height: 3.25rem; margin: 0; gap: 0; }
   .app-shell .mobile-navigation .nav-item { height: auto; gap: var(--space-1); padding: var(--space-1); }
@@ -189,6 +200,19 @@
   .app-shell .home-okr-chat { max-width: 100%; }
   .app-shell .project-tabs { gap: var(--space-3); flex-wrap: wrap; }
   .app-shell :is(.daily-editor, .daily-rollup) { padding: var(--space-6) 0; }
+}
+@media (max-width: 700px) {
+  .app-shell .workspace-topbar .workspace-brand { display: none; }
+  .app-shell .workspace-topbar .workspace-mobile-home {
+    width: 2.75rem !important;
+    min-width: 2.75rem;
+    height: 2.75rem !important;
+    justify-content: center;
+    gap: 0;
+    padding: 0 !important;
+  }
+  .app-shell .workspace-topbar .workspace-mobile-home > span { display: none; }
+  .app-shell .workspace-topbar .workspace-mobile-home > svg { display: block; flex: 0 0 auto; }
 }
 @media (max-width: 640px) {
   .app-shell .page-header p { font-size: var(--type-label); line-height: 1.5; }

@@ -127,6 +127,24 @@ test('Viewer sees a consistent read-only Project without interactive assignment 
   expect(writes.filter(write => /^\/api\/(items|item-assignments|property-values|project-)/.test(write.path))).toEqual([]);
 });
 
+test('Project progress bot stays conservative and applies only a confirmed suggestion', async ({ page }) => {
+  const writes = await fixture(page);
+  await page.goto('/?view=work&project=project-1');
+  const panel = page.locator('.project-detail-panel');
+
+  await expect(panel.getByRole('heading', { name: '진행 상황' })).toBeVisible();
+  await expect(panel.getByRole('checkbox', { name: '진행사항 봇 사용' })).not.toBeChecked();
+  await panel.getByRole('button', { name: '진행사항 봇 켜기' }).click();
+  await expect(panel.getByRole('checkbox', { name: '진행사항 봇 사용' })).toBeChecked();
+  await expect(panel.getByText('Task 완료율과 Project 진행률이 다릅니다.')).toBeVisible();
+  expect(writes.filter(write => write.path === '/api/items' && write.data.progress !== undefined)).toEqual([]);
+  const contrast = await new AxeBuilder({ page: page as never }).include('.project-progress-section').withRules(['color-contrast']).analyze();
+  expect(contrast.violations).toEqual([]);
+
+  await panel.getByRole('button', { name: '진행률 반영' }).click();
+  await expect.poll(() => writes.some(write => write.path === '/api/items' && write.data.progress === 0)).toBe(true);
+});
+
 test('Task uses one completion control instead of Project workflow status and progress', async ({ page }, info) => {
   await installApiMocks(page, { withRoutine: true });
   const writes: Record<string, unknown>[] = [];
@@ -212,7 +230,7 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await cdp.detach();
   for (const theme of ['white', 'beige', 'gray', 'dark', 'neon', 'cyberpunk']) {
     await page.locator('html').evaluate((el, id) => { el.dataset.theme = id; }, theme);
-    const result = await new AxeBuilder({ page: page as never }).include('.project-detail-form').include('.project-custom-properties').withRules(['color-contrast']).analyze();
+    const result = await new AxeBuilder({ page: page as never }).include('.project-progress-section').include('.project-detail-form').include('.project-custom-properties').withRules(['color-contrast']).analyze();
     expect(result.violations, theme).toEqual([]);
     await page.screenshot({ path: info.outputPath(`project-${theme}.png`) });
   }
