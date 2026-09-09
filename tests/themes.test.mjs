@@ -116,6 +116,12 @@ test("readability uses scalable roles instead of per-screen font patches or CSS 
   assert.equal(white["focus-ring"], white["text-primary"]);
 });
 
+test("mobile daily completion stays compact without shrinking its touch target", () => {
+  assert.match(css, /\.app-shell \.scrum-toolbar > div \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/);
+  assert.match(css, /\.app-shell \.scrum-toolbar > div > button\.primary-action \{[^}]*width: auto;[^}]*min-width: max-content;[^}]*border-radius: 999px;/);
+  assert.match(css, /\.app-shell \.scrum-toolbar > div > button\.primary-action \{[^}]*justify-self: end;/);
+});
+
 test("hierarchy colors change with each theme instead of sharing fixed rails", () => {
   assert.equal(new Set(THEMES.map((theme) => theme.tokens["kr-rail"])).size, THEMES.length);
   for (const theme of THEMES) {
