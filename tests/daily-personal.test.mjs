@@ -1094,6 +1094,21 @@ test("completed candidates auto-select actual completions and mark incomplete ch
   assert.equal((await api.submitDailyDraft(authorization, date, "web", "request-1")).id, submitted.id);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM daily_submissions").get().count, 1);
   assert.equal(db.prepare("SELECT COUNT(*) count FROM activity_log WHERE item_id='task'").get().count, 1);
+
+  const revisionCandidates = await work.listDailyYesterdayWork(raw, "w", "me", date, "Asia/Seoul");
+  assert.equal(revisionCandidates.find((entry) => entry.key === "task:task").completedYesterday, true);
+  assert.equal(revisionCandidates.find((entry) => entry.key === "routine:routine").completedYesterday, true);
+  const revisionDraft = await api.getDailyDashboard(authorization, date);
+  assert.deepEqual(revisionDraft.draft.selectedYesterdayWorkIds, ["task:done", "task:task", "routine:routine"]);
+  await api.saveDailyDraft(authorization, {
+    date, selectedWorkIds: [], selectedYesterdayWorkIds: ["task:done"], noPlannedTasks: true,
+  }, false);
+  const revised = await api.submitDailyDraft(authorization, date, "web", "request-2");
+  assert.equal(revised.version, 2);
+  assert.deepEqual(revised.yesterdayWork.map((entry) => entry.key), ["task:done"]);
+  assert.equal(revised.newlyCompletedCount, 0);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM activity_log WHERE item_id='task'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM routine_completions").get().count, 1);
 });
 
 test("completed-work draft rejects overlap and failed submit rolls back completions", async (t) => {
