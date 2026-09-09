@@ -1,4 +1,8 @@
 const messages = {
+  "템플릿을 만들지 못했습니다.": "Could not create the template.",
+  "문서 서식": "Document formatting",
+  "이미지 첨부": "Attach image",
+  "PNG·JPG·WebP·GIF 이미지를 5MB 이하로 첨부해 주세요.": "Attach a PNG, JPG, WebP or GIF image up to 5 MB.",
   "목표와 결과를 함께 정하고, 변화가 생기면 한곳에서 수정하세요.": "Set goals and results together, and update them in one place as things change.",
   "이 공간에 OKR을 만들 권한이 없습니다. 관리자에게 권한을 요청하거나 기능 안내를 먼저 확인하세요.": "You cannot create OKRs in this workspace. Ask an admin for access, or explore the features first.",
   "입력한 내용은 화면에 남아 있습니다. 연결을 확인하고 다시 저장해 주세요.": "Your answers are still here. Check your connection and try saving again.",

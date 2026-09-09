@@ -1,5 +1,9 @@
 import type { Catalog } from "./en";
 const messages = {
+  "템플릿을 만들지 못했습니다.": "No se pudo crear la plantilla.",
+  "문서 서식": "Formato del documento",
+  "이미지 첨부": "Adjuntar imagen",
+  "PNG·JPG·WebP·GIF 이미지를 5MB 이하로 첨부해 주세요.": "Adjunta una imagen PNG, JPG, WebP o GIF de hasta 5 MB.",
   "목표와 결과를 함께 정하고, 변화가 생기면 한곳에서 수정하세요.": "Define objetivos y resultados juntos, y actualízalos en un solo lugar cuando haya cambios.",
   "이 공간에 OKR을 만들 권한이 없습니다. 관리자에게 권한을 요청하거나 기능 안내를 먼저 확인하세요.": "No tienes permiso para crear OKR aquí. Pide acceso a un administrador o explora las funciones.",
   "입력한 내용은 화면에 남아 있습니다. 연결을 확인하고 다시 저장해 주세요.": "Tus respuestas siguen aquí. Comprueba la conexión e intenta guardarlas de nuevo.",

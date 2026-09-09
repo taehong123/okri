@@ -3515,7 +3515,7 @@ function ProjectSystemPropertySlot({ property, readOnly, onHide, children }: { p
   return <div className="project-system-property">{children}{property && !readOnly && <button type="button" className="icon-button" onClick={() => onHide(property.id, true)} aria-label={t("{value1} 숨기기", { value1: messageValue(systemPropertyLabel(property, t)) })} title={t("이 Project에서 숨기기")}><EyeOff size={13} /></button>}</div>;
 }
 
-type ProjectBlockEditorProps = { initialContent: string; editable?: boolean; onChange?: (change: ProjectBlockEditorChange) => void };
+type ProjectBlockEditorProps = import("@/app/project-block-editor").ProjectBlockEditorProps;
 
 function ClientProjectBlockEditor(props: ProjectBlockEditorProps) {
   const [Editor, setEditor] = useState<ComponentType<ProjectBlockEditorProps> | null>(null);
@@ -3529,6 +3529,10 @@ function ClientProjectBlockEditor(props: ProjectBlockEditorProps) {
 
 function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: string; readOnly: boolean; onNotice: (message: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const [editorRevision, setEditorRevision] = useState(0);
+  const [uploadBusy, setUploadBusy] = useState(false);
+  const [draftPending, setDraftPending] = useState(false);
+  const [templateBusy, setTemplateBusy] = useState(false);
   const [document, setDocument] = useState<ProjectDocument | null>(null);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
@@ -3561,23 +3565,32 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
     const change = pendingChangeRef.current;
     pendingChangeRef.current = null;
     setSavingState("saving");
-    const response = await fetch("/api/project-documents", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId, ...change, expectedVersion: versionRef.current }),
-    });
-    const data = await response.json() as { document?: ProjectDocument; error?: string };
-    savingRef.current = false;
-    if (!response.ok || !data.document) {
+    let saved = false;
+    try {
+      const response = await fetch("/api/project-documents", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectId, ...change, expectedVersion: versionRef.current }),
+      });
+      const data = await response.json().catch(() => ({})) as { document?: ProjectDocument };
+      if (!response.ok || !data.document) {
+        if (!pendingChangeRef.current) pendingChangeRef.current = change;
+        setSavingState("error");
+        if (response.status === 409) onNotice(t("다른 변경이 먼저 저장되었습니다. 문서를 다시 불러와 주세요."));
+        return;
+      }
+      versionRef.current = data.document.version;
+      setDocument(data.document);
+      setSavingState("saved");
+      saved = true;
+      window.setTimeout(() => setSavingState((current) => current === "saved" ? "idle" : current), 1600);
+    } catch {
+      if (!pendingChangeRef.current) pendingChangeRef.current = change;
       setSavingState("error");
-      if (response.status === 409) onNotice(t("다른 변경이 먼저 저장되었습니다. 문서를 다시 불러와 주세요."));
-      return;
+    } finally {
+      savingRef.current = false;
+      if (pendingChangeRef.current && saved) void flushDocumentSave();
     }
-    versionRef.current = data.document.version;
-    setDocument((current) => current ? { ...data.document!, content: change.content, plainText: change.plainText } : data.document!);
-    setSavingState("saved");
-    window.setTimeout(() => setSavingState((current) => current === "saved" ? "idle" : current), 1600);
-    if (pendingChangeRef.current) void flushDocumentSave();
   }
 
   function queueDocumentSave(change: ProjectBlockEditorChange) {
@@ -3586,8 +3599,10 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
   }
 
   async function applyTemplate() {
-    if (!templateId || readOnly) return;
+    if (!templateId || readOnly || templateBusy || uploadBusy || draftPending || savingRef.current || pendingChangeRef.current) return;
     const selected = templates.find((template) => template.id === templateId);
+    setTemplateBusy(true);
+    try {
     const response = await fetch("/api/project-documents", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3597,15 +3612,20 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
     if (!response.ok || !data.document) { onNotice(t("템플릿을 불러오지 못했습니다.")); return; }
     versionRef.current = data.document.version;
     setDocument(data.document);
+    setEditorRevision(value => value + 1);
     setTemplateId("");
     onNotice(t("'{value1}'을 기존 내용 위에 추가했습니다.", { value1: messageValue(selected?.name ?? "템플릿") }));
+    } catch { onNotice(t("템플릿을 불러오지 못했습니다.")); }
+    finally { setTemplateBusy(false); }
   }
 
   async function createTemplateFromDocument(event: FormEvent) {
     event.preventDefault();
-    if (!document || readOnly) return;
+    if (!document || readOnly || templateBusy || uploadBusy || draftPending || savingRef.current || pendingChangeRef.current) return;
     const name = templateName.trim();
     if (!name) return;
+    setTemplateBusy(true);
+    try {
     const response = await fetch("/api/project-templates", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -3617,18 +3637,22 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
     setTemplateName("");
     setCreatingTemplate(false);
     onNotice(t("현재 문서를 템플릿으로 저장했습니다."));
+    } catch { onNotice(t("템플릿을 만들지 못했습니다.")); }
+    finally { setTemplateBusy(false); }
   }
 
   return <section className="project-document-section">
-    <header><div><b>{t("프로젝트 문서")}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document} aria-pressed={editing} onClick={() => { setEditing(value => !value); setCreatingTemplate(false); }}>{editing ? t("닫기") : t("변경")}</button>}</header>
-    {!readOnly && editing && <div className="project-document-actions document-template-tools"><select value={templateId} onChange={(event) => setTemplateId(event.target.value)} aria-label={t("본문 템플릿 선택")}><option value="">{t("템플릿 불러오기")}</option>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select><button disabled={!templateId} onClick={() => void applyTemplate()}><BookTemplate size={13} />{t("불러오기")}</button><button onClick={() => setCreatingTemplate(true)}><Copy size={13} />{t("템플릿으로 저장")}</button></div>}
+    <header><div><b>{t("프로젝트 문서")}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document || uploadBusy || templateBusy} aria-pressed={editing} onClick={() => { setEditing(value => !value); setCreatingTemplate(false); }}>{editing ? t("닫기") : t("변경")}</button>}</header>
+    {!readOnly && savingState === "error" && document && <div className="document-save-error"><span role="alert">{t("저장 실패")}</span><button className="secondary" onClick={() => void flushDocumentSave()}>{t("재시도")}</button></div>}
+    {!readOnly && editing && <div className="project-document-actions document-template-tools"><select value={templateId} disabled={templateBusy} onChange={(event) => setTemplateId(event.target.value)} aria-label={t("본문 템플릿 선택")}><option value="">{t("템플릿 불러오기")}</option>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select><button className="secondary" disabled={!templateId || templateBusy || uploadBusy || draftPending || savingState === "saving" || savingState === "error"} aria-busy={templateBusy} onClick={() => void applyTemplate()}><BookTemplate size={16} />{t("불러오기")}</button><button className="secondary" disabled={templateBusy || uploadBusy || draftPending || savingState === "saving" || savingState === "error"} onClick={() => setCreatingTemplate(true)}><Copy size={16} />{t("템플릿으로 저장")}</button></div>}
     {creatingTemplate && <form className="project-document-template-create" onSubmit={(event) => void createTemplateFromDocument(event)}><input aria-label={t("새 템플릿 이름")} value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder={t("템플릿 이름")} /><button disabled={!templateName.trim()}><Check size={13} />{t("저장")}</button><button type="button" className="icon-button" aria-label={t("템플릿 만들기 취소")} onClick={() => { setCreatingTemplate(false); setTemplateName(""); }}><X size={13} /></button></form>}
-    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${document.projectId}:${document.version}`} initialContent={document.content} editable={!readOnly && editing} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
+    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${projectId}:${editorRevision}`} initialContent={document.content} editable={!readOnly && editing && !templateBusy} imageTarget={{ targetKind: "project", targetId: projectId }} onUploadBusyChange={setUploadBusy} onPendingChange={setDraftPending} onChange={readOnly || templateBusy ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
   </section>;
 }
 
 function WorkDocumentSection({ targetKind, targetId, readOnly, onNotice }: { targetKind: "task" | "routine"; targetId: string; readOnly: boolean; onNotice: (message: string) => void }) {
   const [editing, setEditing] = useState(false);
+  const [uploadBusy, setUploadBusy] = useState(false);
   const [document, setDocument] = useState<WorkDocument | null>(null);
   const [loading, setLoading] = useState(true);
   const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -3695,8 +3719,9 @@ function WorkDocumentSection({ targetKind, targetId, readOnly, onNotice }: { tar
 
   const title = targetKind === "task" ? t("Task 문서") : t("Routine 문서");
   return <section className="project-document-section work-document-section">
-    <header><div><b>{title}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document} aria-pressed={editing} onClick={() => setEditing(value => !value)}>{editing ? t("닫기") : t("변경")}</button>}</header>
-    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${targetKind}:${targetId}`} initialContent={document.content} editable={!readOnly && editing} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
+    <header><div><b>{title}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document || uploadBusy} aria-pressed={editing} onClick={() => setEditing(value => !value)}>{editing ? t("닫기") : t("변경")}</button>}</header>
+    {!readOnly && savingState === "error" && document && <div className="document-save-error"><span role="alert">{t("저장 실패")}</span><button className="secondary" onClick={() => void flushDocumentSave()}>{t("재시도")}</button></div>}
+    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${targetKind}:${targetId}`} initialContent={document.content} editable={!readOnly && editing} imageTarget={{ targetKind, targetId }} onUploadBusyChange={setUploadBusy} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
   </section>;
 }
 
