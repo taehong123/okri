@@ -107,6 +107,8 @@ export const users = sqliteTable(
     languagePreference: text("language_preference").notNull().default("ko"),
     resolvedLanguage: text("resolved_language").notNull().default("ko"),
     languageRevision: integer("language_revision").notNull().default(0),
+    // NULL preserves existing accounts; only new sign-ups opt into first-run setup.
+    onboardingState: text("onboarding_state"),
     displayName: text("display_name").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
