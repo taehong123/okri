@@ -5,6 +5,7 @@ import { SlackMemberConnections } from "@/app/slack-member-connections";
 import type { DailyWork } from "@/lib/daily-work";
 import { dailyRevisionChanged } from "@/lib/daily-revision";
 import { PropertyValueInput } from "@/app/property-value-input";
+import { DocumentProperties, type DocumentProperty } from "@/app/document-properties";
 import { dailyDeliveryHealth, dailyDeliveryLabel } from "@/lib/slack-daily-status";
 import {
   slackErrorMessage as baseSlackErrorMessage,
@@ -77,6 +78,8 @@ import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
 import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
+import { FirstRunSetup } from "./first-run-setup";
+import { canAutoOpenSetup, type OnboardingState } from "@/lib/onboarding";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView from "./billing-view";
 import GanttView from "./gantt-view";
@@ -156,7 +159,7 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "backups" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local"; preferences?: LanguagePreferences };
+type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local"; preferences?: LanguagePreferences; onboarding?: OnboardingState | null };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
 
@@ -226,6 +229,7 @@ type PropertyDefinition = {
 };
 
 type ProjectDocument = { id: string | null; projectId: string; content: string; plainText: string; version: number; updatedAt: string };
+type WorkDocument = { id: string | null; targetKind: "task" | "routine"; targetId: string; content: string; plainText: string; version: number; updatedAt: string };
 type ProjectTemplate = { id: string; name: string; description: string; content: string; plainText: string; createdAt: string; updatedAt: string };
 type ProjectBlockEditorChange = { content: string; plainText: string };
 type ProjectDataConnection = {
@@ -939,6 +943,8 @@ function WorkspaceApp() {
   const [integrationStatusAttempt, setIntegrationStatusAttempt] = useState(0);
   const [integrationStatusError, setIntegrationStatusError] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const setupHandledAccount = useRef<string | null>(null);
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
   const [workspaceDataState, setWorkspaceDataState] = useState<"loading" | "ready" | "error">("loading");
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
@@ -1003,7 +1009,7 @@ function WorkspaceApp() {
       const activeCycle = data.cycles.find((cycle) => cycle.status === "active") ?? data.cycles[0];
       setVisibleOkrCycleIds(activeCycle ? [activeCycle.id] : []);
       const currentMember = data.team.members.find((member) => member.isCurrent && member.status === "active");
-      if (currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
+      if (!data.user.onboarding && currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
         setProfilePromptMember(currentMember);
       }
       setAuthState({ status: "authenticated", user: data.user, reason: null });
@@ -1501,6 +1507,16 @@ function WorkspaceApp() {
   }, [activeView, items, selectedProjectId, selectedTaskId, showNotice, workspaceDataState, hydrateSearchResult]);
 
   useEffect(() => {
+    const user = authState.user;
+    if (!freshWorkspaceDataReady || !user || setupHandledAccount.current === user.id) return;
+    if (user.onboarding?.status !== "active" || !canAutoOpenSetup(window.location.search, window.location.hash)) return;
+    setupHandledAccount.current = user.id;
+    const timer = window.setTimeout(() => setSetupOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [authState.user, freshWorkspaceDataReady]);
+
+  useEffect(() => {
+    if (authState.user?.onboarding) return;
     if (!freshWorkspaceDataReady || !currentWorkspace || currentWorkspace.role !== "owner" || hasActiveObjective) return;
     const navigationParams = new URLSearchParams(window.location.search);
     if (navigationParams.has("view") || navigationParams.has("project") || navigationParams.has("task")) return;
@@ -1523,7 +1539,7 @@ function WorkspaceApp() {
       setActiveView("home");
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [currentWorkspace, freshWorkspaceDataReady, hasActiveObjective, selectedOkrCycle]);
+  }, [authState.user?.onboarding, currentWorkspace, freshWorkspaceDataReady, hasActiveObjective, selectedOkrCycle]);
 
   function openAssistant() {
     const cycle = selectedOkrCycle;
@@ -2374,11 +2390,12 @@ function WorkspaceApp() {
         </header>
         <div className="page-body">
           {languageRecovery}
-          <MarketingConsentPrompt
+          {!setupOpen && authState.user?.onboarding?.status !== "active" && <MarketingConsentPrompt
             key={authState.user?.id ?? ""}
             userId={authState.user?.id ?? ""}
             onNotice={(message) => showNotice(message, "error")}
-          />
+          />}
+          {!setupOpen && authState.user?.onboarding && authState.user.onboarding.status !== "completed" && <button type="button" onClick={() => setSetupOpen(true)}>{t("처음 설정 이어하기")}<ChevronRight size={14} /></button>}
           {activeView !== "home" && !selectedProject && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1>{activeView !== "okr" && <p>{activeView === "billing" ? `${currentWorkspace?.name ?? ""} · ${pageSubtitle(activeView)}` : pageSubtitle(activeView)}</p>}</div>
             {activeView === "okr" ? (
@@ -2550,6 +2567,7 @@ function WorkspaceApp() {
       )}
       {onboardingOpen && (
         <WelcomeModal
+          onSetup={() => { setOnboardingOpen(false); setSetupOpen(true); }}
           language={language.language}
           onLanguageChange={(choice) => {
             if (!authState.user) return;
@@ -2569,6 +2587,25 @@ function WorkspaceApp() {
           }}
         />
       )}
+      {setupOpen && authState.user && <FirstRunSetup
+        key={authState.user.id}
+        initial={authState.user.onboarding ?? null}
+        workspaces={workspaces}
+        onState={(onboarding) => setAuthState((current) => current.user && current.user.id === authState.user?.id ? { ...current, user: { ...current.user, onboarding } } : current)}
+        onClose={() => setSetupOpen(false)}
+        onFinish={async (onboarding, destination) => {
+          if (onboarding.workspaceId) {
+            const response = await fetch("/api/workspaces", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspaceId: onboarding.workspaceId }) });
+            if (!response.ok) throw new Error("workspace_unavailable");
+          }
+          clearCachedBootstrap();
+          const target = new URL(window.location.pathname, window.location.origin);
+          const view = destination === "projects" ? "work" : destination === "work" ? "my_work" : destination === "members" || destination === "integrations" ? "okr" : destination;
+          target.searchParams.set("view", view);
+          if (destination === "members" || destination === "integrations") { target.searchParams.set("settings", "workspace"); target.searchParams.set("tab", destination); }
+          window.location.assign(target.toString());
+        }}
+      />}
       {inviteToken && <InvitationDialog
         token={inviteToken}
         preview={invitePreview}
@@ -2660,6 +2697,7 @@ function WorkspaceApp() {
       {selectedTask && (
         <TaskDetailPanel
           task={selectedTask}
+          readOnly={!canWriteWorkspace}
           allItems={activeItems}
           routines={routines}
           teamMembers={teamMembers}
@@ -2799,11 +2837,12 @@ function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
   );
 }
 
-function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
+function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp, onSetup }: {
   language: IntroLanguage;
   onLanguageChange: (language: IntroLanguage) => void;
   onClose: () => void;
   onOpenMcp: () => void;
+  onSetup: () => void;
 }) {
   const copy = getIntroCopy(t);
   const pointIcons = [Bot, Table2, CalendarCheck];
@@ -2838,6 +2877,7 @@ function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
           </div>
         </div>
         <footer className="welcome-actions">
+          <button className="welcome-secondary" onClick={onSetup}>{t("처음부터 함께 설정하기")}</button>
           <button className="welcome-secondary" onClick={onOpenMcp}><Bot size={14} />{copy.mcpAction}</button>
           <button className="welcome-primary" onClick={() => requestClose("close-button")}>{copy.startAction}<ChevronRight size={14} /></button>
         </footer>
@@ -3122,6 +3162,13 @@ function PropertyCell({ itemId, property, value, onChange }: { itemId: string; p
   return <input className="property-input" type={property.type === "number" ? "number" : property.type === "date" ? "date" : "text"} value={value === null ? "" : String(value)} onChange={(event) => { const raw = event.target.value; void onChange(itemId, property.id, property.type === "number" ? (raw ? Number(raw) : null) : raw || null); }} />;
 }
 
+function documentPropertyValue(property: PropertyDefinition, value: PropertyValue, members: TeamMember[]) {
+  if (value === null || value === undefined || value === "" || Array.isArray(value) && !value.length) return t("미지정");
+  if (property.type === "checkbox") return value ? t("완료") : t("아니요");
+  if (property.type === "member" || property.type === "members") return (Array.isArray(value) ? value : [String(value)]).map(id => members.find(member => member.id === id)?.displayName ?? t("미지정")).join(", ");
+  return Array.isArray(value) ? value.join(", ") : String(value);
+}
+
 function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onBackToList, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onItemsRefresh, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
   project: OkriItem;
   onBackToList: () => void;
@@ -3148,6 +3195,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   const confirmAction = useAppConfirm();
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
+  const [addingTask, setAddingTask] = useState(false);
   const [progressBotEnabled, setProgressBotEnabled] = useState(false);
   const [progressBotRefreshing, setProgressBotRefreshing] = useState(false);
   const [progressBotCheckedAt, setProgressBotCheckedAt] = useState<string | null>(null);
@@ -3225,6 +3273,16 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
     return property ? property.active && !hiddenPropertyIds.includes(property.id) : true;
   }
 
+  const propertyEntries: DocumentProperty[] = [
+    { key: "status", label: systemPropertyLabel(systemProperty("status"), t, "상태"), value: statusLabels[project.status], primary: true },
+    { key: "project_dri", label: systemPropertyLabel(systemProperty("project_dri"), t, "책임자"), value: assignmentLabel(project, "project_dri"), primary: true },
+    { key: "due_date", label: systemPropertyLabel(systemProperty("due_date"), t, "기한"), value: dueLabel(project.dueDate), primary: true },
+    { key: "priority", label: systemPropertyLabel(systemProperty("priority"), t, "우선순위"), value: priorityLabels[project.priority] },
+    { key: "parent_id", label: systemPropertyLabel(systemProperty("parent_id"), t, "상위 Initiative"), value: initiative?.title ?? t("연결 없음") },
+    { key: "project_workers", label: systemPropertyLabel(systemProperty("project_workers"), t, "하위 업무자"), value: assignmentLabel(project, "project_worker") },
+  ].filter(entry => systemPropertyVisible(entry.key));
+  propertyEntries.push(...visibleProperties.map(property => ({ key: property.id, label: systemPropertyLabel(property, t), value: documentPropertyValue(property, propertyValues[project.id]?.[property.id] ?? null, teamMembers) })));
+
   async function saveAssignments(role: "project_dri" | "project_worker", memberIds: string[]) {
     const response = await fetch("/api/item-assignments", {
       method: "PATCH",
@@ -3270,14 +3328,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
         <header className="project-page-head">
           <div>
             <button type="button" className="detail-parent-link" onClick={async () => { if (!quickTaskTitle.trim() || await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) onBackToList(); }}><ArrowLeft size={14} />{t("Project 목록")}</button>
-            <textarea
-              className="project-title-input"
-              defaultValue={project.title}
-              readOnly={readOnly}
-              onBlur={(event) => !readOnly && event.target.value.trim() !== project.title && void onPatch(project.id, { title: event.target.value })}
-              aria-label={t("Project 이름")}
-              rows={1}
-            />
+            <h2 className="document-title">{project.title}</h2>
           </div>
           <div className="project-page-actions">
             {canDeleteItem(project) && <DeleteSelectCheckbox item={project} selected={selectedItemIds.has(project.id)} onToggle={onToggleSelect} />}
@@ -3286,45 +3337,10 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           </div>
         </header>
         <div className="project-detail-content">
-          <main className="project-primary-column">
-            <ProjectProgressSection
-              project={project}
-              tasks={linkedTasks}
-              teamMembers={teamMembers}
-              botEnabled={progressBotEnabled}
-              botRefreshing={progressBotRefreshing}
-              botCheckedAt={progressBotCheckedAt}
-              readOnly={readOnly}
-              onToggleBot={setProgressBot}
-              onRefresh={() => void refreshProgressBot()}
-              onPatch={onPatch}
-              onSaveTaskAssignee={saveTaskAssignee}
-              onOpenTask={onOpenTask}
-            />
-            <section className="project-linked-tasks">
-              <header><div><b>{t("연결된 Task")}</b><span>{t("{count}개", { count: linkedTasks.length })}</span></div>{deletableLinkedTasks.length > 0 && <button onClick={() => deletableLinkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />{t("삭제 가능 Task 선택")}</button>}</header>
-              <form className="project-task-quick-add" onSubmit={createLinkedTask}>
-                <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} aria-label={t("새 Task 이름")} placeholder={t("새 Task 빠른 추가")} disabled={readOnly || creatingTask} />
-                <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label={t("Task 추가")} title={t("Task 추가")}><Plus size={15} /></button>
-              </form>
-              <div className="project-task-table">
-                <div className="project-task-row project-task-head"><span>{t("Task")}</span><span>{t("완료")}</span><span>{t("담당자")}</span><span>{t("마감일")}</span></div>
-                {linkedTasks.map((task) => {
-                  const assignee = task.assignments.find((assignment) => assignment.role === "task_assignee")?.memberId ?? "";
-                  return <div className="project-task-row" key={task.id}>
-                    <div className="project-task-title-cell">{canDeleteItem(task) && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
-                    <button type="button" disabled={readOnly} className={`project-task-completion ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} aria-label={`${task.title} ${isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}`} onClick={() => void onPatch(task.id, taskCompletionPatch(task.status))}><span><Check size={12} /></span></button>
-                    <select disabled={readOnly} value={assignee} onChange={(event) => void saveTaskAssignee(task, event.target.value)}><option value="">{t("미지정")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select>
-                    <input disabled={readOnly} type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch(task.id, { dueDate: event.target.value || null })} />
-                  </div>;
-                })}
-                {!linkedTasks.length && <div className="project-task-empty">{t("연결된 Task가 없습니다.")}</div>}
-              </div>
-            </section>
-            <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
-          </main>
           <aside className="project-context-column" aria-label={t("Project 정보")}>
-        <form className="property-form project-detail-form">
+        <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
+        <form className="property-form project-detail-form" onSubmit={event => event.preventDefault()}>
+          <label><span>{t("Project 이름")}</span><textarea aria-label={t("Project 이름")} defaultValue={project.title} rows={2} onBlur={event => { const title = event.target.value.trim(); if (title && title !== project.title) void onPatch(project.id, { title }); }} /></label>
           {systemPropertyVisible("parent_id") && <ProjectSystemPropertySlot property={systemProperty("parent_id")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("parent_id"), t, "상위 Initiative")}</span><select disabled={readOnly} value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">{t("선택")}</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label></ProjectSystemPropertySlot>}
           <div className="project-field-grid">
             {systemPropertyVisible("priority") && <ProjectSystemPropertySlot property={systemProperty("priority")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("priority"), t, "우선순위")}</span><select disabled={readOnly} className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
@@ -3339,6 +3355,9 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           {visibleProperties.length ? <div className="project-field-grid">{visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />)}</div> : <EmptyState icon={Settings2} title={t("표시 중인 커스텀 속성이 없습니다")} />}
           {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>{t("숨긴 속성")}{hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button type="button" disabled={readOnly} key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{systemPropertyLabel(property, t)}</button>)}</div>}
         </section>
+        <div className="project-progress-bot-control"><span><Bot size={15} />{t("진행사항 봇")}</span><label className="project-bot-switch"><input type="checkbox" checked={progressBotEnabled} onChange={event => setProgressBot(event.target.checked)} aria-label={t("진행사항 봇 사용")} /><span aria-hidden="true" /></label></div>
+        </>}</DocumentProperties>
+        <details className="document-related"><summary>{t("상위 OKR")} · {t("연결 데이터")}</summary>
         <ProjectDataSection key={`data:${project.id}`} project={project} />
         <section className="task-lineage project-lineage-compact">
           <header><b>{t("상위 OKR")}</b><span>Objective → KR → Initiative</span></header>
@@ -3346,14 +3365,51 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           <LineageRow label={t("Key Result")} value={keyResult?.title ?? "미연결"} />
           <LineageRow label={t("Initiative")} value={initiative?.title ?? "미연결"} />
         </section>
+        </details>
           </aside>
+          <main className="project-primary-column">
+            <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
+            <ProjectProgressSection
+              project={project}
+              tasks={linkedTasks}
+              teamMembers={teamMembers}
+              botEnabled={progressBotEnabled}
+              botRefreshing={progressBotRefreshing}
+              botCheckedAt={progressBotCheckedAt}
+              readOnly={readOnly}
+              onRefresh={() => void refreshProgressBot()}
+              onPatch={onPatch}
+              onSaveTaskAssignee={saveTaskAssignee}
+              onOpenTask={onOpenTask}
+            />
+            <section className="project-linked-tasks">
+              <header><div><b>{t("연결된 Task")}</b><span>{t("{count}개", { count: linkedTasks.length })}</span></div>{deletableLinkedTasks.length > 0 && <button onClick={() => deletableLinkedTasks.forEach((task) => { if (!selectedItemIds.has(task.id)) onToggleSelect(task.id); })}><ListChecks size={13} />{t("삭제 가능 Task 선택")}</button>}</header>
+              {!readOnly && !addingTask && <button className="secondary" type="button" onClick={() => setAddingTask(true)}><Plus size={15} />{t("Task 추가")}</button>}
+              {addingTask && <form className="project-task-quick-add" onSubmit={createLinkedTask}>
+                <input value={quickTaskTitle} onChange={(event) => setQuickTaskTitle(event.target.value)} aria-label={t("새 Task 이름")} placeholder={t("새 Task 빠른 추가")} disabled={readOnly || creatingTask} />
+                <button disabled={readOnly || creatingTask || !quickTaskTitle.trim()} aria-label={t("Task 추가")} title={t("Task 추가")}><Plus size={15} /></button>
+              </form>}
+              <div className="project-task-table">
+                <div className="project-task-row project-task-head"><span>{t("Task")}</span><span>{t("완료")}</span><span>{t("담당자")}</span><span>{t("마감일")}</span></div>
+                {linkedTasks.map((task) => {
+                  return <div className="project-task-row" key={task.id}>
+                    <div className="project-task-title-cell">{canDeleteItem(task) && <DeleteSelectCheckbox item={task} selected={selectedItemIds.has(task.id)} onToggle={onToggleSelect} />}<button className="project-task-title" onClick={() => onOpenTask(task.id)}>{task.title}</button></div>
+                    <button type="button" disabled={readOnly} className={`project-task-completion ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} aria-label={`${task.title} ${isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}`} onClick={() => void onPatch(task.id, taskCompletionPatch(task.status))}><span><Check size={12} /></span></button>
+                    <span className="document-task-value">{assignmentLabel(task, "task_assignee")}</span>
+                    <span className="document-task-value">{dueLabel(task.dueDate)}</span>
+                  </div>;
+                })}
+                {!linkedTasks.length && <div className="project-task-empty">{t("연결된 Task가 없습니다.")}</div>}
+              </div>
+            </section>
+          </main>
         </div>
       </aside>}
     </OverlayDialog>
   );
 }
 
-function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onToggleBot, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
+function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
   project: OkriItem;
   tasks: OkriItem[];
   teamMembers: TeamMember[];
@@ -3361,7 +3417,6 @@ function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRe
   botRefreshing: boolean;
   botCheckedAt: string | null;
   readOnly: boolean;
-  onToggleBot: (enabled: boolean) => void;
   onRefresh: () => void;
   onPatch: (id: string, patch: Partial<OkriItem>) => Promise<unknown>;
   onSaveTaskAssignee: (task: OkriItem, memberId: string) => Promise<void>;
@@ -3380,11 +3435,7 @@ function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRe
 
   return <section className="project-progress-section" aria-labelledby="project-progress-heading">
     <header className="project-progress-header">
-      <div><h3 id="project-progress-heading">{t("진행 상황")}</h3><p>{t("Task의 상태와 변경이 시간순으로 쌓입니다.")}</p></div>
-      <div className="project-progress-bot-control">
-        <span><Bot size={15} />{t("진행사항 봇")}</span>
-        <label className="project-bot-switch"><input type="checkbox" checked={botEnabled} disabled={readOnly} onChange={(event) => onToggleBot(event.target.checked)} aria-label={t("진행사항 봇 사용")} /><span aria-hidden="true" /></label>
-      </div>
+      <div><h3 id="project-progress-heading">{t("진행 상황")}</h3></div>
     </header>
     <div className="project-progress-overview">
       <div className="project-progress-value"><strong>{project.progress}%</strong><span>{t("Project 진행률")}</span></div>
@@ -3400,7 +3451,7 @@ function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRe
         {overdue.map((task) => <article className="project-bot-review-row overdue" key={`overdue:${task.id}`}><AlertTriangle size={16} /><div><button type="button" className="project-bot-task-link" onClick={() => onOpenTask(task.id)}>{task.title}</button><p>{t("기한이 지났습니다. 상태를 막힘으로 바꿀까요, 기한을 다시 잡을까요?")}</p></div><div className="project-bot-inline-actions"><button type="button" disabled={readOnly} onClick={() => void onPatch(task.id, { status: "blocked" })}>{t("막힘으로 변경")}</button><input aria-label={t("{value1} 새 기한", { value1: messageValue(task.title) })} disabled={readOnly} type="date" min={today} onChange={(event) => event.target.value && void onPatch(task.id, { dueDate: event.target.value })} /></div></article>)}
       </div>}
       <p className="project-bot-last-check">{botCheckedAt ? t("최근 확인 · {value1}", { value1: messageValue(formatDateTime(botCheckedAt)) }) : t("변경사항을 확인하고 있습니다.")}</p>
-    </div> : <button type="button" className="project-bot-empty" disabled={readOnly} onClick={() => onToggleBot(true)}><Bot size={18} /><span><b>{t("진행사항 봇 켜기")}</b><small>{t("누락·지연·진행률 차이를 찾아 이 자리에서 확인합니다.")}</small></span><ChevronRight size={16} /></button>}
+    </div> : null}
     <div className="project-update-feed">
       <header><b>{t("최근 업데이트")}</b><span>{t("최신순")}</span></header>
       {recent.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span className={`status-dot status-${task.status}`} /><span><b>{task.title}</b><small>{isCompletedStatus(task.status) ? t("완료됨") : statusLabels[task.status]} · {formatDateTime(task.updatedAt)}</small></span><ChevronRight size={15} /></button>)}
@@ -3475,6 +3526,7 @@ function ClientProjectBlockEditor(props: ProjectBlockEditorProps) {
 }
 
 function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: string; readOnly: boolean; onNotice: (message: string) => void }) {
+  const [editing, setEditing] = useState(false);
   const [document, setDocument] = useState<ProjectDocument | null>(null);
   const [templates, setTemplates] = useState<ProjectTemplate[]>([]);
   const [templateId, setTemplateId] = useState("");
@@ -3566,9 +3618,83 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
   }
 
   return <section className="project-document-section">
-    <header><div><b>{t("프로젝트 문서")}</b><span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span></div>{!readOnly && <div className="project-document-actions"><select value={templateId} onChange={(event) => setTemplateId(event.target.value)} aria-label={t("본문 템플릿 선택")}><option value="">{t("템플릿 불러오기")}</option>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select><button disabled={!templateId} onClick={() => void applyTemplate()}><BookTemplate size={13} />{t("불러오기")}</button><button onClick={() => setCreatingTemplate(true)}><Copy size={13} />{t("템플릿으로 저장")}</button></div>}</header>
+    <header><div><b>{t("프로젝트 문서")}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document} aria-pressed={editing} onClick={() => { setEditing(value => !value); setCreatingTemplate(false); }}>{editing ? t("닫기") : t("변경")}</button>}</header>
+    {!readOnly && editing && <div className="project-document-actions document-template-tools"><select value={templateId} onChange={(event) => setTemplateId(event.target.value)} aria-label={t("본문 템플릿 선택")}><option value="">{t("템플릿 불러오기")}</option>{templates.map((template) => <option value={template.id} key={template.id}>{template.name}</option>)}</select><button disabled={!templateId} onClick={() => void applyTemplate()}><BookTemplate size={13} />{t("불러오기")}</button><button onClick={() => setCreatingTemplate(true)}><Copy size={13} />{t("템플릿으로 저장")}</button></div>}
     {creatingTemplate && <form className="project-document-template-create" onSubmit={(event) => void createTemplateFromDocument(event)}><input aria-label={t("새 템플릿 이름")} value={templateName} onChange={(event) => setTemplateName(event.target.value)} placeholder={t("템플릿 이름")} /><button disabled={!templateName.trim()}><Check size={13} />{t("저장")}</button><button type="button" className="icon-button" aria-label={t("템플릿 만들기 취소")} onClick={() => { setCreatingTemplate(false); setTemplateName(""); }}><X size={13} /></button></form>}
-    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${document.projectId}:${document.version}`} initialContent={document.content} editable={!readOnly} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
+    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${document.projectId}:${document.version}`} initialContent={document.content} editable={!readOnly && editing} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
+  </section>;
+}
+
+function WorkDocumentSection({ targetKind, targetId, readOnly, onNotice }: { targetKind: "task" | "routine"; targetId: string; readOnly: boolean; onNotice: (message: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [document, setDocument] = useState<WorkDocument | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const versionRef = useRef(0);
+  const savingRef = useRef(false);
+  const pendingChangeRef = useRef<ProjectBlockEditorChange | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const query = new URLSearchParams({ targetKind, targetId });
+    void fetch(`/api/work-documents?${query}`, { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ document: WorkDocument }> : Promise.reject())
+      .then((data) => {
+        if (!active) return;
+        versionRef.current = data.document.version;
+        setDocument(data.document);
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) setSavingState("error");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [targetId, targetKind]);
+
+  async function flushDocumentSave() {
+    if (savingRef.current || !pendingChangeRef.current) return;
+    savingRef.current = true;
+    const change = pendingChangeRef.current;
+    pendingChangeRef.current = null;
+    setSavingState("saving");
+    let saved = false;
+    try {
+      const response = await fetch("/api/work-documents", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetKind, targetId, ...change, expectedVersion: versionRef.current }),
+      });
+      const data = await response.json().catch(() => ({})) as { document?: WorkDocument };
+      if (!response.ok || !data.document) {
+        if (!pendingChangeRef.current) pendingChangeRef.current = change;
+        setSavingState("error");
+        if (response.status === 409) onNotice(t("다른 변경이 먼저 저장되었습니다. 문서를 다시 불러와 주세요."));
+        return;
+      }
+      versionRef.current = data.document.version;
+      setDocument(data.document);
+      setSavingState("saved");
+      saved = true;
+      window.setTimeout(() => setSavingState((current) => current === "saved" ? "idle" : current), 1600);
+    } catch {
+      if (!pendingChangeRef.current) pendingChangeRef.current = change;
+      setSavingState("error");
+    } finally {
+      savingRef.current = false;
+      if (pendingChangeRef.current && saved) void flushDocumentSave();
+    }
+  }
+
+  function queueDocumentSave(change: ProjectBlockEditorChange) {
+    pendingChangeRef.current = change;
+    void flushDocumentSave();
+  }
+
+  const title = targetKind === "task" ? t("Task 문서") : t("Routine 문서");
+  return <section className="project-document-section work-document-section">
+    <header><div><b>{title}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document} aria-pressed={editing} onClick={() => setEditing(value => !value)}>{editing ? t("닫기") : t("변경")}</button>}</header>
+    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${targetKind}:${targetId}`} initialContent={document.content} editable={!readOnly && editing} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
   </section>;
 }
 
@@ -3589,8 +3715,9 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
   );
 }
 
-function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onOpenParent, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
+function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onClose, onOpenParent, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
   task: OkriItem;
+  readOnly: boolean;
   onOpenParent: (kind: "project" | "routine", id: string) => void;
   allItems: OkriItem[];
   routines: Routine[];
@@ -3621,6 +3748,13 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onOpe
   const assigneeIds = task.assignments.filter((entry) => entry.role === "task_assignee").map((entry) => entry.memberId);
   const taskContainerValue = project?.kind === "project" ? `project:${project.id}` : routine ? `routine:${routine.id}` : "";
   const lineageTitle = routine ? `Routine · ${routine.title}` : project?.kind === "project" ? `Project · ${project.title}` : routineMatch?.systemKey === "general" ? "General 수집함" : "연결 끊김";
+  const propertyEntries: DocumentProperty[] = [
+    { key: "status", label: t("상태"), value: statusLabels[task.status], primary: true },
+    { key: "assignee", label: t("담당자"), value: assignmentLabel(task, "task_assignee"), primary: true },
+    { key: "due", label: t("기한"), value: dueLabel(task.dueDate), primary: true },
+    { key: "priority", label: t("우선순위"), value: priorityLabels[task.priority] },
+    { key: "parent", label: t("연결 대상"), value: lineageTitle },
+  ];
   useEffect(() => {
     fetch(`/api/checklists?taskId=${encodeURIComponent(task.id)}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ items: ChecklistItem[] }> : Promise.reject())
@@ -3720,14 +3854,18 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onOpe
   return (
     <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel task-detail-panel">
-        <header><div>{project?.kind === "project" || routine ? <button type="button" className="detail-parent-link" onClick={async () => { if (title.trim() && !await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) return; if (project?.kind === "project") onOpenParent("project", project.id); else if (routine) onOpenParent("routine", routine.id); }}><ArrowLeft size={14} />{lineageTitle}</button> : <p>{lineageTitle}</p>}<textarea className="task-title-input" defaultValue={task.title} rows={1} aria-label={t("Task 이름")} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
-        <button type="button" className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
+        <header><div>{project?.kind === "project" || routine ? <button type="button" className="detail-parent-link" onClick={async () => { if (title.trim() && !await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) return; if (project?.kind === "project") onOpenParent("project", project.id); else if (routine) onOpenParent("routine", routine.id); }}><ArrowLeft size={14} />{lineageTitle}</button> : <p>{lineageTitle}</p>}<h2 className="document-title">{task.title}</h2></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
+        <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
+        <div className="property-form"><label><span>{t("Task 이름")}</span><textarea aria-label={t("Task 이름")} defaultValue={task.title} rows={2} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></label></div>
         <section className="task-detail-fields" aria-label={t("Task 정보")}>
           <label><span>{t("우선순위")}</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>{t("기한")}</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
           <label className="task-container-field"><span>{t("연결 대상")}</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="">General</option><optgroup label={t("Project")}>{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Routine")}>{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
         </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label={t("담당자")} members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></section>}
+        </>}</DocumentProperties>
+        <button type="button" disabled={readOnly} className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
+        <details className="document-related"><summary>{t("상위 맵핑")} · Google Calendar</summary>
         <section className="task-lineage">
           <header><b>{t("상위 맵핑")}</b><span>{routine ? t("Routine 기반 Task") : project ? t("OKR 실행 구조") : t("아직 연결 전")}</span></header>
           <LineageRow label={t("등록 경로")} value={sourceLabel(task.source)} />
@@ -3747,7 +3885,9 @@ function TaskDetailPanel({ task, allItems, routines, teamMembers, onClose, onOpe
             </>
           )}
         </section>
-        <div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? t("동기화 중") : t("Google Calendar에 보내기")}</button></div>
+        <div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={readOnly || syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? t("동기화 중") : t("Google Calendar에 보내기")}</button></div>
+        </details>
+        <WorkDocumentSection key={`task-document:${task.id}`} targetKind="task" targetId={task.id} readOnly={readOnly} onNotice={onNotice} />
         <section className="checklist-section"><header><b>{t("체크리스트")}</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header>{checklistLoadError && <p className="inline-error" role="alert">{t("체크리스트를 불러오지 못했습니다. 상세 화면을 다시 열어 재시도해 주세요.")}</p>}<div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)} aria-label={`${row.title} ${row.completed ? t("완료 취소") : t("완료")}`}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label={t("{value1} 삭제", { value1: messageValue(row.title) })}><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("항목 추가")} aria-label={t("체크리스트 항목")} disabled={savingChecklist} /><button disabled={!title.trim() || savingChecklist}>{savingChecklist ? t("추가 중") : t("추가")}</button></form></section>
       </aside>}
     </OverlayDialog>
@@ -4263,6 +4403,7 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
     });
     setPropertyDrafts((current) => { const next = { ...current }; delete next[routine.id]; return next; });
     onNotice(t("Routine 속성과 실행 방법을 저장했습니다."));
+    return true;
     } catch { onNotice(t("Routine을 저장하지 못했습니다. 입력 내용은 유지됩니다.")); }
     finally { setSaving(false); }
   }
@@ -4321,22 +4462,36 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
           return (
             <article id={`routine-search-${routine.id}`} tabIndex={-1} className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""} ${focusId === routine.id ? "search-target" : ""}`} key={routine.id}>
               <header>
-                {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={!routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? t("완료 취소") : t("완료 처리")}><Check size={12} /></button>}
+                {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={readOnly || !routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? t("완료 취소") : t("완료 처리")}><Check size={12} /></button>}
                 {routine.systemKey === "general" ? <div><b>{routine.title}<em className="system-badge">{t("기본")}</em></b><small>{t("Project·Routine에 연결하지 않은 Task가 모이는 기본 목록")}</small></div> : <button type="button" className="routine-expand" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedIds((current) => { const next = new Set(current); if (next.has(routine.id)) next.delete(routine.id); else next.add(routine.id); return next; })}><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? t("오늘 완료") : t("오늘 미완료")} · {teamMembers.find((member) => member.id === routine.assigneeMemberId)?.displayName ?? t("담당자 없음")}{hasDraftChange(routine) ? t(" · 저장하지 않은 변경") : ""}</small></span><ChevronDown size={16} /></button>}
-                {routine.systemKey !== "general" && <label className="routine-switch"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span /><em className="sr-only">{t("Routine 활성 상태")}</em></label>}
-                {routine.systemKey !== "general" && <button className="icon-button" onClick={() => void remove(routine.id)} aria-label={t("Routine 삭제")} title={t("Routine 삭제")}><Trash2 size={13} /></button>}
               </header>
-              {routine.systemKey !== "general" && <div className="routine-details" id={detailsId} hidden={!expanded}><div className="routine-guide-grid">
+              {routine.systemKey !== "general" && <div className="routine-details" id={detailsId} hidden={!expanded}>
+              <DocumentProperties readOnly={readOnly} autoSave={false} dirty={hasDraftChange(routine)} onEditorClose={() => {
+                setDrafts(current => { const next = { ...current }; delete next[routine.id]; return next; });
+                setPropertyDrafts(current => { const next = { ...current }; delete next[routine.id]; return next; });
+              }} entries={[
+                { key: "cadence", label: t("반복 주기"), value: routineCadenceLabel(routine.cadence), primary: true },
+                { key: "assignee", label: t("담당자"), value: teamMembers.find(member => member.id === routine.assigneeMemberId)?.displayName ?? t("담당자 없음"), primary: true },
+                { key: "active", label: t("Routine 활성 상태"), value: routine.active ? t("활성") : t("일시정지") },
+                { key: "trigger", label: t("트리거 포인트"), value: routine.triggerPoint || t("미지정") },
+                { key: "place", label: t("어디서"), value: routine.actionPlace || t("미지정") },
+                ...activeProperties.map(property => ({ key: property.id, label: systemPropertyLabel(property, t), value: documentPropertyValue(property, routine.properties?.[property.id] ?? null, teamMembers) })),
+              ]}>{close => <>
+              <div className="property-form routine-guide-grid">
                 <label><span>{t("트리거 포인트")}</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder={t("예: 오전 9시, Slack 알림 확인 후")} /></label>
                 <label><span>{t("어디서")}</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder={t("예: OKRI 작업 탭, 캘린더, 책상")} /></label>
                 <label><span>{t("목적/메모")}</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder={t("왜 반복하는지")} /></label>
                 <label className="routine-steps"><span>{t("무엇을 어떻게")}</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder={t("1. 확인할 것\n2. 실행할 것\n3. 끝났다고 판단하는 기준")} rows={3} /></label>
               </div>
-              <section className="routine-property-values" aria-label={t("{value1} 속성 값", { value1: messageValue(routine.title) })}><h3>{t("속성 값")}</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? t("아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다.") : t("루틴 속성을 불러오는 중입니다.")}</p>}</section>
+              <section className="routine-property-values property-form" aria-label={t("{value1} 속성 값", { value1: messageValue(routine.title) })}><h3>{t("속성 값")}</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? t("아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다.") : t("루틴 속성을 불러오는 중입니다.")}</p>}</section>
+              <div className="property-form"><label className="document-checkbox"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span>{t("Routine 활성 상태")}</span></label></div>
               <footer>
                 <label className="routine-assignee"><span>{t("담당자")}</span><select value={routine.assigneeMemberId ?? ""} onChange={(event) => void updateAssignee(routine, event.target.value)}><option value="">{t("담당자 없음")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
-                <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={() => void saveRoutineGuide(routine)}><Check size={14} />{t("저장")}</button>
-              </footer></div>}
+                <button className="icon-button" disabled={saving} onClick={() => void remove(routine.id)} aria-label={t("Routine 삭제")} title={t("Routine 삭제")}><Trash2 size={13} /></button>
+                <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={async () => { if (await saveRoutineGuide(routine)) close(); }}><Check size={14} />{t("저장")}</button>
+              </footer></>}</DocumentProperties>
+              {expanded && <WorkDocumentSection key={`routine-document:${routine.id}`} targetKind="routine" targetId={routine.id} readOnly={readOnly} onNotice={onNotice} />}
+              </div>}
             </article>
           );
         }) : <EmptyState icon={Repeat2} title={t("등록된 Routine이 없습니다")} />}

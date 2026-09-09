@@ -722,7 +722,8 @@ test("keeps Task row structure and the side panel while allowing long titles to 
   assert.doesNotMatch(taskList, /statusLabel\(entry\.status\)/);
   assert.match(taskDetail, /task-completion-toggle/);
   assert.match(taskDetail, /onPatch\(\{ priority:/);
-  assert.doesNotMatch(taskDetail, /statusLabels|task-progress-field|type="range"/);
+  assert.match(taskDetail, /<DocumentProperties entries=\{propertyEntries\}/);
+  assert.doesNotMatch(taskDetail, /Object\.entries\(statusLabels\)|task-progress-field|type="range"/);
   assert.match(projectDetail, /project-task-completion/);
   assert.doesNotMatch(projectDetail, /project-task-progress|task\.progress/);
   assert.match(paceData, /export function normalizeTaskStatus/);

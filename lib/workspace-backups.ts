@@ -2,7 +2,7 @@
 export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Object.entries({
   okr_cycles: "id,owner_id,name,department,version,start_date,end_date,status,created_at,updated_at",
   routine_property_definitions: "id,owner_id,name,type,options,default_value,active,sort_order,created_at,updated_at",
-  routines: "id,owner_id,system_key,assignee_member_id,title,description,trigger_point,action_place,action_steps,properties_json,cadence,active,sort_order,created_at,updated_at",
+  routines: "id,owner_id,system_key,assignee_member_id,title,description,trigger_point,action_place,action_steps,document_content,document_plain_text,document_version,document_updated_at,properties_json,cadence,active,sort_order,created_at,updated_at",
   items: "id,owner_id,cycle_id,parent_id,routine_id,kind,title,description,status,priority,cadence,progress,due_date,source,source_ref,created_by_user_id,sort_order,archived_at,archived_from_status,archive_root_id,created_at,updated_at",
   property_definitions: "id,owner_id,name,type,options,default_value,system_key,active,sort_order,created_at,updated_at",
   project_templates: "id,owner_id,name,description,content,plain_text,created_by_user_id,created_at,updated_at",
@@ -41,7 +41,8 @@ export function backupDay(now = new Date()) {
 
 export function summarizeBackup(tables: Tables): BackupSummary {
   const count = (kind: string) => tables.items.filter((row) => row.kind === kind).length;
-  return { cycles: tables.okr_cycles.length, objectives: count("objective"), keyResults: count("key_result"), initiatives: count("initiative"), projects: count("project"), tasks: count("task"), routines: tables.routines.length, documents: tables.project_documents.length, dailyReports: tables.daily_scrums.length + tables.daily_submissions.length };
+  const routineDocuments = tables.routines.filter((row) => Number(row.document_version) > 0).length;
+  return { cycles: tables.okr_cycles.length, objectives: count("objective"), keyResults: count("key_result"), initiatives: count("initiative"), projects: count("project"), tasks: count("task"), routines: tables.routines.length, documents: tables.project_documents.length + routineDocuments, dailyReports: tables.daily_scrums.length + tables.daily_submissions.length };
 }
 
 function recordSummary(row: RecordRow) {
@@ -143,6 +144,15 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
     data.tables.routine_property_definitions = [];
     if (Array.isArray(data.tables.routines)) data.tables.routines = data.tables.routines.map((row) => ({ properties_json: "{}", ...row }));
   }
+  if (Array.isArray(data.tables.routines)) {
+    data.tables.routines = data.tables.routines.map((row) => ({
+      document_content: "[]",
+      document_plain_text: "",
+      document_version: 0,
+      document_updated_at: null,
+      ...row,
+    }));
+  }
   if (Array.isArray(data.tables.daily_scrums)) data.tables.daily_scrums = data.tables.daily_scrums.map((row) => ({ work_selection_json: "[]", yesterday_work_selection_json: "[]", work_status: "office", ...row }));
   if (Array.isArray(data.tables.daily_submissions)) data.tables.daily_submissions = data.tables.daily_submissions.map((row) => ({ work_snapshot_json: "[]", yesterday_work_snapshot_json: "[]", request_id: null, work_status: "office", ...row }));
   for (const table of BACKUP_TABLES) {
@@ -230,6 +240,12 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
     for (const row of tables.routines) if (!members.has(row.assignee_member_id)) row.assignee_member_id = null;
     const versions = new Map(current.tables.project_documents.map((r) => [r.project_id, Number(r.version)]));
     for (const row of tables.project_documents) row.version = Math.max(Number(row.version), versions.get(row.project_id) ?? 0) + 1;
+    const routineDocumentVersions = new Map(current.tables.routines.map((r) => [r.id, Number(r.document_version)]));
+    for (const row of tables.routines) {
+      const savedVersion = Number(row.document_version);
+      const currentVersion = routineDocumentVersions.get(row.id) ?? 0;
+      if (savedVersion > 0 || currentVersion > 0) row.document_version = Math.max(savedVersion, currentVersion) + 1;
+    }
     const guardId = crypto.randomUUID();
     // CHECK failure rolls back the whole D1 batch if any business data changed after capture.
     const statements = [ctx.DB.prepare(`INSERT INTO workspace_backup_guards (id, verified) VALUES (?,

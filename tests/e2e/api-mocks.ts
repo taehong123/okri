@@ -319,6 +319,13 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
     if (url.pathname === "/api/project-documents") {
       return json(route, { document: { id: "document-1", projectId: "project-1", content: "[]", plainText: "", version: 1, updatedAt: now } });
     }
+    if (url.pathname === "/api/work-documents") {
+      const payload = request.method() === "PUT" ? request.postDataJSON() as { targetKind: "task" | "routine"; targetId: string; content: string; plainText: string; expectedVersion: number } : null;
+      const targetKind = payload?.targetKind ?? url.searchParams.get("targetKind") as "task" | "routine";
+      const targetId = payload?.targetId ?? url.searchParams.get("targetId") ?? "";
+      const plainText = payload?.plainText ?? (targetKind === "task" ? "Task specification" : "Routine playbook");
+      return json(route, { document: { id: `document-${targetId}`, targetKind, targetId, content: payload?.content ?? JSON.stringify([{ type: "paragraph", content: plainText }]), plainText, version: payload ? payload.expectedVersion + 1 : 1, updatedAt: now } });
+    }
     if (url.pathname === "/api/project-templates") return json(route, { templates: [] });
     if (url.pathname === "/api/properties") return json(route, { properties: bootstrapResponse.properties });
     if (url.pathname === "/api/routine-properties") return json(route, { properties: [] });

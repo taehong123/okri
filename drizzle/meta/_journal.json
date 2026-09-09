@@ -351,6 +351,20 @@
       "when": 1788860552923,
       "tag": "0056_project_images",
       "breakpoints": true
+    },
+    {
+      "idx": 50,
+      "version": "6",
+      "when": 1788923908538,
+      "tag": "0057_work_documents",
+      "breakpoints": true
+    },
+    {
+      "idx": 51,
+      "version": "6",
+      "when": 1788926073522,
+      "tag": "0058_account_onboarding",
+      "breakpoints": true
     }
   ]
 }

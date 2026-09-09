@@ -26,7 +26,11 @@ function load(slackApi = async () => ({ messages: [] }), options = {}) {
       ...options.paceData,
     },
     "@/lib/slack-daily": { slackApi },
+    "@/lib/slack-mcp-context": {
+      missingSlackThreadSourceMessage: () => "Slack에서 원본 스레드 내용을 받지 못해 아무 업무도 저장하지 않았습니다.",
+    },
     "@/lib/work-intake": {
+      assertConcreteWorkInput: () => {},
       readWorkContext: async () => ({
         members: [{ id: "member-a", displayName: "A", isCurrent: true }],
         parents: [], routines: [], fallback: { id: "general-a", title: "General" },
@@ -40,19 +44,87 @@ function load(slackApi = async () => ({ messages: [] }), options = {}) {
 }
 
 test("Slack thread reading keeps image-only messages as bounded Project attachments", async () => {
-  const { readSlackThread } = load(async () => ({
-    messages: [
-      { user: "member-a", text: "", files: [{ id: "file-a", name: "error.png", mimetype: "image/png", size: 321, url_private_download: "https://files.slack.test/a" }] },
-      { user: "member-a", text: "이 화면 오류 해결" },
-    ],
-  }));
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    return {
+      messages: [
+        { user: "member-a", text: "", files: [{ id: "file-a", name: "error.png", mimetype: "image/png", size: 321, url_private_download: "https://files.slack.test/a" }] },
+        { user: "member-a", text: "이 화면 오류 해결" },
+      ],
+      response_metadata: { next_cursor: "next" },
+    };
+  });
   const thread = await readSlackThread("token", { channel: "C1", channelType: "channel", user: "member-a", text: "", ts: "1.2" });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0], { method: "conversations.replies", body: { channel: "C1", ts: "1.2" } });
+  assert.equal(thread.truncated, true);
   assert.equal(thread.imageFiles.length, 1);
   assert.deepEqual(thread.imageFiles[0], {
     id: "file-a", name: "error.png", mimeType: "image/png", size: 321, urlPrivateDownload: "https://files.slack.test/a",
   });
   assert.equal(thread.messages.length, 1);
   assert.equal(thread.messages[0].text, "이 화면 오류 해결");
+});
+
+test("Slack work draft stops before AI when thread history cannot be read", async () => {
+  let modelCalled = false;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => {
+    modelCalled = true;
+    throw new Error("OpenAI must not be called");
+  };
+  try {
+    const runtime = {
+      OPENAI_API_KEY: "test-key",
+      DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }) }) }) },
+    };
+    const { prepareSlackWorkDraft } = load(async () => { throw new Error("invalid_arguments"); }, { env: runtime });
+    await assert.rejects(() => prepareSlackWorkDraft({
+      authorization: { ownerId: "workspace-a", userId: "user-a" }, memberId: "member-a", token: "token",
+      event: { channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드로 Task 만들어줘", ts: "2.0", threadTs: "1.0" },
+      query: "이 스레드로 Task 만들어줘",
+    }), /아무 업무도 저장하지 않았습니다/);
+    assert.equal(modelCalled, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Slack thread reading recovers the root when replies returns only the current mention", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    if (method === "conversations.replies") {
+      return { messages: [{ user: "member-a", text: "<@BOT> 이 스레드 정리해줘", ts: "2.0" }] };
+    }
+    return { messages: [{
+      user: "member-b", text: "고객 문의를 확인하고 수정한다", ts: "1.0",
+      files: [{ id: "root-image", name: "issue.png", mimetype: "image/png", size: 100, url_private_download: "https://files.slack.test/root" }],
+    }] };
+  });
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 정리해줘", ts: "2.0", threadTs: "1.0",
+  });
+  assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "conversations.history"]);
+  assert.deepEqual(requests[1].body, { channel: "C1", oldest: "1.0", inclusive: true, limit: 1 });
+  assert.equal(thread.messages[0].text, "고객 문의를 확인하고 수정한다");
+  assert.equal(thread.imageFiles[0].id, "root-image");
+});
+
+test("Slack thread reading keeps the root when replies rejects its arguments", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    if (method === "conversations.replies") throw Object.assign(new Error("invalid_arguments"), { code: "invalid_arguments" });
+    return { messages: [{ user: "member-b", text: "고객 문의 원문", ts: "1.0" }] };
+  });
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 정리해줘", ts: "2.0", threadTs: "1.0",
+  });
+  assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "conversations.history"]);
+  assert.equal(thread.messages[0].text, "고객 문의 원문");
+  assert.equal(thread.truncated, true);
 });
 
 test("Slack work draft retries a rejected structured response with JSON compatibility mode", async () => {
@@ -96,21 +168,12 @@ test("Slack work draft retries a rejected structured response with JSON compatib
   }
 });
 
-test("Slack work draft falls back to the request when Slack cannot read the thread", async () => {
+test("Slack work draft never falls back to a request when Slack cannot read the thread", async () => {
+  let modelCalled = false;
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => {
-    const body = JSON.parse(init.body);
-    const input = JSON.parse(body.input[1].content);
-    assert.equal(input.thread[0].text, "고객 오류 화면을 수정해 줘");
-    assert.equal(input.threadTruncated, true);
-    return Response.json({
-      output_text: JSON.stringify({
-        kind: "task", title: "고객 오류 화면 수정", description: "", parentKind: "routine", parentId: "general-a",
-        parentReason: "", responsibleMemberId: "member-a", participantMemberIds: [], dueDate: "",
-        priority: "medium", typeReason: "한 가지 완료 결과",
-      }),
-      usage: { input_tokens: 100, output_tokens: 40 },
-    });
+  globalThis.fetch = async () => {
+    modelCalled = true;
+    throw new Error("OpenAI must not be called");
   };
   try {
     const runtime = {
@@ -119,13 +182,12 @@ test("Slack work draft falls back to the request when Slack cannot read the thre
     };
     const slackError = Object.assign(new Error("private channel history unavailable"), { code: "not_in_channel" });
     const { prepareSlackWorkDraft } = load(async () => { throw slackError; }, { env: runtime });
-    const draft = await prepareSlackWorkDraft({
+    await assert.rejects(() => prepareSlackWorkDraft({
       authorization: { ownerId: "workspace-a", userId: "user-a" }, memberId: "member-a", token: "token",
       event: { channel: "C1", channelType: "group", user: "member-a", text: "고객 오류 화면을 수정해 줘", ts: "1.2" },
       query: "고객 오류 화면을 수정해 줘",
-    });
-    assert.equal(draft.title, "고객 오류 화면 수정");
-    assert.equal(draft.threadTruncated, true);
+    }), /아무 업무도 저장하지 않았습니다/);
+    assert.equal(modelCalled, false);
   } finally {
     globalThis.fetch = originalFetch;
   }

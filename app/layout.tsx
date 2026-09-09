@@ -3,6 +3,7 @@ import "./fonts.css";
 import "./globals.css";
 import "./workspace-design.css";
 import "./item-editor.css";
+import "./document-view.css";
 import "./gantt-view.css";
 import "./pwa.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";

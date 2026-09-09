@@ -47,7 +47,6 @@ import {
   workspaces,
   type PaceItem,
   type PropertyDefinition,
-  type ProjectDocument,
   type ProjectTemplate,
   type WorkspaceGroup,
   type WorkspaceGroupMember,
@@ -985,6 +984,10 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       workspace.avatar_updated_at,
       routine.system_key,
       routine.assignee_member_id,
+      routine.document_content,
+      routine.document_plain_text,
+      routine.document_version,
+      routine.document_updated_at,
       property.default_value,
       property.system_key,
       property.active,
@@ -2637,7 +2640,8 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
   const [emailUser] = await getDb().select().from(users).where(eq(users.emailNormalized, email)).limit(1);
   const userId = emailUser?.id ?? crypto.randomUUID();
   if (!emailUser) {
-    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), createdAt: now, updatedAt: now }).onConflictDoNothing();
+    const { initialOnboarding } = await import("@/lib/onboarding");
+    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), onboardingState: JSON.stringify(initialOnboarding()), createdAt: now, updatedAt: now }).onConflictDoNothing();
   }
   await getDb().insert(authIdentities).values({
     id: crypto.randomUUID(),
@@ -5100,20 +5104,39 @@ export function serializePropertyDefinition(property: PropertyDefinition, valueC
 }
 
 export async function getProjectDocument(ownerId: string, projectId: string) {
-  const project = await getItem(ownerId, projectId);
-  if (!project || project.kind !== "project") throw new Error("Project not found");
+  const document = await getItemBackedDocument(ownerId, projectId, "project");
+  return {
+    id: document.id,
+    projectId: document.targetId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
+}
+
+async function getItemBackedDocument(ownerId: string, itemId: string, expectedKind: "project" | "task") {
+  const item = await getItem(ownerId, itemId);
+  if (!item || item.kind !== expectedKind) throw new Error(`${expectedKind === "project" ? "Project" : "Task"} not found`);
   const [document] = await getDb().select().from(projectDocuments).where(and(
     eq(projectDocuments.ownerId, ownerId),
-    eq(projectDocuments.projectId, projectId),
+    eq(projectDocuments.projectId, itemId),
   )).limit(1);
-  if (document) return serializeProjectDocument(document);
+  if (document) return {
+    id: document.id,
+    targetId: itemId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
   return {
     id: null,
-    projectId,
-    content: JSON.stringify(blocksFromPlainText(project.description)),
-    plainText: project.description,
+    targetId: itemId,
+    content: JSON.stringify(blocksFromPlainText(item.description)),
+    plainText: item.description,
     version: 0,
-    updatedAt: project.updatedAt,
+    updatedAt: item.updatedAt,
   };
 }
 
@@ -5122,14 +5145,32 @@ export async function saveProjectDocument(
   projectId: string,
   input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
 ) {
-  const project = await getItem(ownerId, projectId);
-  if (!project || project.kind !== "project") throw new Error("Project not found");
-  if (project.archivedAt) throw new Error("Restore the Project before changing its document");
+  const document = await saveItemBackedDocument(ownerId, projectId, "project", input);
+  return {
+    id: document.id,
+    projectId: document.targetId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
+}
+
+async function saveItemBackedDocument(
+  ownerId: string,
+  itemId: string,
+  expectedKind: "project" | "task",
+  input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
+) {
+  const item = await getItem(ownerId, itemId);
+  const label = expectedKind === "project" ? "Project" : "Task";
+  if (!item || item.kind !== expectedKind) throw new Error(`${label} not found`);
+  if (item.archivedAt) throw new Error(`Restore the ${label} before changing its document`);
   const content = normalizeBlockContent(input.content);
   const plainText = normalizeDocumentText(input.plainText);
   const [current] = await getDb().select().from(projectDocuments).where(and(
     eq(projectDocuments.ownerId, ownerId),
-    eq(projectDocuments.projectId, projectId),
+    eq(projectDocuments.projectId, itemId),
   )).limit(1);
   const currentVersion = current?.version ?? 0;
   if (input.expectedVersion !== currentVersion) throw new Error("Document version conflict");
@@ -5140,11 +5181,11 @@ export async function saveProjectDocument(
     ? d1.prepare(`UPDATE project_documents
         SET content = ?, plain_text = ?, version = ?, updated_by_user_id = ?, updated_at = ?
         WHERE owner_id = ? AND project_id = ? AND version = ?`)
-      .bind(content, plainText, nextVersion, input.userId ?? null, now, ownerId, projectId, currentVersion)
+      .bind(content, plainText, nextVersion, input.userId ?? null, now, ownerId, itemId, currentVersion)
     : d1.prepare(`INSERT INTO project_documents
         (id, owner_id, project_id, content, plain_text, version, updated_by_user_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, projectId, content, plainText, nextVersion, input.userId ?? null, now, now);
+      .bind(crypto.randomUUID(), ownerId, itemId, content, plainText, nextVersion, input.userId ?? null, now, now);
   await d1.batch([
     documentStatement,
     d1.prepare(`UPDATE items SET description = ?, updated_at = ?
@@ -5152,16 +5193,76 @@ export async function saveProjectDocument(
           SELECT 1 FROM project_documents
           WHERE owner_id = ? AND project_id = ? AND version = ? AND updated_at = ?
         )`)
-      .bind(plainText, now, ownerId, projectId, ownerId, projectId, nextVersion, now),
+      .bind(plainText, now, ownerId, itemId, ownerId, itemId, nextVersion, now),
   ]);
   const [saved] = await getDb().select().from(projectDocuments).where(and(
     eq(projectDocuments.ownerId, ownerId),
-    eq(projectDocuments.projectId, projectId),
+    eq(projectDocuments.projectId, itemId),
   )).limit(1);
-  if (!saved) throw new Error("Project document could not be saved");
+  if (!saved) throw new Error(`${label} document could not be saved`);
   if (saved.version !== nextVersion || saved.updatedAt !== now) throw new Error("Document version conflict");
-  await logActivity(ownerId, projectId, "project_document_updated", "web", { version: nextVersion });
-  return serializeProjectDocument(saved);
+  await logActivity(ownerId, itemId, `${expectedKind}_document_updated`, "web", { version: nextVersion });
+  return {
+    id: saved.id,
+    targetId: itemId,
+    content: saved.content,
+    plainText: saved.plainText,
+    version: saved.version,
+    updatedAt: saved.updatedAt,
+  };
+}
+
+export type WorkDocumentTargetKind = "task" | "routine";
+
+export async function getWorkDocument(ownerId: string, targetKind: WorkDocumentTargetKind, targetId: string) {
+  if (targetKind === "task") {
+    return { ...(await getItemBackedDocument(ownerId, targetId, "task")), targetKind };
+  }
+  const routine = await getRoutine(ownerId, targetId);
+  if (!routine || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Routine not found");
+  const fallback = [routine.description, routine.actionSteps].map((value) => value.trim()).filter(Boolean).join("\n\n");
+  return {
+    id: routine.documentVersion > 0 ? routine.id : null,
+    targetKind,
+    targetId,
+    content: routine.documentVersion > 0 ? routine.documentContent : JSON.stringify(blocksFromPlainText(fallback)),
+    plainText: routine.documentVersion > 0 ? routine.documentPlainText : fallback,
+    version: routine.documentVersion,
+    updatedAt: routine.documentUpdatedAt ?? routine.updatedAt,
+  };
+}
+
+export async function saveWorkDocument(
+  ownerId: string,
+  targetKind: WorkDocumentTargetKind,
+  targetId: string,
+  input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
+) {
+  if (targetKind === "task") {
+    return { ...(await saveItemBackedDocument(ownerId, targetId, "task", input)), targetKind };
+  }
+  const routine = await getRoutine(ownerId, targetId);
+  if (!routine || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Routine not found");
+  if (input.expectedVersion !== routine.documentVersion) throw new Error("Document version conflict");
+  const content = normalizeBlockContent(input.content);
+  const plainText = normalizeDocumentText(input.plainText);
+  const nextVersion = routine.documentVersion + 1;
+  const now = new Date().toISOString();
+  await (env as RuntimeEnv).DB.prepare(`UPDATE routines
+      SET document_content = ?, document_plain_text = ?, document_version = ?, document_updated_at = ?, updated_at = ?
+      WHERE owner_id = ? AND id = ? AND system_key IS NULL AND document_version = ?`)
+    .bind(content, plainText, nextVersion, now, now, ownerId, targetId, routine.documentVersion).run();
+  const saved = await getRoutine(ownerId, targetId);
+  if (!saved || saved.documentVersion !== nextVersion || saved.documentUpdatedAt !== now) throw new Error("Document version conflict");
+  return {
+    id: saved.id,
+    targetKind,
+    targetId,
+    content: saved.documentContent,
+    plainText: saved.documentPlainText,
+    version: saved.documentVersion,
+    updatedAt: saved.documentUpdatedAt ?? saved.updatedAt,
+  };
 }
 
 export async function listProjectTemplates(ownerId: string) {
@@ -5258,17 +5359,6 @@ export function prepareProjectTemplateDocument(template: { content: string; plai
   ]));
   const plainText = normalizeDocumentText([template.plainText.trim(), description.trim()].filter(Boolean).join("\n\n"));
   return { content, plainText };
-}
-
-function serializeProjectDocument(document: ProjectDocument) {
-  return {
-    id: document.id,
-    projectId: document.projectId,
-    content: document.content,
-    plainText: document.plainText,
-    version: document.version,
-    updatedAt: document.updatedAt,
-  };
 }
 
 function serializeProjectTemplate(template: ProjectTemplate) {

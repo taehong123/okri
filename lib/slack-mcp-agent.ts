@@ -11,6 +11,13 @@ import {
   type RequestAuthorization,
 } from "@/lib/pace-data";
 import { createSlackMemberLinkUrl, dailyMemberBySlack, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import {
+  hasInlineSlackCreationDetails,
+  hasSlackCreationSource,
+  missingSlackThreadSourceMessage,
+  referencesSlackThreadSource,
+  slackThreadSourceMessages,
+} from "@/lib/slack-mcp-context";
 import { readSlackThread, type SlackWorkIntakeEvent } from "@/lib/slack-work-intake";
 import { readSlackImagesForAgent, saveSlackProjectImages } from "@/lib/project-images";
 
@@ -94,6 +101,7 @@ export async function handleSlackMcpConversation(request: Request, connection: S
       authorization: linked.authorization,
       memberId: linked.memberId,
       teamId: connection.teamId,
+      botUserId: connection.botUserId,
       token,
       event,
       query,
@@ -109,6 +117,7 @@ async function runMcpAgent(input: {
   authorization: RequestAuthorization;
   memberId: string;
   teamId: string;
+  botUserId: string;
   token: string;
   event: AgentEvent;
   query: string;
@@ -135,6 +144,9 @@ async function runMcpAgent(input: {
     linkedAuthors(input.authorization.ownerId),
     loadSession(input.authorization, input.teamId, input.event),
   ]);
+  if (thread.readFailed) {
+    throw new SlackMcpAgentError(missingSlackThreadSourceMessage(Boolean(input.event.threadTs)), "slack_thread_unavailable");
+  }
   const threadImages = thread.imageFiles.length
     ? await readSlackImagesForAgent(input.token, thread.imageFiles).catch((error) => {
       console.error("Slack MCP thread image read failed", safeError(error));
@@ -152,16 +164,21 @@ async function runMcpAgent(input: {
   let finalized = false;
   try {
     const listed = await client.request<{ tools: McpTool[] }>("tools/list", {});
-    const tools = selectTools(listed.tools, input.query, thread.messages.map((entry) => entry.text).join("\n"));
-    const conversation = thread.messages.filter((message) => message.text !== "요청을 확인하고 있어요…").map((message) => ({
+    const sourceMessages = slackThreadSourceMessages(thread.messages, input.event.ts, input.botUserId);
+    const tools = selectTools(listed.tools, input.query, sourceMessages.map((entry) => entry.text).join("\n"));
+    const conversation = sourceMessages.map((message) => ({
       author: authors.get(message.user) || (message.user === input.event.user ? input.authorization.displayName || "요청자" : "Slack 멤버"),
       text: message.text,
     }));
     const creationIntent = hasExplicitCreationIntent(input.query);
     const requestedWorkKind = explicitCreationKind(input.query);
-    const threadHasSourceContent = hasCreationSource(conversation.map((message) => message.text), input.query, threadImages.length);
-    if (thread.readFailed && creationIntent && !hasInlineCreationDetails(input.query)) {
-      throw new SlackMcpAgentError("스레드 내용을 읽지 못했습니다. 해당 채널에 OKRI를 초대한 뒤 같은 스레드에서 다시 불러 주세요. 기존 내용을 다시 입력할 필요는 없습니다.", "slack_thread_unavailable");
+    const threadHasSourceContent = hasSlackCreationSource(conversation.map((message) => message.text), input.query, threadImages.length);
+    const inlineHasSourceContent = hasInlineSlackCreationDetails(input.query);
+    const hasCreationSourceContent = threadHasSourceContent || inlineHasSourceContent;
+    const needsMissingThreadSource = referencesSlackThreadSource(input.query)
+      || (creationIntent && !inlineHasSourceContent);
+    if (!hasCreationSourceContent && needsMissingThreadSource) {
+      throw new SlackMcpAgentError(missingSlackThreadSourceMessage(Boolean(input.event.threadTs)), "slack_thread_unavailable");
     }
     const executed: StoredToolTurn[] = [];
     let callsUsed = 0;
@@ -176,7 +193,7 @@ async function runMcpAgent(input: {
         result: mandatoryPreparation, at: new Date().toISOString() });
       callsUsed = 1;
     }
-    const mustProgressCreation = creationIntent && threadHasSourceContent;
+    const mustProgressCreation = creationIntent && hasCreationSourceContent;
     const hiddenState = session?.turns?.length ? JSON.stringify(session.turns) : "없음";
     const payloadChars = JSON.stringify({ conversation, hiddenState, tools, mandatoryPreparation }).length
       + agentInstruction().length + threadImages.length * 4_000;
@@ -401,26 +418,6 @@ function explicitCreationKind(value: string): "task" | "project" | "routine" | "
   if (/(?:프로젝트|project)(?:\s*로|\s*으로)?/iu.test(value)) return "project";
   if (/(?:루틴|routine)(?:\s*로|\s*으로)?/iu.test(value)) return "routine";
   return "";
-}
-
-function creationDetails(value: string) {
-  return cleanSlack(value)
-    .replace(/(?:이\s*스레드|스레드\s*전체|위\s*내용|이\s*내용|논의(?:한)?\s*내용|이거|이것|내용)/giu, " ")
-    .replace(/(?:업무|일|작업|프로젝트|태스크|테스크|루틴|task|project|routine|thread)(?:\s*로|\s*으로)?/giu, " ")
-    .replace(/(?:생성|만들어?|등록|정리|추가|읽고|바탕으로|기준으로|해\s*줘|해주세요|create|add|organize)/giu, " ")
-    .replace(/[^\p{L}\p{N}]+/gu, "")
-    .trim();
-}
-
-function hasInlineCreationDetails(value: string) { return creationDetails(value).length >= 3; }
-
-function hasCreationSource(messages: string[], query: string, imageCount: number) {
-  if (imageCount > 0) return true;
-  const request = cleanSlack(query);
-  return messages.some((message) => {
-    const text = cleanSlack(message);
-    return Boolean(text) && (text !== request || hasInlineCreationDetails(text));
-  });
 }
 
 function hasCreationProgress(turns: StoredToolTurn[]) {

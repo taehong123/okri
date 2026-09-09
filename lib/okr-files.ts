@@ -166,6 +166,13 @@ export async function getOkrFileRead(ownerId: string, cycleId: string): Promise<
 }
 
 export async function createOkrFile(ownerId: string, userId: string, input: OkrFileSaveInput): Promise<OkrFileResponse> {
+  const { cycleId, statements } = await prepareOkrFileCreation(ownerId, userId, input);
+  await (env as RuntimeEnv).DB.batch(statements);
+  return getOkrFile(ownerId, userId, cycleId);
+}
+
+// Reuse the exact file validation and writes when setup completion must commit with the file.
+export async function prepareOkrFileCreation(ownerId: string, userId: string, input: OkrFileSaveInput) {
   const normalized = normalizeSaveInput(input, null);
   const rules = await getWorkspaceRules(ownerId);
   const existingCycles = await getDb().select().from(okrCycles).where(eq(okrCycles.ownerId, ownerId));
@@ -187,8 +194,7 @@ export async function createOkrFile(ownerId: string, userId: string, input: OkrF
     statements.push(insertNodeStatement(d1, ownerId, userId, cycleId, node, rules.defaultPriority, rules.defaultCadence, now));
   }
   statements.push(activityStatement(d1, ownerId, normalized.nodes[0].id, "okr_file_created", { cycleId }, now));
-  await d1.batch(statements);
-  return getOkrFile(ownerId, userId, cycleId);
+  return { cycleId, statements };
 }
 
 export async function updateOkrFile(ownerId: string, userId: string, cycleId: string, input: OkrFileSaveInput): Promise<OkrFileResponse> {
