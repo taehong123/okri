@@ -91,6 +91,27 @@ test("Slack work draft stops before AI when thread history cannot be read", asyn
   }
 });
 
+test("Slack thread reading recovers the root when replies returns only the current mention", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    if (method === "conversations.replies") {
+      return { messages: [{ user: "member-a", text: "<@BOT> 이 스레드 정리해줘", ts: "2.0" }] };
+    }
+    return { messages: [{
+      user: "member-b", text: "고객 문의를 확인하고 수정한다", ts: "1.0",
+      files: [{ id: "root-image", name: "issue.png", mimetype: "image/png", size: 100, url_private_download: "https://files.slack.test/root" }],
+    }] };
+  });
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 정리해줘", ts: "2.0", threadTs: "1.0",
+  });
+  assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "conversations.history"]);
+  assert.deepEqual(requests[1].body, { channel: "C1", oldest: "1.0", latest: "1.0", inclusive: true, limit: 1 });
+  assert.equal(thread.messages[0].text, "고객 문의를 확인하고 수정한다");
+  assert.equal(thread.imageFiles[0].id, "root-image");
+});
+
 test("Slack work draft retries a rejected structured response with JSON compatibility mode", async () => {
   const requests = [];
   const originalFetch = globalThis.fetch;

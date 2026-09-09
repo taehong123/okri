@@ -401,6 +401,37 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     truncated = true;
     imagesTruncated = true;
   }
+  if (event.threadTs && !collected.some((message) => message.ts && message.ts !== event.ts)) {
+    const rootResult = await slackApi<SlackThreadResult>(token, "conversations.history", {
+      channel: event.channel,
+      oldest: event.threadTs,
+      latest: event.threadTs,
+      inclusive: true,
+      limit: 1,
+    });
+    const root = rootResult.messages?.find((message) => message.ts === event.threadTs) ?? rootResult.messages?.[0];
+    if (root) {
+      for (const file of root.files ?? []) {
+        if (!file.id || imageIds.has(file.id) || !String(file.mimetype ?? "").startsWith("image/")) continue;
+        imageIds.add(file.id);
+        if (imageFiles.length >= maxThreadImages) {
+          imagesTruncated = true;
+          continue;
+        }
+        imageFiles.push({
+          id: file.id,
+          name: file.name || file.title || "Slack image",
+          mimeType: file.mimetype || "",
+          size: Number(file.size) || 0,
+          urlPrivateDownload: file.url_private_download || file.url_private || "",
+        });
+      }
+      const text = cleanSlackText(root.text ?? "");
+      if (text && !collected.some((message) => message.ts === root.ts)) {
+        collected.unshift({ user: root.user ?? "", text, botId: root.bot_id, ts: root.ts });
+      }
+    }
+  }
   if (!collected.length) collected.push({ user: event.user, text: cleanSlackText(event.text) });
 
   let chars = 0;
