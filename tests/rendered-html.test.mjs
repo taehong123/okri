@@ -670,7 +670,9 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(page, /expectedVersion/);
   assert.match(editor, /BlockNoteSchema\.create/);
   assert.match(editor, /defaultBlockSpecs\.table/);
-  assert.doesNotMatch(editor, /defaultBlockSpecs\.(image|video|audio|file)/);
+  assert.match(editor, /defaultBlockSpecs\.image/);
+  assert.match(editor, /uploadFile: imageTarget \? uploadImage : undefined/);
+  assert.doesNotMatch(editor, /defaultBlockSpecs\.(video|audio|file)/);
   assert.match(propertiesRoute, /payload\.preview === true/);
   assert.match(propertiesRoute, /includeInactive/);
   assert.match(documentsRoute, /version conflict/i);

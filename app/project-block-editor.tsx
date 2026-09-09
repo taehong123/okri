@@ -4,11 +4,13 @@ import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { ko } from "@blocknote/core/locales";
 import { BlockNoteView } from "@blocknote/mantine";
 import "@blocknote/mantine/style.css";
-import { BlockNoteContext, useCreateBlockNote } from "@blocknote/react";
+import { BasicTextStyleButton, BlockNoteContext, BlockNoteViewEditor, BlockTypeSelect, CreateLinkButton, FileCaptionButton, FileDeleteButton, FileReplaceButton, useCreateBlockNote } from "@blocknote/react";
+import { ImagePlus, LoaderCircle } from "lucide-react";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { themeColorScheme } from "@/lib/themes";
 import { t, useLanguage } from "@/lib/client-language";
 import type { Language } from "@/lib/language";
+import { DOCUMENT_IMAGE_ACCEPT, DOCUMENT_IMAGE_MAX_BYTES, type DocumentImageTarget } from "@/lib/document-images";
 
 const editorDictionaries: Partial<Record<Language, typeof ko>> = { ko };
 const editorRequests: Partial<Record<Language, Promise<typeof ko>>> = {};
@@ -37,6 +39,7 @@ const projectDocumentSchema = BlockNoteSchema.create({
     codeBlock: defaultBlockSpecs.codeBlock,
     divider: defaultBlockSpecs.divider,
     table: defaultBlockSpecs.table,
+    image: defaultBlockSpecs.image,
   },
 });
 
@@ -45,10 +48,13 @@ export type ProjectBlockEditorChange = {
   plainText: string;
 };
 
-type ProjectBlockEditorProps = {
+export type ProjectBlockEditorProps = {
   initialContent: string;
   editable?: boolean;
   onChange?: (change: ProjectBlockEditorChange) => void;
+  imageTarget?: DocumentImageTarget;
+  onUploadBusyChange?: (busy: boolean) => void;
+  onPendingChange?: (pending: boolean) => void;
 };
 
 export default function ProjectBlockEditor(props: ProjectBlockEditorProps) {
@@ -69,16 +75,23 @@ export default function ProjectBlockEditor(props: ProjectBlockEditorProps) {
   </>;
 }
 
-function ProjectBlockEditorBody({ initialContent, editable = true, onChange, dictionary }: ProjectBlockEditorProps & { dictionary: typeof ko }) {
+function ProjectBlockEditorBody({ initialContent, editable = true, onChange, dictionary, imageTarget, onUploadBusyChange, onPendingChange }: ProjectBlockEditorProps & { dictionary: typeof ko }) {
   const initialBlocks = parseInitialContent(initialContent);
   const changeTimer = useRef<number | null>(null);
+  const changeCallback = useRef(onChange);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploadCount, setUploadCount] = useState(0);
+  const [uploadError, setUploadError] = useState("");
   const [viewTheme, setViewTheme] = useState<"light" | "dark">(() => currentEditorTheme());
   const editor = useCreateBlockNote({
     schema: projectDocumentSchema,
     // Own dictionary, never mutate the library's shared locale object.
     dictionary: { ...dictionary },
     initialContent: initialBlocks as never,
+    uploadFile: imageTarget ? uploadImage : undefined,
   });
+  useLayoutEffect(() => { changeCallback.current = onChange; }, [onChange]);
+  useEffect(() => { onUploadBusyChange?.(uploadCount > 0); }, [uploadCount, onUploadBusyChange]);
   const [appliedDictionary, setAppliedDictionary] = useState(dictionary);
   useLayoutEffect(() => {
     if (appliedDictionary === dictionary) return;
@@ -92,8 +105,20 @@ function ProjectBlockEditorBody({ initialContent, editable = true, onChange, dic
     [`--editor-placeholder-${key}`, JSON.stringify(value)])) as CSSProperties;
 
   useEffect(() => () => {
-    if (changeTimer.current !== null) window.clearTimeout(changeTimer.current);
-  }, []);
+    if (changeTimer.current !== null) {
+      window.clearTimeout(changeTimer.current);
+      changeCallback.current?.({ content: JSON.stringify(editor.document), plainText: blocksToPlainText(editor.document) });
+    }
+  }, [editor]);
+
+  useEffect(() => {
+    if (!editable && changeTimer.current !== null) {
+      window.clearTimeout(changeTimer.current);
+      changeTimer.current = null;
+      changeCallback.current?.({ content: JSON.stringify(editor.document), plainText: blocksToPlainText(editor.document) });
+      onPendingChange?.(false);
+    }
+  }, [editable, editor, onPendingChange]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -106,20 +131,77 @@ function ProjectBlockEditorBody({ initialContent, editable = true, onChange, dic
 
   function changed() {
     if (!onChange) return;
+    onPendingChange?.(true);
     if (changeTimer.current !== null) window.clearTimeout(changeTimer.current);
     changeTimer.current = window.setTimeout(() => {
+      changeTimer.current = null;
+      onPendingChange?.(false);
       const document = editor.document;
-      onChange({
+      changeCallback.current?.({
         content: JSON.stringify(document),
         plainText: blocksToPlainText(document),
       });
     }, 450);
   }
 
+  async function uploadImage(file: File) {
+    if (!imageTarget || !editor.isEditable) throw new Error("Read-only document");
+    if (!file.size || file.size > DOCUMENT_IMAGE_MAX_BYTES || !DOCUMENT_IMAGE_ACCEPT.split(",").includes(file.type)) {
+      setUploadError(t("PNG·JPG·WebP·GIF 이미지를 5MB 이하로 첨부해 주세요."));
+      throw new Error("Invalid image");
+    }
+    setUploadError("");
+    setUploadCount(count => count + 1);
+    try {
+      const query = new URLSearchParams({ ...imageTarget, name: file.name });
+      const response = await fetch(`/api/document-images?${query}`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
+      const result = await response.json() as { url?: string; code?: string };
+      if (!response.ok || !result.url?.startsWith("/api/document-images?")) throw new Error("Upload failed");
+      return result.url;
+    } catch (error) {
+      setUploadError(t("이미지를 저장하지 못했습니다."));
+      throw error;
+    } finally { setUploadCount(count => count - 1); }
+  }
+
+  async function attachImage(file: File) {
+    const anchor = editor.getTextCursorPosition().block;
+    try {
+      const url = await uploadImage(file);
+      const block = editor.getBlock(anchor.id) ?? editor.document[editor.document.length - 1];
+      const [, paragraph] = editor.insertBlocks([{ type: "image", props: { url, name: file.name, previewWidth: 640 } }, { type: "paragraph" }], block, "after");
+      editor.setTextCursorPosition(paragraph.id, "end");
+      editor.focus();
+    } catch { /* Keep the document and the inline upload error intact. */ }
+  }
+
   return (
     <div className="project-block-editor" style={placeholderStyle}>
       <BlockNoteContext.Provider value={context}>
-        <BlockNoteView editor={editor} editable={editable} onChange={changed} theme={viewTheme} />
+        <BlockNoteView editor={editor} editable={editable} onChange={changed} theme={viewTheme} renderEditor={false} formattingToolbar={false}>
+          {editable && <div className="document-format-toolbar" role="group" aria-label={t("문서 서식")}>
+            <BlockTypeSelect />
+            <BasicTextStyleButton basicTextStyle="bold" />
+            <BasicTextStyleButton basicTextStyle="italic" />
+            <BasicTextStyleButton basicTextStyle="underline" />
+            <CreateLinkButton />
+            <FileCaptionButton />
+            <FileDeleteButton />
+            {imageTarget && <FileReplaceButton />}
+            {imageTarget && <>
+              <input ref={fileInput} type="file" accept={DOCUMENT_IMAGE_ACCEPT} hidden aria-label={t("이미지 첨부")} onChange={event => {
+                const file = event.currentTarget.files?.[0];
+                event.currentTarget.value = "";
+                if (file) void attachImage(file);
+              }} />
+              <button type="button" className="document-image-button secondary" disabled={uploadCount > 0} aria-busy={uploadCount > 0} onClick={() => fileInput.current?.click()}>
+                {uploadCount > 0 ? <LoaderCircle size={16} className="spinning" /> : <ImagePlus size={16} />}{t("이미지 첨부")}
+              </button>
+            </>}
+          </div>}
+          {editable && uploadError && <p className="document-upload-error" role="alert">{uploadError}</p>}
+          <BlockNoteViewEditor />
+        </BlockNoteView>
       </BlockNoteContext.Provider>
     </div>
   );
@@ -151,6 +233,11 @@ function collectBlockText(value: unknown, lines: string[]) {
   if (!value || typeof value !== "object") return;
   const block = value as Record<string, unknown>;
   const content = block.content;
+  if (block.type === "image" && block.props && typeof block.props === "object") {
+    const props = block.props as Record<string, unknown>;
+    const label = typeof props.caption === "string" && props.caption.trim() ? props.caption : props.name;
+    if (typeof label === "string" && label.trim()) lines.push(label.trim());
+  }
   if (typeof content === "string") lines.push(content);
   else if (Array.isArray(content)) {
     const line = content.map((entry) => inlineText(entry)).join("");

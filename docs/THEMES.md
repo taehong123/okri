@@ -163,6 +163,17 @@ Titles are headings, not permanent input fields. Completion stays a direct work
 action. The `document-view.spec.ts` checks read/edit separation, nested-dialog
 focus, Viewer access, six themes, actual fonts and 320–3840px/200% layouts.
 
+Document edit mode uses the existing BlockNote controls in a small, wrapping
+formatting row. Template actions share the Change button's height, typography
+and semantic action states; do not stretch the final action across mobile rows.
+Reading mode has no toolbar. Autosave must preserve cursor and undo history;
+replace the editor only when explicitly applying a template, not after saving.
+Project, Task and custom Routine images use authenticated, workspace-scoped R2
+objects. Accept only verified PNG/JPEG/WebP/GIF up to 5 MB, with bounded reads,
+no public image caching and server-side target/role checks. Image bytes never
+belong in document JSON or browser storage. `document-editor.spec.ts` and
+`document-images.test.mjs` cover persistence, failures, permissions and layout.
+
 `app/item-editor.css` is the shared field/layout layer loaded after `globals.css`
 and `workspace-design.css`.
 Project creation, Project detail, property definitions, templates, Task detail,

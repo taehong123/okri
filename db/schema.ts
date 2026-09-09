@@ -513,6 +513,77 @@ export const activityLog = sqliteTable(
   ],
 );
 
+export const localAgentDevices = sqliteTable(
+  "local_agent_devices",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    platform: text("platform").notNull().default("unknown"),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    lastSeenAt: text("last_seen_at"),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_local_agent_devices_token_hash").on(table.tokenHash),
+    index("idx_local_agent_devices_account").on(table.workspaceId, table.userId, table.revokedAt),
+    index("idx_local_agent_devices_last_seen").on(table.lastSeenAt),
+  ],
+);
+
+export const localAgentPairings = sqliteTable(
+  "local_agent_pairings",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    claimedAt: text("claimed_at"),
+    deviceId: text("device_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_local_agent_pairings_code_hash").on(table.codeHash),
+    index("idx_local_agent_pairings_account").on(table.workspaceId, table.userId, table.createdAt),
+    index("idx_local_agent_pairings_expiry").on(table.expiresAt),
+  ],
+);
+
+export const localAgentJobs = sqliteTable(
+  "local_agent_jobs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    deviceId: text("device_id").references(() => localAgentDevices.id, { onDelete: "set null" }),
+    targetKind: text("target_kind").notNull(),
+    targetId: text("target_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    targetTitle: text("target_title").notNull(),
+    instruction: text("instruction").notNull(),
+    contextJson: text("context_json").notNull().default("{}"),
+    status: text("status").notNull().default("queued"),
+    leaseId: text("lease_id"),
+    leaseExpiresAt: text("lease_expires_at"),
+    progressText: text("progress_text"),
+    resultText: text("result_text"),
+    errorText: text("error_text"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    startedAt: text("started_at"),
+    completedAt: text("completed_at"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_local_agent_jobs_account").on(table.workspaceId, table.userId, table.createdAt),
+    index("idx_local_agent_jobs_device_status").on(table.deviceId, table.status, table.createdAt),
+    index("idx_local_agent_jobs_target").on(table.workspaceId, table.targetKind, table.targetId, table.createdAt),
+  ],
+);
+
 export const propertyDefinitions = sqliteTable(
   "property_definitions",
   {
@@ -1475,3 +1546,6 @@ export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect;
 export type BillingPaymentMethod = typeof billingPaymentMethods.$inferSelect;
 export type BillingTransaction = typeof billingTransactions.$inferSelect;
 export type TrashRecord = typeof trashRecords.$inferSelect;
+export type LocalAgentDevice = typeof localAgentDevices.$inferSelect;
+export type LocalAgentPairing = typeof localAgentPairings.$inferSelect;
+export type LocalAgentJob = typeof localAgentJobs.$inferSelect;
