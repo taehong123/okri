@@ -67,3 +67,5 @@ CREATE INDEX `idx_local_agent_jobs_account` ON `local_agent_jobs` (`workspace_id
 CREATE INDEX `idx_local_agent_jobs_device_status` ON `local_agent_jobs` (`device_id`,`status`,`created_at`);
 --> statement-breakpoint
 CREATE INDEX `idx_local_agent_jobs_target` ON `local_agent_jobs` (`workspace_id`,`target_kind`,`target_id`,`created_at`);
+--> statement-breakpoint
+PRAGMA optimize;

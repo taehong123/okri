@@ -61,6 +61,7 @@ test("pairing is one-time and runner routes never use browser authorization", as
   assert.match(service, /claimed_at IS NULL AND expires_at > \?/);
   assert.match(service, /hashLocalAgentSecret\(token\)/);
   assert.match(service, /eq\(workspaceMembers\.status, "active"\)/);
+  assert.doesNotMatch(service, /CREATE TABLE IF NOT EXISTS local_agent/i);
   assert.match(nextRoute, /authorizeLocalAgentDevice/);
   assert.match(reportRoute, /authorizeLocalAgentDevice/);
   assert.doesNotMatch(nextRoute + reportRoute, /authorizeRequest/);

@@ -26,8 +26,6 @@ const MAX_CONTEXT_LENGTH = 24_000;
 const MAX_RESULT_LENGTH = 40_000;
 const PAIRING_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 
-let schemaPromise: Promise<void> | undefined;
-
 export class LocalAgentError extends Error {
   constructor(
     message: string,
@@ -42,81 +40,6 @@ export type LocalAgentDeviceAuthorization = Pick<
   LocalAgentDevice,
   "id" | "workspaceId" | "userId" | "name" | "platform"
 >;
-
-export async function ensureLocalAgentSchema() {
-  if (!schemaPromise) {
-    schemaPromise = createLocalAgentSchema().catch((error) => {
-      schemaPromise = undefined;
-      throw error;
-    });
-  }
-  await schemaPromise;
-}
-
-async function createLocalAgentSchema() {
-  const database = env.DB;
-  const statements = [
-    `CREATE TABLE IF NOT EXISTS local_agent_devices (
-      id TEXT PRIMARY KEY NOT NULL,
-      workspace_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      platform TEXT DEFAULT 'unknown' NOT NULL,
-      token_hash TEXT NOT NULL,
-      token_prefix TEXT NOT NULL,
-      last_seen_at TEXT,
-      revoked_at TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-    )`,
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_local_agent_devices_token_hash ON local_agent_devices(token_hash)",
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_devices_account ON local_agent_devices(workspace_id, user_id, revoked_at)",
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_devices_last_seen ON local_agent_devices(last_seen_at)",
-    `CREATE TABLE IF NOT EXISTS local_agent_pairings (
-      id TEXT PRIMARY KEY NOT NULL,
-      workspace_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      code_hash TEXT NOT NULL,
-      expires_at TEXT NOT NULL,
-      claimed_at TEXT,
-      device_id TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
-    )`,
-    "CREATE UNIQUE INDEX IF NOT EXISTS idx_local_agent_pairings_code_hash ON local_agent_pairings(code_hash)",
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_pairings_account ON local_agent_pairings(workspace_id, user_id, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_pairings_expiry ON local_agent_pairings(expires_at)",
-    `CREATE TABLE IF NOT EXISTS local_agent_jobs (
-      id TEXT PRIMARY KEY NOT NULL,
-      workspace_id TEXT NOT NULL,
-      user_id TEXT NOT NULL,
-      device_id TEXT,
-      target_kind TEXT NOT NULL CHECK (target_kind IN ('task', 'project')),
-      target_id TEXT NOT NULL,
-      target_title TEXT NOT NULL,
-      instruction TEXT NOT NULL,
-      context_json TEXT DEFAULT '{}' NOT NULL,
-      status TEXT DEFAULT 'queued' NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
-      lease_id TEXT,
-      lease_expires_at TEXT,
-      progress_text TEXT,
-      result_text TEXT,
-      error_text TEXT,
-      created_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      started_at TEXT,
-      completed_at TEXT,
-      updated_at TEXT DEFAULT CURRENT_TIMESTAMP NOT NULL,
-      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
-      FOREIGN KEY (device_id) REFERENCES local_agent_devices(id) ON DELETE SET NULL,
-      FOREIGN KEY (target_id) REFERENCES items(id) ON DELETE CASCADE
-    )`,
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_jobs_account ON local_agent_jobs(workspace_id, user_id, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_jobs_device_status ON local_agent_jobs(device_id, status, created_at)",
-    "CREATE INDEX IF NOT EXISTS idx_local_agent_jobs_target ON local_agent_jobs(workspace_id, target_kind, target_id, created_at)",
-  ];
-  await database.batch(statements.map((statement) => database.prepare(statement)));
-}
 
 export function normalizePairingCode(value: string) {
   return value.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -154,7 +77,6 @@ export function redactLocalAgentSecrets(value: string) {
 }
 
 export async function createLocalAgentPairing(authorization: RequestAuthorization) {
-  await ensureLocalAgentSchema();
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PAIRING_TTL_MS).toISOString();
   const code = randomPairingCode();
@@ -177,7 +99,6 @@ export async function createLocalAgentPairing(authorization: RequestAuthorizatio
 }
 
 export async function getLocalAgentPairingStatus(authorization: RequestAuthorization, id: string) {
-  await ensureLocalAgentSchema();
   const [pairing] = await getDb().select().from(localAgentPairings).where(and(
     eq(localAgentPairings.id, id),
     eq(localAgentPairings.workspaceId, authorization.ownerId),
@@ -189,7 +110,6 @@ export async function getLocalAgentPairingStatus(authorization: RequestAuthoriza
 }
 
 export async function claimLocalAgentPairing(input: { code: unknown; name: unknown; platform: unknown }) {
-  await ensureLocalAgentSchema();
   const code = normalizePairingCode(cleanLabel(input.code, "", 32));
   if (code.length !== 8) throw new LocalAgentError("The connection code is invalid or expired.", "invalid_pairing", 404);
   const codeHash = await hashLocalAgentSecret(code);
@@ -223,7 +143,6 @@ export async function claimLocalAgentPairing(input: { code: unknown; name: unkno
 }
 
 export async function authorizeLocalAgentDevice(request: Request): Promise<LocalAgentDeviceAuthorization | Response> {
-  await ensureLocalAgentSchema();
   const token = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "").trim() ?? "";
   if (!token.startsWith("okri_local_") || token.length < 40) {
     return Response.json({ error: "A local runner token is required.", code: "device_auth_required" }, { status: 401 });
@@ -271,7 +190,6 @@ function serializeDevice(device: LocalAgentDevice, now = Date.now()) {
 }
 
 export async function listLocalAgentDevices(authorization: RequestAuthorization) {
-  await ensureLocalAgentSchema();
   const devices = await getDb().select().from(localAgentDevices).where(and(
     eq(localAgentDevices.workspaceId, authorization.ownerId),
     eq(localAgentDevices.userId, authorization.userId),
@@ -280,7 +198,6 @@ export async function listLocalAgentDevices(authorization: RequestAuthorization)
 }
 
 export async function revokeLocalAgentDevice(authorization: RequestAuthorization, id: string) {
-  await ensureLocalAgentSchema();
   const now = new Date().toISOString();
   const result = await env.DB.prepare(`UPDATE local_agent_devices SET revoked_at = ?, updated_at = ?
     WHERE id = ? AND workspace_id = ? AND user_id = ? AND revoked_at IS NULL`)
@@ -332,7 +249,6 @@ export async function createLocalAgentJob(authorization: RequestAuthorization, i
   targetId: unknown;
   instruction: unknown;
 }) {
-  await ensureLocalAgentSchema();
   const deviceId = cleanLabel(input.deviceId, "", 80);
   const targetId = cleanLabel(input.targetId, "", 80);
   const targetKind = input.targetKind === "task" || input.targetKind === "project" ? input.targetKind : "";
@@ -392,7 +308,6 @@ function serializeJob(job: LocalAgentJob) {
 }
 
 export async function listLocalAgentJobs(authorization: RequestAuthorization, filter: { targetKind?: string; targetId?: string }) {
-  await ensureLocalAgentSchema();
   const conditions = [
     eq(localAgentJobs.workspaceId, authorization.ownerId),
     eq(localAgentJobs.userId, authorization.userId),
@@ -425,7 +340,6 @@ ${job.instruction}`;
 }
 
 export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization) {
-  await ensureLocalAgentSchema();
   const now = new Date();
   const nowIso = now.toISOString();
   await env.DB.prepare(`UPDATE local_agent_jobs SET status = 'queued', lease_id = NULL, lease_expires_at = NULL,
@@ -462,7 +376,6 @@ export async function reportLocalAgentJob(device: LocalAgentDeviceAuthorization,
   resultText?: unknown;
   errorText?: unknown;
 }) {
-  await ensureLocalAgentSchema();
   const id = cleanLabel(input.id, "", 80);
   const leaseId = cleanLabel(input.leaseId, "", 80);
   const status = input.status === "running" || input.status === "completed" || input.status === "failed" ? input.status : "";
