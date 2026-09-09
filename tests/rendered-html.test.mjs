@@ -135,6 +135,9 @@ test("Google OAuth keeps callback cookies on both official domains", async () =>
   assert.equal(oauthModule.googleRedirectUri(runtime, new Request("https://okri.ai/api/auth/google")), "https://okri.ai/api/google/callback");
   assert.equal(oauthModule.googleRedirectUri(runtime, new Request("https://okrptr.com/api/auth/google")), "https://okrptr.com/api/google/callback");
   assert.equal(oauthModule.googleRedirectUri(runtime, new Request("http://localhost/api/auth/google")), "https://okri.ai/api/google/callback");
+  assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("https://okri.ai/api/auth/google"), "/?view=scrum"), null);
+  assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("https://okrptr.com/api/auth/google"), "/?view=scrum"), null);
+  assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("https://okri.taehong0613.chatgpt.site/api/auth/google"), "/?view=scrum"), "https://okri.ai/api/auth/google?returnTo=%2F%3Fview%3Dscrum");
 });
 
 test("ships product metadata and removes starter assets", async () => {
@@ -433,6 +436,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(googleSession, /readGoogleSignInState/);
   assert.doesNotMatch(googleSession, /readGoogleBrowserSignInState/);
   assert.match(googleSignInRoute, /googleSignInAuthorizationUrl/);
+  assert.match(googleSignInRoute, /googleCanonicalSignInUrl/);
   assert.match(googleSignInRoute, /createGoogleSignInState/);
   assert.doesNotMatch(googleSignInRoute, /createGoogleOAuthState/);
   assert.match(googleSignInRoute, /"Set-Cookie": signIn\.cookie/);
