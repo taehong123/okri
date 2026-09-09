@@ -46,7 +46,7 @@ test("runner denies escalation and network access", async () => {
 });
 
 test("database stores hashes and excludes local paths, Codex credentials, and thread ids", async () => {
-  const migration = await read("../drizzle/0058_local_agent.sql");
+  const migration = await read("../drizzle/0059_local_agent.sql");
   assert.equal(migration.includes("\r"), false, "migration must remain LF-only");
   assert.match(migration, /token_hash` text NOT NULL/i);
   assert.match(migration, /CHECK \(`target_kind` IN \('task', 'project'\)\)/);

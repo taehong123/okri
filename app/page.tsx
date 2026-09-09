@@ -78,6 +78,8 @@ import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
 import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
+import { FirstRunSetup } from "./first-run-setup";
+import { canAutoOpenSetup, type OnboardingState } from "@/lib/onboarding";
 import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView from "./billing-view";
 import GanttView from "./gantt-view";
@@ -158,7 +160,7 @@ type GroupVisibility = "open" | "private";
 type GroupRole = "lead" | "member";
 type WorkspaceSettingsTab = "general" | "members" | "groups" | "projects" | "summary" | "integrations" | "backups" | "danger" | "scheduled";
 type ItemAssignmentRole = "project_dri" | "project_worker" | "task_assignee";
-type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local"; preferences?: LanguagePreferences };
+type AuthUser = { id: string; email: string | null; displayName: string; provider: "google" | "local"; preferences?: LanguagePreferences; onboarding?: OnboardingState | null };
 type AuthState = { status: "loading" | "authenticated" | "unauthenticated"; user: AuthUser | null; reason: string | null };
 
 
@@ -942,6 +944,8 @@ function WorkspaceApp() {
   const [integrationStatusAttempt, setIntegrationStatusAttempt] = useState(0);
   const [integrationStatusError, setIntegrationStatusError] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [setupOpen, setSetupOpen] = useState(false);
+  const setupHandledAccount = useRef<string | null>(null);
   const [authState, setAuthState] = useState<AuthState>({ status: "loading", user: null, reason: null });
   const [workspaceDataState, setWorkspaceDataState] = useState<"loading" | "ready" | "error">("loading");
   const [freshWorkspaceDataReady, setFreshWorkspaceDataReady] = useState(false);
@@ -1006,7 +1010,7 @@ function WorkspaceApp() {
       const activeCycle = data.cycles.find((cycle) => cycle.status === "active") ?? data.cycles[0];
       setVisibleOkrCycleIds(activeCycle ? [activeCycle.id] : []);
       const currentMember = data.team.members.find((member) => member.isCurrent && member.status === "active");
-      if (currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
+      if (!data.user.onboarding && currentMember && memberNameNeedsConfirmation(currentMember) && window.localStorage.getItem(profileNameConfirmationKey(currentMember)) !== currentMember.displayName) {
         setProfilePromptMember(currentMember);
       }
       setAuthState({ status: "authenticated", user: data.user, reason: null });
@@ -1504,6 +1508,16 @@ function WorkspaceApp() {
   }, [activeView, items, selectedProjectId, selectedTaskId, showNotice, workspaceDataState, hydrateSearchResult]);
 
   useEffect(() => {
+    const user = authState.user;
+    if (!freshWorkspaceDataReady || !user || setupHandledAccount.current === user.id) return;
+    if (user.onboarding?.status !== "active" || !canAutoOpenSetup(window.location.search, window.location.hash)) return;
+    setupHandledAccount.current = user.id;
+    const timer = window.setTimeout(() => setSetupOpen(true), 0);
+    return () => window.clearTimeout(timer);
+  }, [authState.user, freshWorkspaceDataReady]);
+
+  useEffect(() => {
+    if (authState.user?.onboarding) return;
     if (!freshWorkspaceDataReady || !currentWorkspace || currentWorkspace.role !== "owner" || hasActiveObjective) return;
     const navigationParams = new URLSearchParams(window.location.search);
     if (navigationParams.has("view") || navigationParams.has("project") || navigationParams.has("task")) return;
@@ -1526,7 +1540,7 @@ function WorkspaceApp() {
       setActiveView("home");
     }, 0);
     return () => window.clearTimeout(timeout);
-  }, [currentWorkspace, freshWorkspaceDataReady, hasActiveObjective, selectedOkrCycle]);
+  }, [authState.user?.onboarding, currentWorkspace, freshWorkspaceDataReady, hasActiveObjective, selectedOkrCycle]);
 
   function openAssistant() {
     const cycle = selectedOkrCycle;
@@ -2377,11 +2391,12 @@ function WorkspaceApp() {
         </header>
         <div className="page-body">
           {languageRecovery}
-          <MarketingConsentPrompt
+          {!setupOpen && authState.user?.onboarding?.status !== "active" && <MarketingConsentPrompt
             key={authState.user?.id ?? ""}
             userId={authState.user?.id ?? ""}
             onNotice={(message) => showNotice(message, "error")}
-          />
+          />}
+          {!setupOpen && authState.user?.onboarding && authState.user.onboarding.status !== "completed" && <button type="button" onClick={() => setSetupOpen(true)}>{t("처음 설정 이어하기")}<ChevronRight size={14} /></button>}
           {activeView !== "home" && !selectedProject && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1>{activeView !== "okr" && <p>{activeView === "billing" ? `${currentWorkspace?.name ?? ""} · ${pageSubtitle(activeView)}` : pageSubtitle(activeView)}</p>}</div>
             {activeView === "okr" ? (
@@ -2553,6 +2568,7 @@ function WorkspaceApp() {
       )}
       {onboardingOpen && (
         <WelcomeModal
+          onSetup={() => { setOnboardingOpen(false); setSetupOpen(true); }}
           language={language.language}
           onLanguageChange={(choice) => {
             if (!authState.user) return;
@@ -2572,6 +2588,25 @@ function WorkspaceApp() {
           }}
         />
       )}
+      {setupOpen && authState.user && <FirstRunSetup
+        key={authState.user.id}
+        initial={authState.user.onboarding ?? null}
+        workspaces={workspaces}
+        onState={(onboarding) => setAuthState((current) => current.user && current.user.id === authState.user?.id ? { ...current, user: { ...current.user, onboarding } } : current)}
+        onClose={() => setSetupOpen(false)}
+        onFinish={async (onboarding, destination) => {
+          if (onboarding.workspaceId) {
+            const response = await fetch("/api/workspaces", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ workspaceId: onboarding.workspaceId }) });
+            if (!response.ok) throw new Error("workspace_unavailable");
+          }
+          clearCachedBootstrap();
+          const target = new URL(window.location.pathname, window.location.origin);
+          const view = destination === "projects" ? "work" : destination === "work" ? "my_work" : destination === "members" || destination === "integrations" ? "okr" : destination;
+          target.searchParams.set("view", view);
+          if (destination === "members" || destination === "integrations") { target.searchParams.set("settings", "workspace"); target.searchParams.set("tab", destination); }
+          window.location.assign(target.toString());
+        }}
+      />}
       {inviteToken && <InvitationDialog
         token={inviteToken}
         preview={invitePreview}
@@ -2803,11 +2838,12 @@ function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
   );
 }
 
-function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
+function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp, onSetup }: {
   language: IntroLanguage;
   onLanguageChange: (language: IntroLanguage) => void;
   onClose: () => void;
   onOpenMcp: () => void;
+  onSetup: () => void;
 }) {
   const copy = getIntroCopy(t);
   const pointIcons = [Bot, Table2, CalendarCheck];
@@ -2842,6 +2878,7 @@ function WelcomeModal({ language, onLanguageChange, onClose, onOpenMcp }: {
           </div>
         </div>
         <footer className="welcome-actions">
+          <button className="welcome-secondary" onClick={onSetup}>{t("처음부터 함께 설정하기")}</button>
           <button className="welcome-secondary" onClick={onOpenMcp}><Bot size={14} />{copy.mcpAction}</button>
           <button className="welcome-primary" onClick={() => requestClose("close-button")}>{copy.startAction}<ChevronRight size={14} /></button>
         </footer>

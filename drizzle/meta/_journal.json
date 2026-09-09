@@ -362,8 +362,15 @@
     {
       "idx": 51,
       "version": "6",
+      "when": 1788926073522,
+      "tag": "0058_account_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 52,
+      "version": "6",
       "when": 1788933600000,
-      "tag": "0058_local_agent",
+      "tag": "0059_local_agent",
       "breakpoints": true
     }
   ]

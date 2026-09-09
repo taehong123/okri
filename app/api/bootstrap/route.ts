@@ -1,5 +1,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { languageForBootstrap } from "@/lib/language-preferences";
+import { readOnboarding } from "@/lib/account-onboarding";
 import {
   authorizeRequest,
   canManageTeam,
@@ -35,12 +36,13 @@ export async function GET(request: Request) {
     const provider = hostname === "localhost" || hostname === "127.0.0.1" ? "local" : "google";
 
     const loadShell = async () => {
-      const [workspaces, rules, cycles, team, preferences] = await Promise.all([
+      const [workspaces, rules, cycles, team, preferences, onboarding] = await Promise.all([
         listUserWorkspaces(authorization.userId, authorization.ownerId),
         getWorkspaceRules(authorization.ownerId),
         listOkrCycles(authorization.ownerId),
         getTeam(authorization.ownerId, authorization.userId),
         languageForBootstrap(env.DB, authorization.userId, request),
+        authorization.apiToken ? Promise.resolve({ state: null }) : readOnboarding(env.DB, authorization.userId),
       ]);
       return {
         user: {
@@ -49,6 +51,7 @@ export async function GET(request: Request) {
         displayName: authorization.displayName,
         provider,
         preferences,
+        onboarding: onboarding.state,
         },
         workspaces,
         rules,

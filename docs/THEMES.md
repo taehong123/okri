@@ -1,5 +1,22 @@
 # OKRI design and theme contract
 
+## First-login setup
+
+- `app/first-run-setup.tsx` uses the existing dialog, Pretendard and semantic
+  typography/field/focus roles. One conversational question is shown at a time:
+  personal/team, workspace, Objective, KR, optional Initiative, review, feature guide.
+- Examples are placeholders, never persisted sample data. The final review
+  contains the user's answers; edits clear its confirmation checkbox.
+- `app/first-run-setup.css` is a focused form surface, not another theme.
+  No viewport font scaling, decorative banner, nested cards or new palette.
+- Close saves and pauses while preserving the underlying business route.
+  Existing accounts and invitation/OAuth/detail links are not intercepted.
+- Drafts belong to the account, not browser storage. New accounts opt in during
+  registration; legacy NULL values never automatically start setup.
+- `tests/onboarding.test.mjs` covers migration, atomic writes, access, conflict
+  and retries. `tests/e2e/onboarding.spec.ts` verifies personal/team/resume/viewer,
+  response-loss and responsive flows with mocked writes.
+
 ## Design source and structure preservation
 
 The upstream design source is [ALLVIBE Design v1.0.0](https://github.com/all-vibe/all-vibe-agent-toolkit/blob/4f927714f728abcbe8920a3c39aad49692758c46/plugins/all-vibe-design/skills/all-vibe-design/SKILL.md), shared by 조성배 on 2026-08-24.

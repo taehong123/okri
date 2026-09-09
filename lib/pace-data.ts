@@ -2640,7 +2640,8 @@ async function canonicalUserIdForGoogle(subject: string, emailInput: string, dis
   const [emailUser] = await getDb().select().from(users).where(eq(users.emailNormalized, email)).limit(1);
   const userId = emailUser?.id ?? crypto.randomUUID();
   if (!emailUser) {
-    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), createdAt: now, updatedAt: now }).onConflictDoNothing();
+    const { initialOnboarding } = await import("@/lib/onboarding");
+    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), onboardingState: JSON.stringify(initialOnboarding()), createdAt: now, updatedAt: now }).onConflictDoNothing();
   }
   await getDb().insert(authIdentities).values({
     id: crypto.randomUUID(),
