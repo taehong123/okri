@@ -23,21 +23,59 @@
 
 .gantt-range-control {
   min-width: 0;
-  gap: var(--space-1);
+  gap: var(--space-3);
 }
 
 .gantt-range-control > strong {
   min-width: 0;
-  margin-inline-start: var(--space-2);
   color: var(--text-primary);
   font-size: var(--type-label);
   font-weight: 650;
   font-variant-numeric: tabular-nums;
 }
 
-.gantt-range-control > .secondary {
+.gantt-range-navigation {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: stretch;
+  overflow: hidden;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-control);
+  background: var(--bg-surface);
+}
+
+.gantt-range-navigation > button {
+  min-width: var(--control-height);
   min-height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-1);
+  padding: 0 var(--space-2);
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+  cursor: pointer;
+}
+
+.gantt-range-navigation > button + button {
+  border-inline-start: 1px solid var(--border-subtle);
+}
+
+.gantt-range-navigation > button:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.gantt-range-navigation > .gantt-today {
   padding-inline: var(--space-3);
+}
+
+.gantt-range-navigation > .gantt-today[aria-current="date"] {
+  background: var(--bg-subtle);
+  color: var(--text-primary);
+  font-weight: 650;
 }
 
 .gantt-zoom {
@@ -460,16 +498,15 @@
   }
 
   .gantt-range-control {
-    display: grid;
-    grid-template-columns: var(--control-height) auto var(--control-height) minmax(0, 1fr);
+    flex-wrap: wrap;
   }
 
   .gantt-range-control > strong {
-    margin-inline-start: var(--space-1);
+    flex: 1 1 9rem;
     white-space: normal;
   }
 
-  .gantt-range-control > button,
+  .gantt-range-navigation > button,
   .gantt-zoom button,
   .gantt-expand,
   .gantt-milestone {
@@ -494,7 +531,7 @@
   }
 
   .gantt-scroll {
-    --gantt-label-width: min(12rem, 54vw);
+    --gantt-label-width: min(15rem, 68vw);
     margin-inline: calc(var(--space-4) * -1);
     border-inline: 0;
     border-radius: 0;

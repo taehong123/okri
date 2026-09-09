@@ -100,7 +100,7 @@ function assigneeLabel(project: GanttItem) {
 }
 
 export default function GanttView({ items, onOpenProject, onOpenTask }: GanttViewProps) {
-  const language = useLanguage().language;
+  useLanguage();
   const today = useMemo(() => localToday(), []);
   const todayIso = isoDate(today);
   const [zoom, setZoom] = useState<Zoom>("fortnight");
@@ -122,14 +122,14 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
     for (const tasks of result.values()) tasks.sort((left, right) => (left.dueDate ?? "9999-12-31").localeCompare(right.dueDate ?? "9999-12-31") || left.title.localeCompare(right.title));
     return result;
   }, [items]);
-  const [expanded, setExpanded] = useState(() => new Set(projects.map((project) => project.id)));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const { start, end } = useMemo(() => rangeFor(anchor, zoom), [anchor, zoom]);
   const days = useMemo(() => Array.from({ length: dateDifference(start, end) + 1 }, (_, index) => addDays(start, index)), [start, end]);
   const overdueCount = projects.filter((project) => project.dueDate && project.dueDate < todayIso && !isComplete(project.status)).length;
   const undatedCount = projects.filter((project) => !project.dueDate).length;
   const locale = getClientLocale();
-  const weekdayFormat = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" }), [locale, language]);
-  const dateFormat = useMemo(() => new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", timeZone: "UTC" }), [locale, language]);
+  const weekdayFormat = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" }), [locale]);
+  const dateFormat = useMemo(() => new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", timeZone: "UTC" }), [locale]);
   const timelineStyle = { "--gantt-day-count": days.length, "--gantt-day-width": zoom === "fortnight" ? "3.5rem" : "2.25rem" } as CSSProperties;
 
   function moveRange(direction: -1 | 1) {
@@ -154,9 +154,11 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
     <section className="gantt-view" aria-label={t("Project 일정")}>
       <header className="gantt-toolbar">
         <div className="gantt-range-control">
-          <button className="icon-button" type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
-          <button className="secondary" type="button" onClick={() => setAnchor(today)}>{t("오늘")}</button>
-          <button className="icon-button" type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
+          <div className="gantt-range-navigation" role="group" aria-label={t("날짜")}>
+            <button type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
+            <button className="gantt-today" type="button" aria-current={isoDate(anchor) === todayIso ? "date" : undefined} onClick={() => setAnchor(today)}><CalendarDays size={14} />{t("오늘")}</button>
+            <button type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
+          </div>
           <strong>{rangeLabel(start, end, locale)}</strong>
         </div>
         <div className="gantt-zoom" role="group" aria-label={t("일정 범위")}>
