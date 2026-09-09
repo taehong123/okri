@@ -54,8 +54,16 @@ test("Slack thread images can be supplied to the agent without exposing the bot 
 test("Slack thread images use complete message metadata without files.info", async () => {
   slackFileInfo = {};
   const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, options) => {
+  let calls = 0;
+  globalThis.fetch = async (url, options) => {
+    calls += 1;
     assert.equal(options.headers.Authorization, "Bearer xoxb-agent");
+    assert.equal(options.redirect, "manual");
+    if (calls === 1) {
+      assert.match(String(url), /^https:\/\/files\.slack\.com\//);
+      return new Response(null, { status: 302, headers: { location: "https://slack-files.com/download/signed-image" } });
+    }
+    assert.equal(String(url), "https://slack-files.com/download/signed-image");
     return new Response(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), { status: 200 });
   };
   try {
@@ -100,7 +108,7 @@ test("Slack images are copied to private Project storage without persisting Slac
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (_url, options) => {
     assert.equal(options.headers.Authorization, "Bearer xoxb-secret");
-    assert.equal(options.redirect, "error");
+    assert.equal(options.redirect, "manual");
     return new Response(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), { status: 200 });
   };
   try {

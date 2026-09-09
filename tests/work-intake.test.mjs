@@ -141,6 +141,7 @@ test("Unsure stays undecided; Routine does not need an Initiative or invented ta
 
 test("referenced conversation placeholders are rejected while concrete repair work remains valid", () => {
   for (const input of [
+    { title: "문의 내용 확인" },
     { title: "스레드 업무 내용 확인" },
     { title: "스레드 원문 확인" },
     { title: "업무 정리", description: "원본 스레드를 읽지 못해 내용이 보이면 다시 정리합니다." },

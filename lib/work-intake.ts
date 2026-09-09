@@ -7,12 +7,15 @@ const KOREAN_MISSING_CONTEXT_REPORT = /(?:원본\s*)?(?:스레드|대화|원문|
 const ENGLISH_MISSING_CONTEXT_REPORT = /(?:(?:thread|conversation|context|message)[\s\S]{0,100}(?:not\s+(?:available|provided|visible)|becomes?\s+available)|(?:could(?:\s+not|n't)|unable\s+to)\s+(?:read|access|see)[\s\S]{0,60}(?:thread|conversation|context|message))/iu;
 const CONCRETE_REPAIR_WORK = /(?:수정|고치|해결|구현|지원|복구|조사|디버그|fix|resolve|implement|support|restore|investigate|debug)/iu;
 
+const GENERIC_INQUIRY_PLACEHOLDER = /^(?:문의|요청)\s*(?:내용|원문)?\s*(?:확인|파악|검토)(?:하기)?$/u;
+
 export function assertConcreteWorkInput(input: { title: string; description?: string }) {
   const title = input.title.trim();
   const combined = `${title}\n${input.description ?? ""}`;
   const unresolvedReference = KOREAN_MISSING_CONTEXT_REPORT.test(combined)
     || ENGLISH_MISSING_CONTEXT_REPORT.test(combined);
   if (GENERIC_CONTEXT_PLACEHOLDER.test(title)
+    || GENERIC_INQUIRY_PLACEHOLDER.test(title)
     || (unresolvedReference && !CONCRETE_REPAIR_WORK.test(title))) {
     throw new Error(
       "Referenced conversation content was not included in this tool call, so nothing was saved. "
