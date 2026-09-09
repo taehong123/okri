@@ -208,6 +208,12 @@ export async function saveSlackProjectImages(input: {
 }
 
 async function hydrateSlackFile(token: string, reference: SlackImageFile): Promise<SlackImageFile | null> {
+  if (reference.id
+    && reference.mimeType.startsWith("image/")
+    && reference.size > 0
+    && slackDownloadUrl(reference.urlPrivateDownload)) {
+    return reference;
+  }
   const result = await slackApi<SlackFileInfoResult>(token, "files.info", { file: reference.id });
   const file = result.file;
   if (!file?.id || !String(file.mimetype ?? "").startsWith("image/")) return null;
