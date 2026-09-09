@@ -83,6 +83,39 @@ test("Project and Routine are peer groups with only child Tasks selectable", asy
   await page.screenshot({ path: testInfo.outputPath("personal-daily.png"), fullPage: true });
 });
 
+test("a shared Daily enables reshare only after its content changes", async ({ page }) => {
+  await installApiMocks(page, { teamWorkspace: true });
+  const work = [
+    { id: "task-a", key: "task:task-a", kind: "task", title: "고객 인터뷰", parentId: "project", parentKind: "project", parentTitle: "서비스 개선", dueDate: null },
+    { id: "task-b", key: "task:task-b", kind: "task", title: "인터뷰 정리", parentId: "project", parentKind: "project", parentTitle: "서비스 개선", dueDate: null },
+  ];
+  let draft = { id: "draft", date: "2026-09-09", yesterdayNote: "", todayNote: "오늘 진행", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false, selectedTaskIds: ["task-a", "task-b"], selectedWorkIds: ["task:task-a", "task:task-b"], selectedYesterdayWorkIds: [] as string[] };
+  const latestSubmission = { id: "submission-v1", memberId: "member-1", memberName: "테스트 사용자", memberEmail: "test@example.test", date: draft.date, version: 1,
+    yesterdayNote: "", todayNote: "오늘 진행", blockersNote: "", noPlannedTasks: false, skipReason: null, skipNote: "", source: "web", submittedAt: "2026-09-09T01:00:00.000Z",
+    tasks: work.map((task, index) => ({ id: `snapshot-${index}`, taskId: task.id, taskTitle: task.title, parentKind: "project", parentId: "project", parentTitle: "서비스 개선", status: "todo", isNew: false, sortOrder: index })), work: [], yesterdayWork: [] };
+  const writes: Array<{ path: string; body: Record<string, unknown> }> = [];
+  await page.route(/\/api\/daily-scrum(?:\/|\?|$)/, async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON(); writes.push({ path, body }); draft = { ...draft, ...body };
+    } else if (path.endsWith("/submit")) {
+      writes.push({ path, body: route.request().postDataJSON() });
+      return route.fulfill({ json: { submission: { ...latestSubmission, id: "submission-v2", version: 2 } } });
+    }
+    return route.fulfill({ json: { date: draft.date, draft, member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, candidates: { work, yesterdayWork: [], tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: false }, team: [], latestSubmission, legacyWorkspaceNote: null } });
+  });
+
+  await page.goto("/?view=scrum");
+  await expect(page.getByText("항목을 추가하거나 빼고 다시 공유하면 기존 Slack 메시지가 업데이트됩니다.")).toBeVisible();
+  await expect(page.getByRole("button", { name: "변경사항 없음", exact: true })).toBeDisabled();
+  await page.getByRole("checkbox", { name: "인터뷰 정리 선택", exact: true }).uncheck();
+  await expect(page.getByRole("button", { name: "수정 반영 및 다시 공유", exact: true })).toBeEnabled();
+  await page.getByRole("button", { name: "수정 반영 및 다시 공유", exact: true }).click();
+  await expect.poll(() => writes.length).toBe(2);
+  expect(writes[0]).toMatchObject({ path: "/api/daily-scrum", body: { selectedWorkIds: ["task:task-a"], selectedTaskIds: ["task-a"] } });
+  expect(writes[1].path).toBe("/api/daily-scrum/submit");
+});
+
 test("submitted completed Tasks show their Project or Routine context", async ({ page }) => {
   await installApiMocks(page, { teamWorkspace: true });
   const submission = {

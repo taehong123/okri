@@ -17,6 +17,7 @@ function compile(source, deps = {}) {
   return loaded.exports;
 }
 const work = compile(await read("../lib/daily-work.ts"));
+const { dailyRevisionChanged } = compile(await read("../lib/daily-revision.ts"));
 const workStatus = compile(await read("../lib/daily-work-status.ts"));
 const form = compile(await read("../lib/slack-daily-form.ts"), { "@/lib/daily-work-status": workStatus });
 const matching = compile(await read("../lib/slack-member-matching.ts"));
@@ -35,6 +36,36 @@ const persistenceSource = paceAst.statements.filter((node) =>
     : ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => persistenceNames.has(d.name.getText(paceAst))))
   .map((node) => node.getText(paceAst)).join("\n");
 const realSchema = compile(await read("../db/schema.ts"), { "drizzle-orm": require("drizzle-orm"), "drizzle-orm/sqlite-core": require("drizzle-orm/sqlite-core") });
+
+test("daily revisions detect content changes without depending on selection order", () => {
+  const submission = {
+    yesterdayNote: "완료 메모",
+    todayNote: "오늘 메모",
+    blockersNote: "",
+    noPlannedTasks: false,
+    skipReason: null,
+    skipNote: "",
+    tasks: [{ taskId: "task-a" }, { taskId: "task-b" }],
+    work: [{ key: "project:one" }, { key: "task:completed", completedToday: true }],
+    yesterdayWork: [{ key: "task:done" }],
+  };
+  const draft = {
+    yesterdayNote: " 완료 메모 ",
+    todayNote: "오늘 메모",
+    blockersNote: "",
+    noPlannedTasks: false,
+    skipReason: null,
+    skipNote: "",
+    selectedTaskIds: ["task-a", "task-b"],
+    selectedWorkIds: ["task:task-b", "project:one", "task:task-a"],
+    selectedYesterdayWorkIds: ["task:done"],
+  };
+
+  assert.equal(dailyRevisionChanged(draft, submission), false);
+  assert.equal(dailyRevisionChanged({ ...draft, selectedWorkIds: ["task:task-a"] }, submission), true);
+  assert.equal(dailyRevisionChanged({ ...draft, todayNote: "바뀐 오늘 메모" }, submission), true);
+  assert.equal(dailyRevisionChanged(draft, null), true);
+});
 
 function realTaskPersistence(d1) {
   const { drizzle } = require("drizzle-orm/d1");
