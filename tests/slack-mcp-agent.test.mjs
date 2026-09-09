@@ -34,6 +34,8 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /never ask the user to repeat a title or work description/);
   assert.match(agent, /Slack MCP thread read failed/);
   assert.match(agent, /requiredThreadScope/);
+  assert.match(agent, /if \(!threadHasSourceContent && needsMissingThreadSource\)/);
+  assert.ok(agent.indexOf("if (!threadHasSourceContent && needsMissingThreadSource)") < agent.indexOf("const preparation = await client.request"));
 });
 
 test("Slack MCP OAuth covers public, private, direct, and group-direct thread history", async () => {

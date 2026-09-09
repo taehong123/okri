@@ -4,7 +4,7 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { listRoutineProperties } from "@/lib/routine-properties";
 import { arrayBufferToBase64, getProjectImage, getProjectImageCounts, listProjectImages } from "@/lib/project-images";
-import { isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
+import { assertConcreteWorkInput, isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
 import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
   LEGACY_MCP_CREATE_ITEM_CONFIRM_PREFIX, MCP_CREATE_ITEM_CONFIRM_PREFIX, mcpProjectConfirmationSchema,
@@ -347,7 +347,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okri", version: "0.9.0" },
+    { name: "okri", version: "0.9.1" },
     {
       instructions:
         [
@@ -427,6 +427,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       };
     }
     if (!input.title) throw new Error("title is required to propose a Project.");
+    assertConcreteWorkInput({ title: input.title, description: input.description });
     const review = await stageMcpProjectReview(authorization, {
       title: input.title, description: input.description, status: input.status, priority: input.priority,
       cadence: input.cadence, progress: input.progress, dueDate: input.due_date,
@@ -529,19 +530,20 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "capture_item",
     {
       title: "Capture unclassified work to OKRI",
-      description: "Save one explicitly requested, clear Task to General when no Project/Routine is known. Do not use for mere discussion, a Project/Routine idea, or unresolved Task-vs-Project classification; use prepare_work for those. If a container is known use create_item with its ID.",
+      description: "Save one explicitly requested, concrete Task to General when no Project/Routine is known. When the user refers to this/above/the current thread, the host model must extract the actual work from conversation messages visible to it and pass that concrete content here. The MCP server cannot fetch a host conversation transcript from a message ID. If the source messages are not visible, do not call any write tool and do not create a placeholder Task. Do not use for mere discussion, a Project/Routine idea, or unresolved Task-vs-Project classification; use prepare_work for those. If a container is known use create_item with its ID.",
       inputSchema: {
         title: z.string().trim().min(1).max(500).describe("Short actionable title in the user's language"),
-        description: z.string().optional().describe("Useful context from the conversation"),
+        description: z.string().optional().describe("Concrete details extracted from conversation messages visible to the host model; never a note saying the source could not be read"),
         due_date: dueDateInput.optional(),
         priority: z.enum(ITEM_PRIORITIES).optional(),
-        source_ref: z.string().optional().describe("Message or conversation identifier for traceability"),
+        source_ref: z.string().optional().describe("Optional identifier for traceability only; it does not let the MCP server fetch the host conversation transcript"),
         assignee_member_id: memberIdInput.optional().describe("Active workspace member ID for the single Task assignee"),
       },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async ({ title, description, due_date, priority, source_ref, assignee_member_id }) => {
+      assertConcreteWorkInput({ title, description });
       await validateMcpMembers(ownerId, [assignee_member_id]);
       const item = await createItem(ownerId, {
         title,
@@ -566,7 +568,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save a correctly classified Task or OKR item. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id; this completes creation even when confirm_project is absent from an older client tool list. Keep the internal value private. Never ask the user to copy a review ID, open a new chat, mention @OKRI, or visit a browser approval page.",
+      description: "Save a correctly classified, concrete Task or OKR item. If the user refers to this/above/the current thread, use the conversation messages visible to the host model; this MCP server cannot fetch the host transcript itself. Never create a placeholder for missing context. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id; this completes creation even when confirm_project is absent from an older client tool list. Keep the internal value private. Never ask the user to copy a review ID, open a new chat, mention @OKRI, or visit a browser approval page.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
@@ -589,6 +591,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
+      assertConcreteWorkInput({ title: input.title, description: input.description });
       if (input.kind === "project") {
         assertMcpAssignmentFields(input);
         if (input.routine_id) throw new Error("Projects cannot belong to a Routine");
@@ -743,7 +746,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "create_tasks",
     {
       title: "Create multiple explicitly requested Tasks together",
-      description: "Save 1–50 explicitly supplied Task titles sharing one Project/Routine, assignee, due date, priority and cadence in one batch. Do not invent Tasks from a Project idea. For different per-Task fields or descriptions use create_item. Returns saved records; no follow-up list is needed.",
+      description: "Save 1–50 explicitly supplied, concrete Task titles sharing one Project/Routine, assignee, due date, priority and cadence in one batch. When the user refers to earlier conversation content, use only messages visible to the host model; never create placeholders for unavailable context. Do not invent Tasks from a Project idea. For different per-Task fields or descriptions use create_item. Returns saved records; no follow-up list is needed.",
       inputSchema: {
         titles: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
         parent_id: memberIdInput.optional().describe("Existing Project ID; mutually exclusive with routine_id"),
@@ -757,6 +760,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
+      for (const title of input.titles) assertConcreteWorkInput({ title });
       const rows = await createLinkedTasks(ownerId, {
         titles: input.titles, projectId: input.parent_id, routineId: input.routine_id,
         assigneeMemberId: input.assignee_member_id, dueDate: input.due_date,
