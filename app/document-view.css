@@ -62,6 +62,10 @@
 .project-detail-panel .project-document-section > header { border-bottom: 0; }
 .project-detail-panel .project-block-editor:not(:has([contenteditable="true"])) { min-height: 0; padding-bottom: var(--space-6); }
 .project-detail-panel .project-block-editor [contenteditable="false"] { min-height: 0; }
+.work-document-section { border: 0; background: transparent; }
+.work-document-section > header { flex-direction: row; align-items: center; border: 0; background: transparent; }
+.work-document-section > header > div { flex: 1; min-width: 0; }
+.work-document-section > header > button { flex: 0 0 auto; }
 .work-document-section .project-block-editor:not(:has([contenteditable="true"])) { min-height: 0; padding-bottom: var(--space-6); }
 .work-document-section .project-block-editor [contenteditable="false"] { min-height: 0; }
 .routine-details > .work-document-section { margin-inline: 0; }

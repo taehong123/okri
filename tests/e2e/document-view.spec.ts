@@ -156,6 +156,8 @@ test("Task and Routine body changes are explicit and save through the shared edi
     if (kind === "routine") await page.locator(".routine-expand").click();
     const section = page.locator(".work-document-section");
     await expect(section.locator(".bn-editor")).toBeVisible();
+    await expect(section.locator(":scope > header")).toHaveCSS("flex-direction", "row");
+    await expect(section.locator(":scope > header")).toHaveCSS("border-bottom-width", "0px");
     await expect(section.locator('[contenteditable="true"]')).toHaveCount(0);
     await section.getByRole("button", { name: "변경", exact: true }).click();
     await section.locator('.bn-editor[contenteditable="true"]').fill(`${kind} 문서 본문 2026`);
