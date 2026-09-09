@@ -404,7 +404,6 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   if (event.threadTs && !collected.some((message) => message.ts && message.ts !== event.ts)) {
     const rootResult = await slackApi<SlackThreadResult>(token, "conversations.history", {
       channel: event.channel,
-      oldest: event.threadTs,
       latest: event.threadTs,
       inclusive: true,
       limit: 1,

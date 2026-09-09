@@ -107,7 +107,7 @@ test("Slack thread reading recovers the root when replies returns only the curre
     channel: "C1", channelType: "channel", user: "member-a", text: "이 스레드 정리해줘", ts: "2.0", threadTs: "1.0",
   });
   assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "conversations.history"]);
-  assert.deepEqual(requests[1].body, { channel: "C1", oldest: "1.0", latest: "1.0", inclusive: true, limit: 1 });
+  assert.deepEqual(requests[1].body, { channel: "C1", latest: "1.0", inclusive: true, limit: 1 });
   assert.equal(thread.messages[0].text, "고객 문의를 확인하고 수정한다");
   assert.equal(thread.imageFiles[0].id, "root-image");
 });
