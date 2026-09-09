@@ -201,6 +201,13 @@
 .project-task-table { max-width: 100%; }
 .project-task-row { min-width: 53rem; }
 .project-document-section > header { padding: var(--space-4) var(--editor-inset); }
+.work-document-section { border-top: 1px solid var(--border-default); }
+.work-document-section > header { border-bottom-color: var(--border-default); }
+.work-document-section .project-block-editor { min-height: 18rem; }
+.work-document-section .project-block-editor .bn-editor { min-height: 15rem; }
+.routine-details > .work-document-section { margin-inline: calc(-1 * var(--space-4)); }
+.routine-details > .work-document-section > header { padding-inline: var(--space-4); }
+.routine-details > .work-document-section .project-block-editor .bn-editor { padding-inline: var(--space-4); }
 .project-document-actions { flex-wrap: wrap; gap: var(--space-2) !important; min-width: 0; }
 .project-document-actions select { min-width: 0; max-width: 100%; flex: 1 1 10rem; }
 .project-document-actions button { white-space: normal; }

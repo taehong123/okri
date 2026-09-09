@@ -227,6 +227,7 @@ type PropertyDefinition = {
 };
 
 type ProjectDocument = { id: string | null; projectId: string; content: string; plainText: string; version: number; updatedAt: string };
+type WorkDocument = { id: string | null; targetKind: "task" | "routine"; targetId: string; content: string; plainText: string; version: number; updatedAt: string };
 type ProjectTemplate = { id: string; name: string; description: string; content: string; plainText: string; createdAt: string; updatedAt: string };
 type ProjectBlockEditorChange = { content: string; plainText: string };
 type ProjectDataConnection = {
@@ -3587,6 +3588,79 @@ function ProjectDocumentSection({ projectId, readOnly, onNotice }: { projectId: 
   </section>;
 }
 
+function WorkDocumentSection({ targetKind, targetId, readOnly, onNotice }: { targetKind: "task" | "routine"; targetId: string; readOnly: boolean; onNotice: (message: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [document, setDocument] = useState<WorkDocument | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [savingState, setSavingState] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const versionRef = useRef(0);
+  const savingRef = useRef(false);
+  const pendingChangeRef = useRef<ProjectBlockEditorChange | null>(null);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    let active = true;
+    const query = new URLSearchParams({ targetKind, targetId });
+    void fetch(`/api/work-documents?${query}`, { signal: controller.signal })
+      .then(async (response) => response.ok ? response.json() as Promise<{ document: WorkDocument }> : Promise.reject())
+      .then((data) => {
+        if (!active) return;
+        versionRef.current = data.document.version;
+        setDocument(data.document);
+      })
+      .catch((error: unknown) => {
+        if (active && !(error instanceof DOMException && error.name === "AbortError")) setSavingState("error");
+      })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; controller.abort(); };
+  }, [targetId, targetKind]);
+
+  async function flushDocumentSave() {
+    if (savingRef.current || !pendingChangeRef.current) return;
+    savingRef.current = true;
+    const change = pendingChangeRef.current;
+    pendingChangeRef.current = null;
+    setSavingState("saving");
+    let saved = false;
+    try {
+      const response = await fetch("/api/work-documents", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetKind, targetId, ...change, expectedVersion: versionRef.current }),
+      });
+      const data = await response.json().catch(() => ({})) as { document?: WorkDocument };
+      if (!response.ok || !data.document) {
+        if (!pendingChangeRef.current) pendingChangeRef.current = change;
+        setSavingState("error");
+        if (response.status === 409) onNotice(t("다른 변경이 먼저 저장되었습니다. 문서를 다시 불러와 주세요."));
+        return;
+      }
+      versionRef.current = data.document.version;
+      setDocument(data.document);
+      setSavingState("saved");
+      saved = true;
+      window.setTimeout(() => setSavingState((current) => current === "saved" ? "idle" : current), 1600);
+    } catch {
+      if (!pendingChangeRef.current) pendingChangeRef.current = change;
+      setSavingState("error");
+    } finally {
+      savingRef.current = false;
+      if (pendingChangeRef.current && saved) void flushDocumentSave();
+    }
+  }
+
+  function queueDocumentSave(change: ProjectBlockEditorChange) {
+    pendingChangeRef.current = change;
+    void flushDocumentSave();
+  }
+
+  const title = targetKind === "task" ? t("Task 문서") : t("Routine 문서");
+  return <section className="project-document-section work-document-section">
+    <header><div><b>{title}</b>{(editing || savingState !== "idle") && <span>{savingState === "saving" ? t("저장 중") : savingState === "saved" ? t("저장됨") : savingState === "error" ? t("저장 실패") : t("자동 저장")}</span>}</div>{!readOnly && <button type="button" className="secondary" disabled={loading || !document} aria-pressed={editing} onClick={() => setEditing(value => !value)}>{editing ? t("닫기") : t("변경")}</button>}</header>
+    {loading ? <div className="project-editor-loading"><LoaderCircle size={16} />{t("문서를 불러오는 중")}</div> : document ? <ClientProjectBlockEditor key={`${targetKind}:${targetId}`} initialContent={document.content} editable={!readOnly && editing} onChange={readOnly ? undefined : queueDocumentSave} /> : <div className="project-editor-error">{t("문서를 불러오지 못했습니다.")}</div>}
+  </section>;
+}
+
 function ProjectPropertyField({ projectId, property, value, members, readOnly, onChange, onHide }: { projectId: string; property: PropertyDefinition; value: PropertyValue; members: TeamMember[]; readOnly: boolean; onChange: (itemId: string, propertyId: string, value: PropertyValue) => Promise<void>; onHide: () => void }) {
   const memberIds = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
   const inputValue = property.type === "member" ? memberIds[0] ?? null : property.type === "members" ? memberIds : value;
@@ -3776,6 +3850,7 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
         </section>
         <div className="task-calendar-action"><button onClick={() => void syncCalendar()} disabled={readOnly || syncingCalendar || !task.dueDate}><CalendarDays size={13} />{syncingCalendar ? t("동기화 중") : t("Google Calendar에 보내기")}</button></div>
         </details>
+        <WorkDocumentSection key={`task-document:${task.id}`} targetKind="task" targetId={task.id} readOnly={readOnly} onNotice={onNotice} />
         <section className="checklist-section"><header><b>{t("체크리스트")}</b><span>{rows.filter((entry) => entry.completed).length}/{rows.length}</span></header>{checklistLoadError && <p className="inline-error" role="alert">{t("체크리스트를 불러오지 못했습니다. 상세 화면을 다시 열어 재시도해 주세요.")}</p>}<div>{rows.map((row) => <div className="checklist-row" key={row.id}><button className={`task-check ${row.completed ? "checked" : ""}`} onClick={() => void toggleRow(row)} aria-label={`${row.title} ${row.completed ? t("완료 취소") : t("완료")}`}><Check size={12} /></button><span className={row.completed ? "completed" : ""}>{row.title}</span><button className="icon-button" onClick={() => void deleteRow(row.id)} aria-label={t("{value1} 삭제", { value1: messageValue(row.title) })}><Trash2 size={13} /></button></div>)}</div><form className="checklist-form" onSubmit={addRow}><Plus size={14} /><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder={t("항목 추가")} aria-label={t("체크리스트 항목")} disabled={savingChecklist} /><button disabled={!title.trim() || savingChecklist}>{savingChecklist ? t("추가 중") : t("추가")}</button></form></section>
       </aside>}
     </OverlayDialog>
@@ -4378,10 +4453,7 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
                 <button className="icon-button" disabled={saving} onClick={() => void remove(routine.id)} aria-label={t("Routine 삭제")} title={t("Routine 삭제")}><Trash2 size={13} /></button>
                 <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={async () => { if (await saveRoutineGuide(routine)) close(); }}><Check size={14} />{t("저장")}</button>
               </footer></>}</DocumentProperties>
-              <div className="routine-document-body">
-                {routine.description && <section><h3>{t("목적/메모")}</h3><p>{routine.description}</p></section>}
-                <section><h3>{t("무엇을 어떻게")}</h3><p>{routine.actionSteps || t("미지정")}</p></section>
-              </div>
+              {expanded && <WorkDocumentSection key={`routine-document:${routine.id}`} targetKind="routine" targetId={routine.id} readOnly={readOnly} onNotice={onNotice} />}
               </div>}
             </article>
           );

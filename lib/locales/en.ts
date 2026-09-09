@@ -721,6 +721,8 @@ const messages = {
   "이 Project에서 숨기기": "Hide in this project",
   "편집기를 불러오는 중": "Loading editor",
   "프로젝트 문서": "Project document",
+  "Task 문서": "Task document",
+  "Routine 문서": "Routine document",
   "저장 실패": "Save failed",
   "자동 저장": "Autosave",
   "본문 템플릿 선택": "Select document template",

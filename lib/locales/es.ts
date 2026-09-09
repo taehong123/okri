@@ -722,6 +722,8 @@ const messages = {
   "이 Project에서 숨기기": "Ocultar en este proyecto",
   "편집기를 불러오는 중": "Cargando el editor",
   "프로젝트 문서": "Documento del proyecto",
+  "Task 문서": "Documento de la tarea",
+  "Routine 문서": "Documento de la rutina",
   "저장 실패": "Error al guardar",
   "자동 저장": "Guardado automático",
   "본문 템플릿 선택": "Seleccionar plantilla del documento",

@@ -159,6 +159,8 @@ test('Task uses one completion control instead of Project workflow status and pr
 
   await page.goto('/?view=inbox&task=task-1');
   const panel = page.locator('.task-detail-panel');
+  await expect(panel.getByText('Task 문서', { exact: true })).toBeVisible();
+  await expect(panel.locator('.work-document-section .bn-editor')).toContainText('Task specification');
   await expect(panel.getByRole('combobox', { name: '상태', exact: true })).toHaveCount(0);
   await expect(panel.locator('input[type="range"]')).toHaveCount(0);
   await panel.getByRole('button', { name: '완료', exact: true }).click();
@@ -251,6 +253,8 @@ test('Project theme contrast, actual font, keyboard and shared Task/Routine/OKR 
   await page.goto('/?view=routines');
   await page.locator('.routine-expand').click();
   await expect(page.locator('.routine-guide-grid')).toBeVisible();
+  await expect(page.getByText('Routine 문서', { exact: true })).toBeVisible();
+  await expect(page.locator('.routine-details .work-document-section .bn-editor')).toContainText('Routine playbook');
   const routineStyle = await fieldStyle(page.locator('.routine-guide-grid').getByLabel('트리거 포인트', { exact: true }));
   expect(routineStyle).toEqual(taskStyle);
   await page.screenshot({ path: info.outputPath('routine-edit.png') });
