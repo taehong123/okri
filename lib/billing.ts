@@ -4,15 +4,16 @@ import { aiUsagePercent } from "@/lib/ai-usage";
 import { cancelPayPalSubscription, ensurePayPalSchema, expirePayPalEntitlement, getPayPalSubscription,
   payPalCheckoutOptions, reconcilePayPalSubscriptions, refundPayPalFirstPayment, withWorkspaceLock } from "@/lib/billing-paypal";
 
+const MIB = 1024 ** 2;
 const GIB = 1024 ** 3;
 
 export const BILLING_PLANS = {
   free: { label: "Free", seatPriceWon: 0, projectLimit: 30, editorLimit: 5, activityHistoryDays: 90,
-    storageBaseBytes: GIB, storagePerEditorBytes: 0, aiBudgetBaseWon: 500, aiBudgetPerEditorWon: 0 },
+    storageBaseBytes: 100 * MIB, storagePerEditorBytes: 0, aiBudgetBaseWon: 500, aiBudgetPerEditorWon: 0 },
   team: { label: "Team", seatPriceWon: 2_900, projectLimit: null, editorLimit: null, activityHistoryDays: null,
-    storageBaseBytes: 0, storagePerEditorBytes: 5 * GIB, aiBudgetBaseWon: 0, aiBudgetPerEditorWon: 600 },
+    storageBaseBytes: 0, storagePerEditorBytes: 500 * MIB, aiBudgetBaseWon: 0, aiBudgetPerEditorWon: 600 },
   business: { label: "Business", seatPriceWon: 4_900, projectLimit: null, editorLimit: null, activityHistoryDays: null,
-    storageBaseBytes: 0, storagePerEditorBytes: 20 * GIB, aiBudgetBaseWon: 0, aiBudgetPerEditorWon: 1_500 },
+    storageBaseBytes: 0, storagePerEditorBytes: GIB, aiBudgetBaseWon: 0, aiBudgetPerEditorWon: 1_500 },
 } as const;
 
 export type BillingPlan = keyof typeof BILLING_PLANS;

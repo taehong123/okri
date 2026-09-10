@@ -138,7 +138,7 @@ export async function installApiMocks(page: Page, options: { failItemCreate?: bo
         projects: { used: 4, limit: 30, remaining: 26, resetsAt: "2026-09-30T15:00:00.000Z" },
         editors: { used: 1, limit: 3, remaining: 2 },
         ai: { usedWon: 120, limitWon: 500, remainingWon: 380, resetsAt: "2026-09-30T15:00:00.000Z" },
-        storage: { usedBytes: 268_435_456, limitBytes: 1_073_741_824, remainingBytes: 805_306_368 },
+        storage: { usedBytes: 26_214_400, limitBytes: 104_857_600, remainingBytes: 78_643_200 },
       },
       editorMembers: [{ id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: workspaceRole, selected: true, writeAllowed: true }],
       paymentMethod: null, transactions: [], canManage: workspaceRole === "owner",
