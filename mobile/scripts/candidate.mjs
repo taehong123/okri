@@ -16,4 +16,4 @@ const report = {
 };
 mkdirSync(path.join(root, "mobile/artifacts"), { recursive: true });
 writeFileSync(path.join(root, "mobile/artifacts/candidate.json"), JSON.stringify(report, null, 2) + "\n");
-console.log("Candidate recorded for " + sourceCommit + ". No store/OTA publication performed.");
+console.log("Candidate recorded for " + sourceCommit + ". No store publication performed.");

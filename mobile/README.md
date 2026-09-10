@@ -41,20 +41,18 @@ for single-worker browser checks. Install the root Playwright Chromium browser f
 The authoritative compatibility, cadence, rollback and evidence contract is
 [MOBILE_RELEASE_POLICY.md](../docs/MOBILE_RELEASE_POLICY.md). The weekly workflow
 creates candidates, not automatic public releases. Store releases target a
-14-day cadence after device verification. OTA is disabled by default; signed OTA
-requires an explicit account/plan/key setup and a new binary.
+14-day cadence after device verification. Production updates are store binaries;
+there is no Expo account, EAS build or OTA dependency.
 
-1. Authenticate Expo/EAS and select the actual Apple/Google developer organizations.
-2. Confirm `ai.okri.app` in both stores. Link the real EAS project using `eas init`.
-   Supply `EXPO_OWNER` and `EXPO_PUBLIC_EAS_PROJECT_ID` to the build environment.
+1. Confirm `ai.okri.app` in both stores and keep store ownership independent from
+   build tooling.
 3. Review and deploy the backend with migration `0063_native_sessions.sql` before
    enabling native login. Keep SQL LF and existing guards intact.
 4. Configure server secrets `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`
    and `APPLE_BUNDLE_ID=ai.okri.app`; reuse the existing token encryption key.
    Keys belong in the server secret store, never `EXPO_PUBLIC_*`, Git or chat.
-5. Build preview APK and iOS simulator/device artifacts using `eas.json` profiles.
-   Windows can generate Android sources but cannot generate/compile this iOS app.
-   EAS/macOS must compile iOS and validate entitlements/privacy manifests.
+5. Build Android AAB locally on Windows with the stable upload key. GitHub Actions
+   uses a macOS runner and Xcode to compile/sign iOS without an Expo cloud account.
 6. Test real Google and Apple auth, cancel/back, cold launch, session expiry,
    airplane mode, 200% system text, VoiceOver/TalkBack, keyboard, notch/safe areas,
    workspace isolation, editor roles and form submission on both platforms.
@@ -66,11 +64,10 @@ requires an explicit account/plan/key setup and a new binary.
    A first Play upload may require Console upload before automated submissions.
    Complete store metadata, reviewer access, age rating and export declarations.
 9. Verify accepted processing, testing eligibility and store review status before
-   claiming publication. An EAS upload is not a public store release.
+   claiming publication. An artifact upload is not a public store release.
 
-Use `build:android` / `build:ios`, then verify the exact signed artifact.
-`submit:android` / `submit:ios` only promote the tested build ID after matching
-source digest, fresh per-platform physical-device checks and reachable native API.
+Use `build:android` / `build:ios`, then verify the exact signed artifact SHA and
+store build number. Store upload is a separate protected workflow step.
 
 No payment purchase UI, advertising, analytics SDK or new push delivery is included
 in this first native companion. Existing server-side bot behavior is reused when
@@ -102,9 +99,8 @@ upstream patches before the release candidate and record the outcome.
 - Android/iOS Hermes and web JavaScript exports succeed.
 - Android native release APK builds successfully from the generated project; the
   emulator install and cold launch were verified with package `ai.okri.app`.
-- The verification APK uses the Android debug keystore and is not a Play Store
-  upload artifact. It must be rebuilt with an EAS production signing key before
-  internal testing or public release.
+- The older verification APK uses the Android debug keystore and is not a Play
+  Store artifact. Production uses the dedicated OKRI upload key.
 - That APK predates the API v1/release-policy changes. Its launch check is not
   evidence for the current candidate.
 - Native auth/model/API/localization unit tests pass; existing daily, language,
@@ -113,6 +109,6 @@ upstream patches before the release candidate and record the outcome.
 - No production-signed AAB/IPA, physical-device verification or store submission yet.
 - Backend changes are isolated on `codex/native-mobile`, not publicly deployed.
 
-References: [Expo monorepos](https://docs.expo.dev/build-reference/build-with-monorepos/),
-[Play submission](https://docs.expo.dev/submit/android/),
+References: [React Native signed Android builds](https://reactnative.dev/docs/signed-apk-android),
+[Play app release](https://support.google.com/googleplay/android-developer/answer/9859348),
 [App Store review guidelines](https://developer.apple.com/app-store/review/guidelines/).

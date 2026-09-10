@@ -3,7 +3,7 @@
 ## Candidate scope
 
 - Bundle/package ID: `ai.okri.app`
-- Version: `1.0.0`; EAS remotely increments store build numbers.
+- Version: `1.0.0`; store build numbers are explicit environment values and only increase.
 - iOS: iPhone only for the first release. iPad is added only after separate layout,
   screenshot, text-size and VoiceOver verification.
 - Android: phone and tablet layouts supported by the same responsive native UI.

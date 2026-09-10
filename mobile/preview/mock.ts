@@ -33,7 +33,7 @@ export function installPreview() {
   globalThis.fetch = async (input, init) => {
     const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, location.href);
     if (url.origin === location.origin) return network(input, init);
-    // This entry is never part of an EAS build. All remote requests fail closed.
+    // This entry is never part of a store build. All remote requests fail closed.
     if (url.origin !== "https://okri.ai") throw new Error("Remote requests are disabled in preview");
     const method = init?.method || "GET", body = init?.body ? JSON.parse(String(init.body)) : {};
     if (method !== "GET") controls.writes.push({ path: url.pathname, method, body });

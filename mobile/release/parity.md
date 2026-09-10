@@ -9,7 +9,7 @@
   integration configuration and billing. Existing web links remain available
   where appropriate; do not add payment steering without store-policy review.
 - This policy change: native v1 transport, current-member mapping, release status,
-  isolated preview, runtime fingerprint and store/optional-signed-OTA release lanes.
+  isolated preview, runtime fingerprint and store-binary-only release lanes.
 - Re-run physical iOS/Android validation. Previous APK predates these changes.
 - Integrated web/Slack work status (916d46c): v1 preserves remote status and
   translates skip to the existing skipReason contract; selecting work can resume

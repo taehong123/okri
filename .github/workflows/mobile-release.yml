@@ -1,30 +1,36 @@
-name: OKRI mobile release
+name: OKRI mobile store build
 on:
   workflow_dispatch:
     inputs:
       platform:
+        description: Store platform to build
         type: choice
         required: true
         options: [android, ios]
-      action:
+      destination:
+        description: Build only, or upload the signed artifact to the internal store track
         type: choice
         required: true
-        options: [build, submit, update]
+        default: artifact
+        options: [artifact, store]
 permissions:
   contents: read
 concurrency:
-  group: okri-mobile-production
+  group: okri-mobile-${{ inputs.platform }}
   cancel-in-progress: false
+
 jobs:
-  release:
-    # Configure required reviewers and main-only deployment in GitHub Settings.
-    if: github.ref == 'refs/heads/main'
+  android:
+    if: github.ref == 'refs/heads/main' && inputs.platform == 'android'
     environment: mobile-production
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 75
     env:
-      EXPO_OWNER: ${{ vars.EXPO_OWNER }}
-      EXPO_PUBLIC_EAS_PROJECT_ID: ${{ vars.EXPO_PUBLIC_EAS_PROJECT_ID }}
+      ANDROID_ARTIFACT: mobile/artifacts/okri-android-1.0.0-1.aab
+      OKRI_ANDROID_VERSION_CODE: "1"
+      OKRI_UPLOAD_KEY_ALIAS: ${{ secrets.OKRI_ANDROID_KEY_ALIAS }}
+      OKRI_UPLOAD_KEY_PASSWORD: ${{ secrets.OKRI_ANDROID_KEY_PASSWORD }}
+      OKRI_UPLOAD_STORE_PASSWORD: ${{ secrets.OKRI_ANDROID_STORE_PASSWORD }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -37,30 +43,98 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             mobile/package-lock.json
-      - name: Require linked release account
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+      - name: Materialize Android upload key
         env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-        run: test -n "$EXPO_TOKEN" && test -n "$EXPO_OWNER" && test -n "$EXPO_PUBLIC_EAS_PROJECT_ID"
+          KEYSTORE_BASE64: ${{ secrets.OKRI_ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$KEYSTORE_BASE64"
+          install -d -m 700 "$RUNNER_TEMP/okri-signing"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/okri-signing/upload.jks"
+          chmod 600 "$RUNNER_TEMP/okri-signing/upload.jks"
+          echo "OKRI_UPLOAD_STORE_FILE=$RUNNER_TEMP/okri-signing/upload.jks" >> "$GITHUB_ENV"
       - run: npm ci
       - run: npm ci --prefix mobile
       - run: npm run test:mobile-contract
       - run: npm run typecheck --prefix mobile
       - run: npm test --prefix mobile
-      - name: Materialize OTA key only for approved OTA promotion
-        if: inputs.action == 'update'
+      - run: npm run build:android --prefix mobile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: okri-android-${{ github.sha }}
+          path: |
+            ${{ env.ANDROID_ARTIFACT }}
+            mobile/artifacts/okri-android-manifest.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload exact AAB to Play internal draft
+        if: inputs.destination == 'store'
         env:
-          UPDATE_KEY: ${{ secrets.OKRI_UPDATE_PRIVATE_KEY }}
+          GOOGLE_PLAY_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
         run: |
-          test -n "$UPDATE_KEY"
-          umask 077
-          printf '%s' "$UPDATE_KEY" > "$RUNNER_TEMP/okri-update-private.pem"
-          echo "OKRI_UPDATE_PRIVATE_KEY_PATH=$RUNNER_TEMP/okri-update-private.pem" >> "$GITHUB_ENV"
-      - name: Promote exact reviewed artifact
-        env:
-          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-          RELEASE_ACTION: ${{ inputs.action }}
-          RELEASE_PLATFORM: ${{ inputs.platform }}
-        run: npm run "$RELEASE_ACTION:$RELEASE_PLATFORM" --prefix mobile
-      - name: Remove temporary signing key
+          test -n "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"
+          gem install fastlane --no-document
+          fastlane supply --json_key_data "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" --package_name ai.okri.app --aab "$ANDROID_ARTIFACT" --track internal --release_status draft --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true
+      - name: Remove signing material
         if: always()
-        run: rm -f -- "$RUNNER_TEMP/okri-update-private.pem"
+        run: rm -rf -- "$RUNNER_TEMP/okri-signing"
+
+  ios:
+    if: github.ref == 'refs/heads/main' && inputs.platform == 'ios'
+    environment: mobile-production
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      IOS_ARTIFACT: mobile/artifacts/okri-ios-1.0.0-1.ipa
+      OKRI_IOS_BUILD_NUMBER: "1"
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.20.0"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            mobile/package-lock.json
+      - name: Materialize App Store Connect API key
+        env:
+          ASC_PRIVATE_KEY: ${{ secrets.ASC_PRIVATE_KEY }}
+        run: |
+          test -n "$ASC_PRIVATE_KEY"
+          test -n "$APPLE_TEAM_ID"
+          test -n "$ASC_KEY_ID"
+          test -n "$ASC_ISSUER_ID"
+          install -d -m 700 "$RUNNER_TEMP/okri-signing"
+          printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/okri-signing/AuthKey_${ASC_KEY_ID}.p8"
+          chmod 600 "$RUNNER_TEMP/okri-signing/AuthKey_${ASC_KEY_ID}.p8"
+          echo "ASC_KEY_PATH=$RUNNER_TEMP/okri-signing/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
+      - run: npm ci
+      - run: npm ci --prefix mobile
+      - run: npm run test:mobile-contract
+      - run: npm run typecheck --prefix mobile
+      - run: npm test --prefix mobile
+      - run: npm run build:ios --prefix mobile
+      - uses: actions/upload-artifact@v4
+        with:
+          name: okri-ios-${{ github.sha }}
+          path: |
+            ${{ env.IOS_ARTIFACT }}
+            mobile/artifacts/okri-ios-manifest.json
+          retention-days: 30
+          if-no-files-found: error
+      - name: Upload exact IPA to TestFlight
+        if: inputs.destination == 'store'
+        run: xcrun altool --upload-app --type ios --file "$IOS_ARTIFACT" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
+      - name: Remove signing material
+        if: always()
+        run: rm -rf -- "$RUNNER_TEMP/okri-signing"

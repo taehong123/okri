@@ -1,8 +1,0 @@
-{
-  "schemaVersion": 1,
-  "ota": "disabled",
-  "storeCadenceDays": 14,
-  "candidateWeekday": "Tuesday",
-  "candidateTimeZone": "Asia/Seoul",
-  "candidateHour": 10
-}

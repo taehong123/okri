@@ -1,30 +1,21 @@
 import type { ExpoConfig } from "expo/config";
-import { existsSync } from "node:fs";
-import { resolve } from "node:path";
-import updatePolicy from "./release/update-policy.json";
 
-const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? "ceef3e46-c20b-4ae1-875b-9aff91267a4f";
-const certificate = "./release/update-certificate.pem";
-const hasCertificate = existsSync(resolve(__dirname, certificate));
-if (projectId && updatePolicy.ota === "signed" && !hasCertificate) {
-  throw new Error("Signed OTA requires the public update certificate");
+const androidVersionCode = Number.parseInt(process.env.OKRI_ANDROID_VERSION_CODE ?? "1", 10);
+const iosBuildNumber = process.env.OKRI_IOS_BUILD_NUMBER ?? "1";
+if (!Number.isInteger(androidVersionCode) || androidVersionCode < 1 || !/^\d+$/.test(iosBuildNumber)) {
+  throw new Error("Store build numbers must be positive integers");
 }
 const config: ExpoConfig = {
   name: "OKRI",
   slug: "okri",
-  owner: process.env.EXPO_OWNER ?? "taehong0613",
   version: "1.0.0",
   runtimeVersion: { policy: "fingerprint" },
   updates: {
-    enabled: Boolean(projectId) && updatePolicy.ota === "signed",
-    ...(projectId ? { url: "https://u.expo.dev/" + projectId } : {}),
-    checkAutomatically: "ON_LOAD",
+    // Store binaries are the only production update lane. No Expo account or OTA service is used.
+    enabled: false,
+    checkAutomatically: "NEVER",
     fallbackToCacheTimeout: 0,
     useEmbeddedUpdate: true,
-    ...(hasCertificate ? {
-      codeSigningCertificate: certificate,
-      codeSigningMetadata: { keyid: "main", alg: "rsa-v1_5-sha256" },
-    } : {}),
   },
   scheme: "okri",
   orientation: "default",
@@ -32,6 +23,7 @@ const config: ExpoConfig = {
   userInterfaceStyle: "automatic",
   ios: {
     bundleIdentifier: "ai.okri.app",
+    buildNumber: iosBuildNumber,
     // The first store candidate is iPhone-only; iPad is a separately verified release target.
     supportsTablet: false,
     usesAppleSignIn: true,
@@ -46,6 +38,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "ai.okri.app",
+    versionCode: androidVersionCode,
     allowBackup: false,
     predictiveBackGestureEnabled: true,
     adaptiveIcon: {
@@ -59,6 +52,5 @@ const config: ExpoConfig = {
     ["expo-font", { fonts: ["./assets/PretendardVariable.ttf"] }],
     ["expo-splash-screen", { image: "./assets/icon.png", imageWidth: 80, backgroundColor: "#FFFFFF" }],
   ],
-  extra: { ...(projectId ? { eas: { projectId } } : {}) },
 };
 export default config;

@@ -468,12 +468,13 @@ export function normalizeSlackWorkDraft(
 ): SlackWorkDraft {
   const kind = value.kind === "project" ? "project" : "task";
   const contextMembers = context.members as Array<{ id?: unknown; displayName?: unknown; isCurrent: boolean }>;
+  const contextRoutines = context.routines as Array<{ id?: unknown; title?: unknown; sourceMatched: boolean }>;
   const members = new Map(contextMembers.map((member) => [String(member.id ?? ""), String(member.displayName ?? "")]));
   const actorId = members.has(actorMemberId) ? actorMemberId : String(contextMembers.find((member) => member.isCurrent)?.id ?? actorMemberId);
   const responsibleMemberId = members.has(value.responsibleMemberId) ? value.responsibleMemberId : actorId;
   const parentCandidates = [
     ...context.parents.map((parent) => ({ id: String(parent.id), kind: String(parent.kind), label: parent.path.join(" › ") })),
-    ...context.routines.map((routine) => ({ id: String(routine.id), kind: "routine", label: `Routine › ${String(routine.title)}` })),
+    ...contextRoutines.map((routine) => ({ id: String(routine.id), kind: "routine", label: `Routine › ${String(routine.title)}` })),
   ];
   const requestedParent = parentCandidates.find((parent) => parent.id === value.parentId);
   const validParent = kind === "project"

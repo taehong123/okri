@@ -6,7 +6,7 @@
 - Update mobile/release/parity.md for product changes.
 - Oldest supported client contract and auth tests:
 - API/DB change is additive; rollback compatibility:
-- Store binary or eligible OTA (no new functionality via OTA):
+- Store binary or web/server-only change:
 
 ## Verification
 
