@@ -1,6 +1,6 @@
 import type { ExpoConfig } from "expo/config";
 
-const androidVersionCode = Number.parseInt(process.env.OKRI_ANDROID_VERSION_CODE ?? "1", 10);
+const androidVersionCode = Number.parseInt(process.env.OKRI_ANDROID_VERSION_CODE ?? "2", 10);
 const iosBuildNumber = process.env.OKRI_IOS_BUILD_NUMBER ?? "1";
 if (!Number.isInteger(androidVersionCode) || androidVersionCode < 1 || !/^\d+$/.test(iosBuildNumber)) {
   throw new Error("Store build numbers must be positive integers");

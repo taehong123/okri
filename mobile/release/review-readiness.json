@@ -15,7 +15,7 @@
   },
   "access": {
     "loginRequired": true,
-    "instructions": "Sign in with any reviewer-controlled Google account. On iOS, Sign in with Apple is also available. A new sign-in creates an empty personal workspace, so no invitation, payment, demo code or special role is required.",
+    "instructions": "Tap App review access and use the dedicated credentials supplied only in the store review console. The account opens an isolated personal workspace with all core mobile features; no invitation, payment, OTP or third-party account is required.",
     "paidAccessRequired": false,
     "demoCredentialCommitted": false
   },
@@ -57,7 +57,7 @@
   },
   "googlePlay": {
     "targetAudience": "Adults and workplace teams; not designed for children",
-    "appAccessInstructions": "Use any reviewer-controlled Google account. No invitation, OTP, payment or organization approval is required. Account deletion is available in More > Settings and at the public deletion URL.",
+    "appAccessInstructions": "Tap App review access on the sign-in screen and enter the dedicated username and password supplied in Play Console. The account has access to all core mobile features in an isolated workspace. No Google account, invitation, OTP, payment or organization approval is required. Account deletion is available in More > Settings and at the public deletion URL.",
     "containsAds": false
   }
 }

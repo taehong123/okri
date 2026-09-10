@@ -26,8 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 75
     env:
-      ANDROID_ARTIFACT: mobile/artifacts/okri-android-1.0.0-1.aab
-      OKRI_ANDROID_VERSION_CODE: "1"
+      ANDROID_ARTIFACT: mobile/artifacts/okri-android-1.0.0-2.aab
+      OKRI_ANDROID_VERSION_CODE: "2"
       OKRI_UPLOAD_KEY_ALIAS: ${{ secrets.OKRI_ANDROID_KEY_ALIAS }}
       OKRI_UPLOAD_KEY_PASSWORD: ${{ secrets.OKRI_ANDROID_KEY_PASSWORD }}
       OKRI_UPLOAD_STORE_PASSWORD: ${{ secrets.OKRI_ANDROID_STORE_PASSWORD }}

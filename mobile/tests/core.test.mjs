@@ -68,3 +68,12 @@ test("API sends native bearer, language and workspace without cookies; writes ar
     await assert.rejects(api.request("/api/mobile/v1/items", null, null, "en"), error => error.status === 401);
   } finally { globalThis.fetch = previous; }
 });
+
+test("store review login is server-validated and localized without embedded credentials", async () => {
+  const app = await read("../App.tsx"), auth = await read("../src/auth.ts");
+  assert.match(app, /앱 심사용 로그인/);
+  assert.match(app, /reviewLogin\(language, reviewUsername, reviewPassword\)/);
+  assert.match(auth, /\/api\/native\/review/);
+  assert.doesNotMatch(app + auth, /google-play-review@okri\.invalid|a-long-random-review-password/);
+  for (const lang of ["ko", "en", "ja", "zh", "es"]) assert.notEqual(i18n.translator(lang)("앱 심사용 로그인"), "");
+});

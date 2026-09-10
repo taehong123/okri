@@ -9,7 +9,7 @@ import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
 import { CalendarCheck, Ellipsis, FolderKanban, ListTodo } from "lucide-react-native";
 import { Providers, useApp, useBootstrap } from "./src/context";
-import { Button, ErrorState, Loading, Screen, Txt } from "./src/ui";
+import { Button, ErrorState, Field, Loading, Screen, Txt } from "./src/ui";
 import { ProjectsScreen, RoutinesScreen, TodayScreen } from "./src/screens/work";
 import { ItemScreen, RoutineScreen } from "./src/screens/detail";
 import { EditorScreen, Select } from "./src/screens/editor";
@@ -18,7 +18,7 @@ import { GanttScreen, OkrScreen } from "./src/screens/schedule";
 import { MoreScreen, SettingsScreen } from "./src/screens/settings";
 import { languages } from "./src/i18n";
 import type { Routes, Session } from "./src/types";
-import { appleLogin } from "./src/auth";
+import { appleLogin, reviewLogin } from "./src/auth";
 
 const Stack = createNativeStackNavigator<Routes>();
 const Tab = createBottomTabNavigator();
@@ -39,15 +39,36 @@ function Tabs() {
   </Tab.Navigator>;
 }
 function Login() {
-  const { t, signIn, language, setLanguage, theme, api, acceptSession } = useApp(), [busy, setBusy] = useState(false), [error, setError] = useState(false), [apple, setApple] = useState(false);
-  useEffect(() => { if (Platform.OS === "ios") void Promise.all([Apple.isAvailableAsync(), api<{ enabled: boolean }>("/api/native/apple")]).then(([available, config]) => setApple(available && config.enabled)).catch(() => setApple(false)); }, [api]);
+  const { t, signIn, language, setLanguage, theme, api, acceptSession } = useApp();
+  const [busy, setBusy] = useState(false), [error, setError] = useState(false), [apple, setApple] = useState(false);
+  const [reviewEnabled, setReviewEnabled] = useState(false), [reviewOpen, setReviewOpen] = useState(false);
+  const [reviewUsername, setReviewUsername] = useState(""), [reviewPassword, setReviewPassword] = useState("");
+  useEffect(() => {
+    void api<{ enabled: boolean }>("/api/native/review").then(config => setReviewEnabled(config.enabled)).catch(() => setReviewEnabled(false));
+    if (Platform.OS === "ios") void Promise.all([Apple.isAvailableAsync(), api<{ enabled: boolean }>("/api/native/apple")]).then(([available, config]) => setApple(available && config.enabled)).catch(() => setApple(false));
+  }, [api]);
   async function start() { if (busy) return; setBusy(true); setError(false); try { await signIn(); } catch { setError(true); } finally { setBusy(false); } }
   async function startApple() { if (busy) return; setBusy(true); setError(false); try { await acceptSession(await appleLogin(language)); } catch (e) { if ((e as { code?: string }).code !== "ERR_REQUEST_CANCELED") setError(true); } finally { setBusy(false); } }
+  async function startReview() {
+    if (busy || !reviewUsername.trim() || !reviewPassword) return;
+    setBusy(true); setError(false);
+    try { await acceptSession(await reviewLogin(language, reviewUsername, reviewPassword)); }
+    catch { setError(true); }
+    finally { setBusy(false); }
+  }
+  function closeReview() { setReviewOpen(false); setReviewPassword(""); setError(false); }
   return <SafeAreaView style={{ flex: 1, backgroundColor: theme.tokens["bg-page"] }}>
     <Screen style={{ flexGrow: 1, justifyContent: "space-between", paddingTop: 24 }}>
       <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}><Image source={require("./assets/icon.png")} style={{ width: 48, height: 48, borderRadius: 8 }} accessible={false} /><Txt role="section">OKRI</Txt></View>
       <View style={{ gap: 24, paddingVertical: 32 }}><Txt role="title">{t("목표와 실행, 한곳에서.")}</Txt><Txt muted>{t("목표부터 오늘 할 일까지.")}</Txt><Button label={t("Google로 시작하기")} onPress={() => void start()} busy={busy} />
         {apple && <View pointerEvents={busy ? "none" : "auto"} accessibilityState={{ disabled: busy }}><Apple.AppleAuthenticationButton buttonType={Apple.AppleAuthenticationButtonType.SIGN_IN} buttonStyle={theme.colorScheme === "dark" ? Apple.AppleAuthenticationButtonStyle.WHITE : Apple.AppleAuthenticationButtonStyle.BLACK} cornerRadius={8} style={{ width: "100%", height: 52 }} onPress={() => void startApple()} /></View>}
+        {reviewEnabled && !reviewOpen && <Button secondary label={t("앱 심사용 로그인")} onPress={() => { setReviewOpen(true); setError(false); }} />}
+        {reviewEnabled && reviewOpen && <View style={{ gap: 16 }}>
+          <Txt role="section">{t("심사 계정으로 로그인")}</Txt>
+          <Field label={t("심사 계정 아이디")} value={reviewUsername} onChangeText={setReviewUsername} autoCapitalize="none" autoCorrect={false} autoComplete="username" textContentType="username" />
+          <Field label={t("비밀번호")} value={reviewPassword} onChangeText={setReviewPassword} secureTextEntry autoCapitalize="none" autoCorrect={false} autoComplete="password" textContentType="password" onSubmitEditing={() => void startReview()} />
+          <View style={{ gap: 8 }}><Button label={t("로그인")} onPress={() => void startReview()} busy={busy} disabled={!reviewUsername.trim() || !reviewPassword} /><Button secondary label={t("취소")} onPress={closeReview} disabled={busy} /></View>
+        </View>}
         <View style={{ flexDirection: "row", gap: 16, flexWrap: "wrap" }}>{[{ path: "terms", text: "이용약관" }, { path: "privacy", text: "개인정보 처리방침" }].map(link => <Pressable key={link.path} accessibilityRole="link" onPress={() => void Linking.openURL("https://okri.ai/" + link.path)} style={{ minHeight: 48, justifyContent: "center" }}><Txt role="label">{t(link.text)}</Txt></Pressable>)}</View>
         {error && <ErrorState />}</View>
       <Select label={t("언어")} value={language} options={languages.map(l => ({ id: l.id, label: l.name }))} onChange={id => void setLanguage(id as typeof language)} />

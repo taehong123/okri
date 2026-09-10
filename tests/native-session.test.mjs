@@ -7,6 +7,7 @@ import ts from "typescript";
 import { compileLanguageModule, d1Fixture } from "./helpers/language-fixture.mjs";
 const read = path => readFile(new URL("../" + path, import.meta.url), "utf8");
 const native = compileLanguageModule(await read("lib/native-session.ts"));
+const review = compileLanguageModule(await read("lib/native-review.ts"), { "./native-session": native });
 const apple = compileLanguageModule(await read("lib/apple-native.ts"), { jose, "./google-oauth": {}, "./native-session": native });
 const migration = await read("drizzle/0054_native_sessions.sql");
 function fixture() {
@@ -63,6 +64,22 @@ test("native browser handoff is bound to the browser, challenge and state", asyn
   assert.equal(await flow.validNativeBrowserFlow(request, "challenge", "other", "test-secret"), false);
   assert.equal(await flow.validNativeBrowserFlow(request, "challenge", "state", "wrong-secret"), false);
   assert.equal(await flow.validNativeBrowserFlow(new Request(request.url), "challenge", "state", "test-secret"), false);
+});
+
+test("store reviewer access is secret-backed and creates an isolated native session", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE users(id TEXT PRIMARY KEY,email_normalized TEXT UNIQUE NOT NULL,language_preference TEXT NOT NULL DEFAULT 'ko',resolved_language TEXT NOT NULL DEFAULT 'ko',language_revision INTEGER NOT NULL DEFAULT 0,onboarding_state TEXT,display_name TEXT NOT NULL DEFAULT '',created_at TEXT NOT NULL,updated_at TEXT NOT NULL);`);
+  db.exec(migration);
+  const runtime = { DB: d1Fixture(db), OKRI_MOBILE_REVIEW_USERNAME: "google-reviewer", OKRI_MOBILE_REVIEW_PASSWORD: "a-long-random-review-password" };
+  try {
+    assert.equal(review.reviewAccessConfigured(runtime), true);
+    assert.equal(await review.authenticateNativeReviewer(runtime, "google-reviewer", "wrong-password"), null);
+    assert.equal(db.prepare("SELECT count(*) n FROM users").get().n, 0);
+    const session = await review.authenticateNativeReviewer(runtime, "google-reviewer", "a-long-random-review-password");
+    assert.match(session.accessToken, /^okri_native_[a-f0-9]{64}$/);
+    assert.equal(session.user.email, "google-play-review@okri.invalid");
+    assert.equal(db.prepare("SELECT resolved_language FROM users").get().resolved_language, "en");
+  } finally { db.close(); }
 });
 
 const journal = JSON.parse(await read("drizzle/meta/_journal.json"));

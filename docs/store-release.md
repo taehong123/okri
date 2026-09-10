@@ -15,9 +15,13 @@
 ## Review answers
 
 - Login is required because all work belongs to an authenticated workspace.
-- Reviewers can use their own Google account or Sign in with Apple. A new account
-  receives an empty personal workspace; no invitation, payment or special role is
-  needed to inspect and create OKRs, Projects, Tasks, Routines and a Daily update.
+- Reviewers tap `App review access` and use the dedicated credentials stored only
+  in each store's review console. The server creates an isolated personal
+  workspace; no Google or Apple account, invitation, OTP, payment or special role
+  is needed to inspect and create OKRs, Projects, Tasks, Routines and a Daily update.
+- Reviewer credentials are production secrets named
+  `OKRI_MOBILE_REVIEW_USERNAME` and `OKRI_MOBILE_REVIEW_PASSWORD`. Never commit,
+  log, screenshot or include them in release artifacts.
 - The app does not track users, display ads, use an advertising identifier, read
   contacts/media, record audio, or request location. It sends user-created work
   content, account identity and workspace operations to `https://okri.ai` over TLS.

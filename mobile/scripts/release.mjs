@@ -39,7 +39,7 @@ try {
       run("./gradlew", ["bundleRelease"], { cwd: path.join(mobileRoot, "android") });
     }
     source = path.join(mobileRoot, "android", "app", "build", "outputs", "bundle", "release", "app-release.aab");
-    buildNumber = process.env.OKRI_ANDROID_VERSION_CODE ?? "1";
+    buildNumber = process.env.OKRI_ANDROID_VERSION_CODE ?? "2";
   } else if (platform === "ios") {
     if (process.platform !== "darwin") throw new Error("iOS must be compiled on the GitHub macOS runner");
     const teamId = required("APPLE_TEAM_ID");

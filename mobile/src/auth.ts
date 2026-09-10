@@ -46,3 +46,10 @@ export async function appleLogin(language: string) {
     name: [credential.fullName?.givenName, credential.fullName?.familyName].filter(Boolean).join(" "),
   }) });
 }
+
+export async function reviewLogin(language: string, username: string, password: string) {
+  return request<Session>("/api/native/review", null, null, language, {
+    method: "POST",
+    body: JSON.stringify({ username: username.trim(), password }),
+  });
+}

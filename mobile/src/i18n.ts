@@ -65,6 +65,12 @@ const extra: Record<string, [string, string, string, string]> = {
   "계정 연결이 만료되었습니다. 다시 로그인해 주세요.": ["Your session expired. Sign in again.", "セッションが期限切れです。再度ログインしてください。", "登录已过期，请重新登录。", "Tu sesión ha caducado. Vuelve a iniciar sesión."],
   "이름을 입력해 주세요.": ["Enter a title.", "タイトルを入力してください。", "请输入标题。", "Introduce un título."],
   "업무 보기": ["View work", "業務を見る", "查看工作", "Ver trabajo"],
+  "앱 심사용 로그인": ["App review access", "アプリ審査用ログイン", "应用审核登录", "Acceso para revisión"],
+  "심사 계정으로 로그인": ["Sign in with the review account", "審査用アカウントでログイン", "使用审核账号登录", "Iniciar sesión con la cuenta de revisión"],
+  "심사 계정 아이디": ["Review account ID", "審査用アカウントID", "审核账号 ID", "ID de la cuenta de revisión"],
+  "비밀번호": ["Password", "パスワード", "密码", "Contraseña"],
+  "로그인": ["Sign in", "ログイン", "登录", "Iniciar sesión"],
+  "취소": ["Cancel", "キャンセル", "取消", "Cancelar"],
 };
 const catalogs: Record<string, Record<string, LocalizedMessage>> = { en, ja, zh, es };
 export function translator(lang: Language) {
