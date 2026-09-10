@@ -62,10 +62,12 @@ function assertMcpReviewWriter(authorization: RequestAuthorization) {
   }
 }
 
-export async function confirmMcpProjectReview(authorization: RequestAuthorization, raw: unknown) {
+export async function confirmMcpProjectReview(authorization: RequestAuthorization, raw: unknown,
+  reviewUserId = authorization.userId) {
   assertMcpReviewWriter(authorization);
   const input = mcpProjectConfirmationSchema.parse(raw);
-  const review = await approveProjectReview(env.DB, authorization, {
+  const reviewIdentity = { ownerId: authorization.ownerId, userId: reviewUserId };
+  const review = await approveProjectReview(env.DB, reviewIdentity, {
     id: input.review_id, version: input.version, initiativeId: input.initiative_id, initiativeFingerprint: input.initiative_fingerprint,
   }, (draft, parent, completed) => writeReviewedProject(authorization, draft, parent, completed),
   (draft, parent) => prepareEditedProjectReview(authorization.ownerId, draft, parent, input.proposal, input.editor_revision));

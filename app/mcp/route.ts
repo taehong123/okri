@@ -343,7 +343,8 @@ const projectConversationOutputSchema = {
 
 type ProjectConversationInput = z.infer<typeof projectConversationInputSchema>;
 
-export async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai") {
+export async function createOkriServer(authorization: RequestAuthorization, origin = "https://okri.ai",
+  context: { projectReviewUserId?: string } = {}) {
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
@@ -365,7 +366,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   const runProjectConversation = async (input: ProjectConversationInput) => {
     if (input.action === "confirm") {
       if (!input.confirmation) throw new Error("Pass confirmation after the user approves the final Project proposal in this conversation.");
-      const review = await confirmMcpProjectReview(authorization, input.confirmation);
+      const review = await confirmMcpProjectReview(authorization, input.confirmation, context.projectReviewUserId);
       return {
         structuredContent: { action: input.action, review },
         content: [{ type: "text" as const, text: "Project created. Continue editing it in this conversation; no new chat, mention, review ID, or browser visit is needed." }],
