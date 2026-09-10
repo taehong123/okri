@@ -32,7 +32,11 @@ try {
   if (platform === "android") {
     for (const key of ["OKRI_UPLOAD_STORE_FILE", "OKRI_UPLOAD_STORE_PASSWORD", "OKRI_UPLOAD_KEY_ALIAS", "OKRI_UPLOAD_KEY_PASSWORD"]) required(key);
     run(process.execPath, [path.join(mobileRoot, "scripts", "configure-android-release.mjs")]);
-    run(process.platform === "win32" ? "gradlew.bat" : "./gradlew", ["bundleRelease"], { cwd: path.join(mobileRoot, "android") });
+    if (process.platform === "win32") {
+      run(process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", ["/d", "/s", "/c", "gradlew.bat bundleRelease"], { cwd: path.join(mobileRoot, "android") });
+    } else {
+      run("./gradlew", ["bundleRelease"], { cwd: path.join(mobileRoot, "android") });
+    }
     source = path.join(mobileRoot, "android", "app", "build", "outputs", "bundle", "release", "app-release.aab");
     buildNumber = process.env.OKRI_ANDROID_VERSION_CODE ?? "1";
   } else if (platform === "ios") {
