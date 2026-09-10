@@ -107,6 +107,7 @@ export const WORKFLOW_INSTRUCTIONS = [
 export type WorkContextInput = {
   kind?: WorkKind;
   query?: string;
+  sourceText?: string;
   memberQuery?: string;
   limit?: number;
   includeMembers?: boolean;
@@ -131,6 +132,7 @@ type ContextRow = {
   id: string; kind: string; title: string; cycleId: string | null;
   parentTitle: string | null; grandparentTitle: string | null; ancestorTitle: string | null;
   description: string; parentDescription: string; grandparentDescription: string;
+  sourceMatched: number | boolean;
 };
 
 function likePattern(value: string) {
@@ -143,6 +145,7 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
   if (!WORK_KINDS.includes(kind)) throw new Error("Unsupported work kind");
   const limit = Math.max(1, Math.min(20, Math.trunc(input.limit || 6)));
   const query = input.query?.trim().slice(0, 120) ?? "";
+  const sourceText = input.sourceText?.normalize("NFC").trim().slice(-8_000) ?? "";
   const memberQuery = input.memberQuery?.trim().slice(0, 120) ?? "";
   const parentKinds = kind === "unsure" ? ["project", "initiative"]
     : ({ task: ["project"], project: ["initiative"], key_result: ["objective"], initiative: ["key_result"], objective: [], routine: [] } as const)[kind];
@@ -153,6 +156,8 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
   for (const parentKind of parentKinds) {
     add(parentKind, db.prepare(`SELECT i.id, i.kind, i.title, i.cycle_id AS cycleId,
       p.title AS parentTitle, g.title AS grandparentTitle, a.title AS ancestorTitle,
+      CASE WHEN ? != '' AND length(trim(i.title)) >= 2
+        AND instr(lower(replace(?, ' ', '')), lower(replace(trim(i.title), ' ', ''))) > 0 THEN 1 ELSE 0 END AS sourceMatched,
       CASE WHEN i.kind = 'initiative' THEN substr(i.description, 1, 500) ELSE '' END AS description,
       CASE WHEN i.kind = 'initiative' THEN substr(COALESCE(p.description, ''), 1, 350) ELSE '' END AS parentDescription,
       CASE WHEN i.kind = 'initiative' THEN substr(COALESCE(g.description, ''), 1, 350) ELSE '' END AS grandparentDescription
@@ -172,14 +177,17 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
           OR (i.kind = 'initiative' AND (i.description LIKE ? ESCAPE '\\'
             OR p.title LIKE ? ESCAPE '\\' OR p.description LIKE ? ESCAPE '\\'
             OR g.title LIKE ? ESCAPE '\\' OR g.description LIKE ? ESCAPE '\\')))
-      ORDER BY CASE WHEN c.status = 'active' THEN 0 ELSE 1 END, i.updated_at DESC, i.id
-      LIMIT ?`).bind(ownerId, parentKind, query, ...Array(6).fill(likePattern(query)), limit + 1));
+      ORDER BY sourceMatched DESC, CASE WHEN c.status = 'active' THEN 0 ELSE 1 END, i.updated_at DESC, i.id
+      LIMIT ?`).bind(sourceText, sourceText, ownerId, parentKind, query, ...Array(6).fill(likePattern(query)), limit + 1));
   }
   if (kind === "task" || kind === "unsure") {
-    add("routines", db.prepare(`SELECT id, title, system_key AS systemKey FROM routines
+    add("routines", db.prepare(`SELECT id, title, system_key AS systemKey,
+      CASE WHEN ? != '' AND length(trim(title)) >= 2
+        AND instr(lower(replace(?, ' ', '')), lower(replace(trim(title), ' ', ''))) > 0 THEN 1 ELSE 0 END AS sourceMatched
+      FROM routines
       WHERE owner_id = ? AND active = 1 AND (system_key IS NULL OR system_key != 'general')
-        AND (? = '' OR title LIKE ? ESCAPE '\\') ORDER BY updated_at DESC, id LIMIT ?`)
-      .bind(ownerId, query, likePattern(query), limit + 1));
+        AND (? = '' OR title LIKE ? ESCAPE '\\') ORDER BY sourceMatched DESC, updated_at DESC, id LIMIT ?`)
+      .bind(sourceText, sourceText, ownerId, query, likePattern(query), limit + 1));
     add("general", db.prepare("SELECT id, title FROM routines WHERE owner_id = ? AND system_key = 'general' AND active = 1 LIMIT 1").bind(ownerId));
   }
   if ((input.includeMembers ?? true) && ["task", "project", "unsure"].includes(kind)) {
@@ -209,6 +217,7 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
   const parents = parentKinds.flatMap((parentKind) => (rows[parentKind].slice(0, limit) as unknown as ContextRow[]).map((row) => ({
     id: row.id, kind: row.kind, title: row.title, cycleId: row.cycleId,
     path: [row.ancestorTitle, row.grandparentTitle, row.parentTitle, row.title].filter((title): title is string => Boolean(title)),
+    sourceMatched: Boolean(row.sourceMatched),
     ...(row.kind === 'initiative' ? { evidence: {
       initiative: row.description, keyResult: row.parentDescription, objective: row.grandparentDescription,
     } } : {}),
@@ -219,7 +228,7 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
     classification: kind === "unsure" ? WORK_CLASSIFICATION : { [kind]: WORK_CLASSIFICATION[kind] },
     fields: kind === "unsure" ? { task: WORK_FIELDS.task, project: WORK_FIELDS.project, routine: WORK_FIELDS.routine } : { [kind]: WORK_FIELDS[kind] },
     parents,
-    routines: (rows.routines ?? []).slice(0, limit),
+    routines: (rows.routines ?? []).slice(0, limit).map((row) => ({ ...row, sourceMatched: Boolean(row.sourceMatched) })),
     fallback: rows.general?.[0] ?? null,
     members: (rows.members ?? []).slice(0, limit).map((row) => ({ ...row, isCurrent: Boolean(row.isCurrent) })),
     cycles: (rows.cycles ?? []).slice(0, limit),
@@ -227,6 +236,6 @@ export async function readWorkContext(db: D1Database, ownerId: string, userId: s
       options: JSON.parse(String(row.options)), defaultValue: JSON.parse(String(row.defaultValue)),
     })),
     truncated,
-    nextStep: "목록 순서는 관련도 추천이 아니다. Initiative의 설명과 상위 KR·Objective를 요청한 결과물과 대조하고, 직접 기여하는 근거가 있는 후보만 추천 이유와 전체 경로를 보여준다. 근거가 없으면 추천 없음이라고 밝히고 다른 후보 검색 또는 생성 보류를 제공한다. Project는 사용자가 최종 내용을 검토하고 연결을 선택·승인하기 전에는 생성하지 않는다. systemKey 속성은 전용 필드를 사용하고 잘린 목록은 검색을 좁힌다.",
+    nextStep: "sourceMatched=true는 현재 대화에 제목이 직접 언급된 기존 연결 대상이다. Task는 직접 언급된 Project·Routine을 General보다 우선하며, 중복 후보가 아니면 그 ID를 사용한다. sourceMatched 후보가 없고 목록이 잘렸다면 짧고 구별되는 제목으로 추가 검색한 뒤에만 General을 사용한다. 그 밖의 목록 순서는 관련도 추천이 아니다. Initiative의 설명과 상위 KR·Objective를 요청한 결과물과 대조하고, 직접 기여하는 근거가 있는 후보만 추천 이유와 전체 경로를 보여준다. 근거가 없으면 추천 없음이라고 밝히고 다른 후보 검색 또는 생성 보류를 제공한다. Project는 사용자가 최종 내용을 검토하고 연결을 선택·승인하기 전에는 생성하지 않는다. systemKey 속성은 전용 필드를 사용한다.",
   };
 }

@@ -124,6 +124,19 @@ test("Queries escape LIKE patterns, preserve General fallback and disclose trunc
   } finally { db.close(); }
 });
 
+test("Task context ranks an older Project named in the source ahead of recent candidates", async () => {
+  const { db, d1 } = fixture();
+  try {
+    const result = await intake.readWorkContext(d1, "a", "user", {
+      kind: "task", limit: 1, sourceText: "**100%완료를** 거래 규칙 실행 앱으로 다듬기",
+    });
+    assert.equal(result.parents[0].id, "percent");
+    assert.equal(result.parents[0].sourceMatched, true);
+    assert.equal(result.truncated.project, true);
+    assert.match(result.nextStep, /General보다 우선/);
+  } finally { db.close(); }
+});
+
 test("Unsure stays undecided; Routine does not need an Initiative or invented task", async () => {
   const { db, d1 } = fixture();
   try {
@@ -332,12 +345,13 @@ test("MCP does not tell users to approve closed or uncertain reviews", async () 
   } finally { f.db.close(); }
 });
 
-test("MCP contracts expose the single-read preparation, optional Routine/cycle, and all read-only hints match policy", async () => {
+test("MCP contracts expose source-aware preparation, optional Routine/cycle, and all read-only hints match policy", async () => {
   const f = mcpFixture();
   try {
     await f.init();
-    const result = await f.call("prepare_work", { kind: "project" });
-    assert.equal(result.context.parents[0].id, "ini");
+    const result = await f.call("prepare_work", { kind: "task", source_text: "100%완료를 다듬기", limit: 1 });
+    assert.equal(result.context.parents[0].id, "percent");
+    assert.equal(result.context.parents[0].sourceMatched, true);
     assert.equal(f.calls.length, 0);
     const images = await f.call("list_project_images", { project_id: "p" });
     assert.equal(images.count, 1);

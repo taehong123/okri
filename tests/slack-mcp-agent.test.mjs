@@ -70,6 +70,10 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /workspaceRequestsThisMinute/);
   assert.match(agent, /workspaceRequestsToday/);
   assert.match(agent, /name: "prepare_work"/);
+  assert.match(agent, /boundedCreationSource/);
+  assert.match(agent, /source_text: sourceText/);
+  assert.match(agent, /sourceMatched=true/);
+  assert.match(agent, /\["list_items", "capture_item", "create_item", "create_tasks"\]/);
   assert.match(agent, /tool_choice: mustProgressCreation \? "required" : "auto"/);
   assert.match(agent, /never ask the user to repeat a title or work description/);
   assert.match(agent, /Slack MCP thread read failed/);

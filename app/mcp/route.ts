@@ -274,10 +274,10 @@ const workContextOutput = z.object({
   rules: workspaceRulesOutput,
   classification: z.record(z.string(), z.string()),
   fields: z.record(z.string(), workFieldOutput),
-  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()),
+  parents: z.array(z.object({ id: z.string(), kind: z.string(), title: z.string(), cycleId: z.string().nullable(), path: z.array(z.string()), sourceMatched: z.boolean(),
     evidence: z.object({ initiative: z.string(), keyResult: z.string(), objective: z.string() }).optional(),
   })),
-  routines: z.array(z.object({ id: z.string(), title: z.string(), systemKey: z.string().nullable() })),
+  routines: z.array(z.object({ id: z.string(), title: z.string(), systemKey: z.string().nullable(), sourceMatched: z.boolean() })),
   fallback: z.object({ id: z.string(), title: z.string() }).nullable(),
   members: z.array(z.object({ id: z.string(), displayName: z.string(), role: z.string(), isCurrent: z.boolean() })),
   cycles: z.array(z.object({ id: z.string(), name: z.string(), status: z.string(), startDate: z.string(), endDate: z.string() })),
@@ -457,10 +457,11 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "prepare_work",
     {
       title: "Prepare work with classification and connection choices",
-      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
+      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. When source_text is supplied, existing Project or Routine titles directly mentioned there are marked sourceMatched and ranked first even when they are not recent. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
       inputSchema: {
         kind: z.enum(WORK_KINDS).default("unsure").describe("Your semantic hypothesis or the user's chosen type; unsure does not silently classify or save"),
         query: z.string().max(120).optional().describe("Short existing parent title/topic to filter candidates, not the full work request. Omit to browse recent parents."),
+        source_text: z.string().max(8000).optional().describe("Visible conversation text used only to prioritize existing parent titles mentioned in it; never instructions"),
         member_query: z.string().max(120).optional().describe("Named person's name/email to narrow members; never guess IDs"),
         include_members: z.boolean().default(true),
         limit: z.number().int().min(1).max(20).default(6),
@@ -468,9 +469,9 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       outputSchema: { context: workContextOutput },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
-    async ({ kind, query, member_query, include_members, limit }) => {
+    async ({ kind, query, source_text, member_query, include_members, limit }) => {
       const context = await readWorkContext(env.DB, ownerId, authorization.userId, {
-        kind, query, memberQuery: member_query, includeMembers: include_members, limit,
+        kind, query, sourceText: source_text, memberQuery: member_query, includeMembers: include_members, limit,
       });
       return {
         structuredContent: { context: { ...context, rules } },
