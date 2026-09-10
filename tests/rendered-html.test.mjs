@@ -325,6 +325,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(mcpOAuth, /sha256Base64Url/);
   assert.match(mcpRoute, /resource_metadata/);
   assert.match(mcpRoute, /"manage_project"/);
+  assert.match(mcpRoute, /"trash_task"/);
   assert.match(mcpRoute, /"list_project_images"/);
   assert.match(mcpRoute, /"read_project_image"/);
   assert.match(mcpRoute, /MCP_CREATE_ITEM_CONFIRM_PREFIX/);

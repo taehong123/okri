@@ -73,6 +73,7 @@ import {
   updateTeamMember,
   validateItemPropertiesByName,
   setRoutineCompletion,
+  trashItems,
   type ItemCadence,
   type ItemKind,
   type ItemPriority,
@@ -911,6 +912,30 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       return {
         structuredContent: { item: serialized },
         content: [{ type: "text", text: `Linked "${item.title}" into the OKR hierarchy.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "trash_task",
+    {
+      title: "Move a Task to trash",
+      description: "Move one existing Task to the recoverable unified trash. Resolve the exact Task with list_items or the current conversation's saved tool result. Set confirmed=true only when the user explicitly asked to delete or move that exact Task to trash in the current message; otherwise ask for confirmation first. The server enforces creator or Task assignee permission.",
+      inputSchema: {
+        id: memberIdInput.describe("Exact existing Task ID"),
+        confirmed: z.literal(true).describe("Required explicit confirmation from the user's current message"),
+      },
+      outputSchema: { trashed: z.literal(true), title: z.string(), taskCount: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const task = await getItem(ownerId, id);
+      if (!task || task.kind !== "task") throw new Error("Task not found");
+      if (task.archivedAt) throw new Error("Task is already in trash");
+      const result = await trashItems(ownerId, authorization.userId, { itemIds: [id] });
+      return {
+        structuredContent: { trashed: true as const, title: task.title, taskCount: result.taskCount },
+        content: [{ type: "text", text: `Moved Task "${task.title}" to trash. It can be restored from OKRI.` }],
       };
     },
   );

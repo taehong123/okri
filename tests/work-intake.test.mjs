@@ -194,6 +194,7 @@ function mcpFixture() {
     updateItem: async (_owner, id, input) => { calls.push({ method: "update", input }); return fullItem({ id, status: "in_progress", ...input }); },
     createLinkedTasks: async (_owner, input) => { calls.push({ method: "batch", input }); return input.titles.map((title) => fullItem({ title, cycleId: "cycle-a", parentId: input.projectId, dueDate: input.dueDate })); },
     archiveProject: async (_owner, _user, id) => { calls.push({ method: "archive", id }); return { project: fullItem({ id, kind: "project", title: "Archived", archivedAt: "now" }), affectedCount: 3 }; },
+    trashItems: async (_owner, _user, input) => { calls.push({ method: "trash-task", input }); return { trashedRootIds: input.itemIds, projectCount: 0, taskCount: 1, affectedItemCount: 1 }; },
     restoreProject: async (_owner, id) => { calls.push({ method: "restore", id }); return { project: fullItem({ id, kind: "project", title: "Restored" }), affectedCount: 3 }; },
     getItemPropertiesByName: async (_owner, ids) => { calls.push({ method: "properties", ids }); return {}; },
     getItemAssignmentMap: async () => ({}),
@@ -361,6 +362,23 @@ test("MCP contracts expose source-aware preparation, optional Routine/cycle, and
     for (const [name, { definition }] of f.tools) {
       assert.equal(intake.READ_ONLY_MCP_TOOLS.has(name), definition.annotations.readOnlyHint === true, name);
     }
+  } finally { f.db.close(); }
+});
+
+test("MCP moves an explicitly confirmed Task to recoverable trash with existing permission guards", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const { z } = require("zod");
+    const definition = f.tools.get("trash_task").definition;
+    const schema = z.object(definition.inputSchema);
+    assert.equal(schema.safeParse({ id: "task" }).success, false);
+    assert.equal(schema.safeParse({ id: "task", confirmed: false }).success, false);
+    assert.equal(definition.annotations.destructiveHint, true);
+    const result = await f.call("trash_task", { id: "task", confirmed: true });
+    assert.deepEqual(result, { trashed: true, title: "Task", taskCount: 1 });
+    assert.deepEqual(f.calls.find((call) => call.method === "trash-task")?.input, { itemIds: ["task"] });
+    await assert.rejects(() => f.call("trash_task", { id: "p", confirmed: true }), /Task not found/);
   } finally { f.db.close(); }
 });
 

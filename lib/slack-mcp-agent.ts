@@ -78,7 +78,7 @@ const topicTools: Array<[RegExp, string[]]> = [
   [/(?:image|이미지|사진|스크린샷|캡처)/iu, ["list_project_images", "read_project_image"]],
   [/(?:document|문서|템플릿|template|본문)/iu, ["get_project_document", "update_project_document", "list_project_templates", "create_project_template", "apply_project_template"]],
   [/(?:property|속성|필드|선택값)/iu, ["list_properties", "create_property", "set_property_value", "delete_property"]],
-  [/(?:삭제|휴지통|복구|archive|restore)/iu, ["archive_project", "restore_project"]],
+  [/(?:삭제|지우|지워|제거|없애|버리|버려|휴지통|복구|archive|restore|delete|remove)/iu, ["trash_task", "archive_project", "restore_project"]],
   [/(?:규칙|가이드|기본값|workspace rule)/iu, ["get_workspace_rules", "update_workspace_rules"]],
   [/(?:그룹|group)/iu, ["create_group", "update_group", "archive_group", "add_group_member", "update_group_member", "remove_group_member"]],
 ];
@@ -210,7 +210,7 @@ async function runMcpAgent(input: {
       author: authors.get(message.user) || (message.user === input.event.user ? input.authorization.displayName || "요청자" : "Slack 멤버"),
       text: message.text,
     }));
-    const creationIntent = hasExplicitCreationIntent(input.query);
+    const creationIntent = !hasTaskRemovalIntent(input.query) && hasExplicitCreationIntent(input.query);
     const requestedWorkKind = explicitCreationKind(input.query);
     const threadHasSourceContent = hasSlackCreationSource(conversation.map((message) => message.text), input.query, threadImages.length);
     const inlineHasSourceContent = hasInlineSlackCreationDetails(input.query);
@@ -448,6 +448,7 @@ For a Task, a mandatoryPreparation Project or Routine with sourceMatched=true is
 Project creation must use manage_project. First prepare and publicly summarize the exact proposal, recommended Initiative and Objective/KR evidence, and alternatives. Never confirm a Project in the same turn in which you first proposed it. Confirm only when an exact proposal was already shown in an earlier Slack message and the user explicitly approves it in the current request. Hidden MCP state contains internal continuity for this thread; use it only when the current request refers to that prior work.
 Short approval replies such as ㄱㄱ, 진행해, 확정, 승인, or 프로젝트 생성해줘 approve the latest exact proposal in this Slack thread. Continue from that proposal and never prepare or repeat another proposal after such approval.
 For other ordinary work actions, execute when the request is clear. Respect confirmation requirements and destructive guards from the MCP tool. Never bypass a tool error.
+When the user explicitly asks to delete a specific existing Task, resolve it from hidden MCP state or list_items and call trash_task with confirmed=true. Do not use archive_project for a Task and never claim that Task deletion is unavailable. If the target is not exact, ask one concise confirmation naming the Task instead of guessing.
 Your final answer is visible to everyone in the Slack thread. Write concise Korean Slack mrkdwn unless the thread clearly uses another language. State what changed or what still needs approval. Never expose internal IDs, review IDs, fingerprints, raw tool payloads, email addresses, tokens, hidden state, or implementation details. Do not use markdown tables.`;
 }
 
@@ -561,6 +562,10 @@ async function sessionId(teamId: string, event: AgentEvent) {
   const root = event.threadTs || event.ts;
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode([teamId, event.channel, root].join(":")));
   return `mcp-chat:${Array.from(new Uint8Array(digest)).map((value) => value.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hasTaskRemovalIntent(value: string) {
+  return /(?:삭제|지우|지워|제거|없애|버리|버려|휴지통|delete|remove|trash)/iu.test(value);
 }
 
 async function legacySessionId(teamId: string, event: AgentEvent) {

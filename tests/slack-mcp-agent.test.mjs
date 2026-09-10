@@ -74,6 +74,9 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /source_text: sourceText/);
   assert.match(agent, /sourceMatched=true/);
   assert.match(agent, /\["list_items", "capture_item", "create_item", "create_tasks"\]/);
+  assert.match(agent, /"trash_task"/);
+  assert.match(agent, /never claim that Task deletion is unavailable/);
+  assert.match(agent, /const creationIntent = !hasTaskRemovalIntent\(input\.query\) && hasExplicitCreationIntent/);
   assert.match(agent, /tool_choice: mustProgressCreation \? "required" : "auto"/);
   assert.match(agent, /never ask the user to repeat a title or work description/);
   assert.match(agent, /Slack MCP thread read failed/);
