@@ -329,7 +329,7 @@ function ProjectUsage({ billing }: { billing: BillingStatusData }) {
 
 function StorageUsage({ storage }: { storage: BillingStatusData["usage"]["storage"] }) {
   const percentage = storage.limitBytes > 0 ? Math.min(100, Math.round((storage.usedBytes / storage.limitBytes) * 100)) : 0;
-  return <article className={percentage >= 100 ? "limit" : percentage >= 80 ? "warning" : ""}><header><span>{t("이미지 저장 공간")}</span><b>{formatBytes(storage.usedBytes)}<small> / {formatBytes(storage.limitBytes)}</small></b></header><div role="progressbar" aria-label={t("이미지 저장 공간 사용량")} aria-valuemin={0} aria-valuemax={storage.limitBytes} aria-valuenow={Math.min(storage.usedBytes, storage.limitBytes)} aria-valuetext={t("{value1} 중 {value2} 사용", { value1: messageValue(formatBytes(storage.limitBytes)), value2: messageValue(formatBytes(storage.usedBytes)) })}><i style={{ width: `${percentage}%` }} /></div><p>{t("Project에 저장된 이미지 기준")}</p></article>;
+  return <article className={percentage >= 100 ? "limit" : percentage >= 80 ? "warning" : ""}><header><span>{t("이미지 저장 공간")}</span><b>{formatBytes(storage.usedBytes)}<small> / {formatBytes(storage.limitBytes)}</small></b></header><div role="progressbar" aria-label={t("이미지 저장 공간 사용량")} aria-valuemin={0} aria-valuemax={storage.limitBytes} aria-valuenow={Math.min(storage.usedBytes, storage.limitBytes)} aria-valuetext={t("{value1} 중 {value2} 사용", { value1: messageValue(formatBytes(storage.limitBytes)), value2: messageValue(formatBytes(storage.usedBytes)) })}><i style={{ width: `${percentage}%` }} /></div><p>{t("워크스페이스에 저장된 작업 이미지 기준")}</p></article>;
 }
 
 function BillingSeats({ billing }: { billing: BillingStatusData }) {

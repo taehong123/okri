@@ -1,5 +1,22 @@
 # OKRI design and theme contract
 
+## First-login setup
+
+- `app/first-run-setup.tsx` uses the existing dialog, Pretendard and semantic
+  typography/field/focus roles. One conversational question is shown at a time:
+  personal/team, workspace, Objective, KR, optional Initiative, review, feature guide.
+- Examples are placeholders, never persisted sample data. The final review
+  contains the user's answers; edits clear its confirmation checkbox.
+- `app/first-run-setup.css` is a focused form surface, not another theme.
+  No viewport font scaling, decorative banner, nested cards or new palette.
+- Close saves and pauses while preserving the underlying business route.
+  Existing accounts and invitation/OAuth/detail links are not intercepted.
+- Drafts belong to the account, not browser storage. New accounts opt in during
+  registration; legacy NULL values never automatically start setup.
+- `tests/onboarding.test.mjs` covers migration, atomic writes, access, conflict
+  and retries. `tests/e2e/onboarding.spec.ts` verifies personal/team/resume/viewer,
+  response-loss and responsive flows with mocked writes.
+
 ## Design source and structure preservation
 
 The upstream design source is [ALLVIBE Design v1.0.0](https://github.com/all-vibe/all-vibe-agent-toolkit/blob/4f927714f728abcbe8920a3c39aad49692758c46/plugins/all-vibe-design/skills/all-vibe-design/SKILL.md), shared by 조성배 on 2026-08-24.
@@ -145,6 +162,17 @@ bot enable controls and template tools stay out of the default reading surface.
 Titles are headings, not permanent input fields. Completion stays a direct work
 action. The `document-view.spec.ts` checks read/edit separation, nested-dialog
 focus, Viewer access, six themes, actual fonts and 320–3840px/200% layouts.
+
+Document edit mode uses the existing BlockNote controls in a small, wrapping
+formatting row. Template actions share the Change button's height, typography
+and semantic action states; do not stretch the final action across mobile rows.
+Reading mode has no toolbar. Autosave must preserve cursor and undo history;
+replace the editor only when explicitly applying a template, not after saving.
+Project, Task and custom Routine images use authenticated, workspace-scoped R2
+objects. Accept only verified PNG/JPEG/WebP/GIF up to 5 MB, with bounded reads,
+no public image caching and server-side target/role checks. Image bytes never
+belong in document JSON or browser storage. `document-editor.spec.ts` and
+`document-images.test.mjs` cover persistence, failures, permissions and layout.
 
 `app/item-editor.css` is the shared field/layout layer loaded after `globals.css`
 and `workspace-design.css`.

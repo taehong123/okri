@@ -53,6 +53,7 @@ test("usage is calculated from precise metering units without changing cost enfo
   assert.match(billingSource, /storageBaseBytes: GIB, storagePerEditorBytes: 0/);
   assert.match(billingSource, /storagePerEditorBytes: 5 \* GIB/);
   assert.match(billingSource, /storagePerEditorBytes: 20 \* GIB/);
+  assert.match(billingSource, /FROM document_image_assets WHERE workspace_id = \?/);
 });
 
 test("percent formatting never says zero or full for positive, unfinished usage", () => {

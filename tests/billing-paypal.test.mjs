@@ -250,7 +250,7 @@ test("provider checkout exclusion covers existing cards and in-flight card sessi
 
 test("migration is LF and preserves payment records independently of workspace deletion", async (t) => {
   const sql = await source("drizzle/0051_paypal_billing.sql");
-  const seatSql = await source("drizzle/0054_editor_seat_billing.sql");
+  const seatSql = await source("drizzle/0060_editor_seat_billing.sql");
   assert.ok(!sql.includes("\r"));
   assert.ok(!seatSql.includes("\r"));
   assert.match(seatSql, /seat_count/);

@@ -241,8 +241,10 @@ export async function getBillableEditorCount(workspaceId: string) {
 }
 
 export async function getWorkspaceStorageUsage(workspaceId: string) {
-  const row = await (env as BillingRuntimeEnv).DB.prepare(`SELECT coalesce(sum(byte_size), 0) AS used
-    FROM project_images WHERE owner_id = ?`).bind(workspaceId).first<{ used: number }>();
+  const row = await (env as BillingRuntimeEnv).DB.prepare(`SELECT
+      coalesce((SELECT sum(byte_size) FROM project_images WHERE owner_id = ?), 0)
+      + coalesce((SELECT sum(byte_size) FROM document_image_assets WHERE workspace_id = ?), 0) AS used`)
+    .bind(workspaceId, workspaceId).first<{ used: number }>();
   return Math.max(0, Number(row?.used ?? 0));
 }
 
@@ -449,9 +451,10 @@ export async function reserveStorageUpload(workspaceId: string, byteSize: number
       (id, workspace_id, byte_size, expires_at, created_at)
     SELECT ?, ?, ?, ?, ?
     WHERE coalesce((SELECT sum(byte_size) FROM project_images WHERE owner_id = ?), 0)
+      + coalesce((SELECT sum(byte_size) FROM document_image_assets WHERE workspace_id = ?), 0)
       + coalesce((SELECT sum(byte_size) FROM storage_upload_reservations WHERE workspace_id = ? AND expires_at > ?), 0)
       + ? <= ?`)
-    .bind(id, workspaceId, requestedBytes, expiresAt, now.toISOString(), workspaceId, workspaceId, now.toISOString(), requestedBytes, limitBytes).run();
+    .bind(id, workspaceId, requestedBytes, expiresAt, now.toISOString(), workspaceId, workspaceId, workspaceId, now.toISOString(), requestedBytes, limitBytes).run();
   if (!result.meta.changes) {
     const usedBytes = await getWorkspaceStorageUsage(workspaceId);
     throw new BillingLimitError("storage_quota_exceeded", "이미지 저장 공간을 모두 사용했습니다. 기존 이미지는 그대로 유지됩니다.", {
@@ -465,6 +468,22 @@ export async function releaseStorageUpload(reservationId: string | null) {
   if (!reservationId) return;
   await (env as BillingRuntimeEnv).DB.prepare("DELETE FROM storage_upload_reservations WHERE id = ?")
     .bind(reservationId).run();
+}
+
+export async function recordDocumentImageUsage(input: {
+  id: string;
+  workspaceId: string;
+  targetKind: "project" | "task" | "routine";
+  targetId: string;
+  byteSize: number;
+  objectKey: string;
+  createdByUserId?: string | null;
+}) {
+  await (env as BillingRuntimeEnv).DB.prepare(`INSERT OR IGNORE INTO document_image_assets
+    (id, workspace_id, target_kind, target_id, byte_size, object_key, created_by_user_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+    .bind(input.id, input.workspaceId, input.targetKind, input.targetId, input.byteSize, input.objectKey,
+      input.createdByUserId ?? null, new Date().toISOString()).run();
 }
 
 export async function assertEditorSeatAvailable(workspaceId: string, role: string) {

@@ -1,5 +1,11 @@
 # OKRI desktop app
 
+## Local Codex runner
+
+The PWA and the local Codex runner are separate. Installing OKRI as a PWA does not start local code execution. A user explicitly downloads the runner from a Task or Project, creates a short-lived connection code, chooses a working folder, and starts it in a terminal.
+
+The runner does not copy browser OAuth state, Codex credentials, API keys, or OKRI cookies. See `docs/local-agent.md` for its execution boundary and revocation model.
+
 OKRI currently uses an installable PWA, not a native EXE, DMG, or embedded
 WebView. Edge/Chrome/Safari can install it into a standalone window with the
 existing Google browser authentication, cookies and workspace selection. The

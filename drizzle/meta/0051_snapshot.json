@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "32233056-9281-4832-84b8-2a7a9189e69c",
+  "id": "ebd8f02a-5d34-4054-8a7e-9c009a77abea",
   "prevId": "49f71a6b-ba9c-42e8-85c6-f17faae76090",
   "tables": {
     "account_consent_events": {
@@ -6694,80 +6694,6 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "storage_upload_reservations": {
-      "name": "storage_upload_reservations",
-      "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "workspace_id": {
-          "name": "workspace_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "byte_size": {
-          "name": "byte_size",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "CURRENT_TIMESTAMP"
-        }
-      },
-      "indexes": {
-        "idx_storage_upload_reservations_workspace_expiry": {
-          "name": "idx_storage_upload_reservations_workspace_expiry",
-          "columns": [
-            "workspace_id",
-            "expires_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "storage_upload_reservations_workspace_id_workspaces_id_fk": {
-          "name": "storage_upload_reservations_workspace_id_workspaces_id_fk",
-          "tableFrom": "storage_upload_reservations",
-          "tableTo": "workspaces",
-          "columnsFrom": [
-            "workspace_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "storage_upload_reservations_positive_size": {
-          "name": "storage_upload_reservations_positive_size",
-          "value": "\"storage_upload_reservations\".\"byte_size\" > 0"
-        }
-      }
-    },
     "trash_records": {
       "name": "trash_records",
       "columns": {
@@ -6955,6 +6881,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": 0
+        },
+        "onboarding_state": {
+          "name": "onboarding_state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "display_name": {
           "name": "display_name",
