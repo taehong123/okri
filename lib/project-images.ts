@@ -1,5 +1,6 @@
 import { env } from "cloudflare:workers";
 import { slackApi } from "@/lib/slack-daily";
+import { BillingLimitError, releaseStorageUpload, reserveStorageUpload } from "@/lib/billing";
 
 type ProjectImageRuntimeEnv = typeof env & {
   WORKSPACE_AVATARS?: R2Bucket;
@@ -137,6 +138,7 @@ export async function saveSlackProjectImages(input: {
   let reused = 0;
   let skipped = input.imagesTruncated ? Math.max(1, input.files.length - uniqueFiles.length) : 0;
   let failed = 0;
+  let quotaExceeded = false;
 
   for (const reference of uniqueFiles) {
     const sourceRef = `${input.teamId}:${reference.id}`;
@@ -171,11 +173,12 @@ export async function saveSlackProjectImages(input: {
       }
       const id = crypto.randomUUID();
       const objectKey = `project-images/v1/${input.ownerId}/${input.projectId}/${id}.${imageExtension(mimeType)}`;
-      await imageBucket().put(objectKey, bytes, {
-        httpMetadata: { contentType: mimeType },
-        customMetadata: { ownerId: input.ownerId, projectId: input.projectId, source: "slack" },
-      });
+      const storageReservation = await reserveStorageUpload(input.ownerId, bytes.byteLength);
       try {
+        await imageBucket().put(objectKey, bytes, {
+          httpMetadata: { contentType: mimeType },
+          customMetadata: { ownerId: input.ownerId, projectId: input.projectId, source: "slack" },
+        });
         const now = new Date().toISOString();
         const result = await env.DB.prepare(`INSERT OR IGNORE INTO project_images
           (id, owner_id, project_id, name, mime_type, byte_size, object_key, source, source_ref, created_by_user_id, created_at)
@@ -185,20 +188,28 @@ export async function saveSlackProjectImages(input: {
         if (!result.meta.changes) {
           await imageBucket().delete(objectKey);
           reused += 1;
+          await releaseStorageUpload(storageReservation).catch(() => undefined);
           continue;
         }
       } catch (error) {
         await imageBucket().delete(objectKey);
+        await releaseStorageUpload(storageReservation).catch(() => undefined);
         throw error;
       }
+      await releaseStorageUpload(storageReservation).catch(() => undefined);
       totalBytes += bytes.byteLength;
       saved += 1;
     } catch (error) {
+      if (error instanceof BillingLimitError && error.code === "storage_quota_exceeded") {
+        quotaExceeded = true;
+        skipped += uniqueFiles.length - saved - reused - skipped - failed;
+        break;
+      }
       console.error("Slack Project image save failed", reference.id, error);
       failed += 1;
     }
   }
-  return { found: uniqueFiles.length, saved, reused, skipped, failed };
+  return { found: uniqueFiles.length, saved, reused, skipped, failed, quotaExceeded };
 }
 
 async function hydrateSlackFile(token: string, reference: SlackImageFile): Promise<SlackImageFile | null> {

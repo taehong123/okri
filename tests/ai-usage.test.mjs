@@ -23,15 +23,37 @@ const meter = compile(await read("../app/ai-usage-meter.tsx"), { "@/lib/ai-usage
 const billingSource = await read("../lib/billing.ts");
 const routeSource = await read("../app/api/billing/ai-usage/route.ts");
 
+test("per-editor plan totals and AI budgets scale from one billable seat", () => {
+  const ast = ts.createSourceFile("billing.ts", billingSource, ts.ScriptTarget.Latest, true);
+  const constants = ast.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => ["GIB", "BILLING_PLANS"].includes(d.name.getText(ast)))).map((node) => node.getText(ast)).join("\n");
+  const functions = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && ["planMonthlyPriceWon", "planAiBudgetWon", "planStorageLimitBytes"].includes(node.name?.text)).map((node) => node.getText(ast)).join("\n");
+  const pricing = compile(`${constants}\n${functions}`);
+  assert.equal(pricing.planMonthlyPriceWon("team", 1), 2_900);
+  assert.equal(pricing.planMonthlyPriceWon("team", 5), 14_500);
+  assert.equal(pricing.planMonthlyPriceWon("business", 10), 49_000);
+  assert.equal(pricing.planAiBudgetWon("free", 100), 500);
+  assert.equal(pricing.planAiBudgetWon("team", 5), 3_000);
+  assert.equal(pricing.planAiBudgetWon("business", 5), 7_500);
+  assert.equal(pricing.planStorageLimitBytes("free", 100), 1024 ** 3);
+  assert.equal(pricing.planStorageLimitBytes("team", 5), 25 * 1024 ** 3);
+  assert.equal(pricing.planStorageLimitBytes("business", 5), 100 * 1024 ** 3);
+});
+
 test("usage is calculated from precise metering units without changing cost enforcement", () => {
   assert.deepEqual(usage.aiUsagePercent(120_000_000, 500_000_000), { usedPercent: 24, remainingPercent: 76 });
   assert.deepEqual(usage.aiUsagePercent(0, 500), { usedPercent: 0, remainingPercent: 100 });
   assert.ok(Math.abs(usage.aiUsagePercent(1_000, 500_000_000).usedPercent - 0.0002) < 1e-12);
   assert.deepEqual(usage.aiUsagePercent(600, 500), { usedPercent: 100, remainingPercent: 0 });
   for (const [used, limit] of [[null, 500], [NaN, 500], [-1, 500], [Infinity, 500], [0, 0], [0, null], [0, Infinity]]) assert.equal(usage.aiUsagePercent(used, limit), null);
-  assert.match(billingSource, /aiUsagePercent\(aiUsage, limits.aiBudgetWon \* 1_000_000\)/);
+  assert.match(billingSource, /aiUsagePercent\(aiUsage, aiBudgetWon \* 1_000_000\)/);
   assert.match(billingSource, /spentWonMicros >= limitWon \* 1_000_000/);
-  assert.match(billingSource, /free: \{[^\n]+aiBudgetWon: 500 \}/);
+  assert.match(billingSource, /free: \{[\s\S]*?aiBudgetBaseWon: 500, aiBudgetPerEditorWon: 0 \}/);
+  assert.match(billingSource, /projectLimit: 30/);
+  assert.match(billingSource, /activityHistoryDays: 90/);
+  assert.match(billingSource, /storageBaseBytes: GIB, storagePerEditorBytes: 0/);
+  assert.match(billingSource, /storagePerEditorBytes: 5 \* GIB/);
+  assert.match(billingSource, /storagePerEditorBytes: 20 \* GIB/);
+  assert.match(billingSource, /FROM document_image_assets WHERE workspace_id = \?/);
 });
 
 test("percent formatting never says zero or full for positive, unfinished usage", () => {
@@ -138,11 +160,11 @@ test("cache expires across monthly reset and late old requests cannot overwrite 
 
 test("lightweight summary preserves Free owner aggregation and paid workspace boundaries", async () => {
   const ast = ts.createSourceFile("billing.ts", billingSource, ts.ScriptTarget.Latest, true);
-  const functions = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && ["getAiUsageStatus", "getAiMonthlyUsage", "kstPeriod", "validPlan"].includes(node.name?.text)).map((node) => node.getText(ast)).join("\n");
-  const constants = ast.statements.find((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => d.name.getText(ast) === "BILLING_PLANS")).getText(ast);
-  for (const [plan, limit] of [["free", 500], ["team", 2_000], ["business", 10_000]]) {
+  const functions = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && ["getAiUsageStatus", "getAiMonthlyUsage", "kstPeriod", "validPlan", "planAiBudgetWon"].includes(node.name?.text)).map((node) => node.getText(ast)).join("\n");
+  const constants = ast.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => ["GIB", "BILLING_PLANS"].includes(d.name.getText(ast)))).map((node) => node.getText(ast)).join("\n");
+  for (const [plan, limit] of [["free", 500], ["team", 600], ["business", 1_500]]) {
     let query, params;
-    const { getAiUsageStatus } = compile(`const { env, getWorkspaceSubscription, aiUsagePercent } = require("deps");\n${constants}\n${functions}`, {
+    const { getAiUsageStatus } = compile(`const { env, getWorkspaceSubscription, aiUsagePercent } = require("deps");\nconst getBillableEditorCount = async () => 1;\n${constants}\n${functions}`, {
       deps: { aiUsagePercent: usage.aiUsagePercent, getWorkspaceSubscription: async () => ({ plan, billing_owner_user_id: "billing-owner" }), env: { DB: { prepare(sql) { query = sql; return { bind(...args) { params = args; return { first: async () => ({ spent: limit * 1_000_000 * .24 }) }; } }; } } } },
     });
     assert.equal((await getAiUsageStatus("workspace-a")).usedPercent, 24);
@@ -168,7 +190,9 @@ test("usage route is read-only, authorized and never leaks billing details", asy
 test("billing plan allowances no longer expose won, while subscription prices remain", async () => {
   const source = await read("../app/billing-view.tsx");
   assert.doesNotMatch(source, /ai: "[^"]*원|label="AI 안전한도"/);
-  assert.match(source, /price: 11_000/);
-  assert.match(source, /price: 55_000/);
+  assert.match(source, /seatPrice: 2_900/);
+  assert.match(source, /seatPrice: 4_900/);
   assert.match(source, /<AiUsageMeter usage=\{billing.usage.ai\}/);
+  assert.match(source, /ChatGPT·Claude와 제한 없이 사용/);
+  assert.match(source, /<StorageUsage storage=\{billing.usage.storage\}/);
 });

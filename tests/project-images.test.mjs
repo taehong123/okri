@@ -12,9 +12,14 @@ const compiled = ts.transpileModule(source, {
 const loaded = { exports: {} };
 const runtimeEnv = {};
 let slackFileInfo = {};
+let storageReservation = async () => null;
+class TestBillingLimitError extends Error {
+  constructor(code, message, details = {}) { super(message); this.code = code; this.details = details; }
+}
 new Function("require", "module", "exports", compiled)((name) => ({
   "cloudflare:workers": { env: runtimeEnv },
   "@/lib/slack-daily": { slackApi: async () => slackFileInfo },
+  "@/lib/billing": { BillingLimitError: TestBillingLimitError, reserveStorageUpload: (...args) => storageReservation(...args), releaseStorageUpload: async () => {} },
 })[name] ?? require(name), loaded, loaded.exports);
 
 const { arrayBufferToBase64, readSlackImagesForAgent, saveSlackProjectImages, verifiedImageType } = loaded.exports;
@@ -78,6 +83,7 @@ test("Slack thread images use complete message metadata without files.info", asy
 });
 
 test("Slack images are copied to private Project storage without persisting Slack URLs or tokens", async () => {
+  storageReservation = async () => null;
   const calls = [];
   const objects = new Map();
   runtimeEnv.DB = {
@@ -116,7 +122,7 @@ test("Slack images are copied to private Project storage without persisting Slac
       ownerId: "workspace", projectId: "project", createdByUserId: "user", teamId: "T1", token: "xoxb-secret",
       files: [{ id: "F1", name: "stale", mimeType: "image/png", size: 8, urlPrivateDownload: "" }],
     });
-    assert.deepEqual(result, { found: 1, saved: 1, reused: 0, skipped: 0, failed: 0 });
+    assert.deepEqual(result, { found: 1, saved: 1, reused: 0, skipped: 0, failed: 0, quotaExceeded: false });
     assert.equal(objects.size, 1);
     assert.equal([...objects.values()][0].options.httpMetadata.contentType, "image/png");
     const persistedValues = calls.flatMap((call) => call.values).map(String).join(" ");
@@ -124,5 +130,39 @@ test("Slack images are copied to private Project storage without persisting Slac
     assert.ok(!persistedValues.includes("files.slack.com"));
   } finally {
     globalThis.fetch = originalFetch;
+  }
+});
+
+test("storage quota keeps existing images and blocks only the new Project image", async () => {
+  const objects = new Map();
+  runtimeEnv.DB = {
+    prepare(sql) {
+      return { bind() { return {
+        async first() {
+          if (sql.includes("FROM items")) return { id: "project" };
+          if (sql.includes("FROM project_images")) return null;
+          throw new Error(`Unexpected first: ${sql}`);
+        },
+        async run() { return { meta: { changes: 1 } }; },
+      }; } };
+    },
+  };
+  runtimeEnv.WORKSPACE_AVATARS = {
+    async put(key, bytes) { objects.set(key, bytes); },
+    async delete(key) { objects.delete(key); },
+  };
+  slackFileInfo = { file: { id: "F2", name: "full.png", mimetype: "image/png", size: 8,
+    url_private_download: "https://files.slack.com/files-pri/T-F/download/full.png" } };
+  storageReservation = async () => { throw new TestBillingLimitError("storage_quota_exceeded", "full"); };
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => new Response(Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), { status: 200 });
+  try {
+    const result = await saveSlackProjectImages({ ownerId: "workspace", projectId: "project", createdByUserId: "user",
+      teamId: "T1", token: "xoxb-secret", files: [{ id: "F2", name: "full.png", mimeType: "image/png", size: 8, urlPrivateDownload: "" }] });
+    assert.deepEqual(result, { found: 1, saved: 0, reused: 0, skipped: 1, failed: 0, quotaExceeded: true });
+    assert.equal(objects.size, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+    storageReservation = async () => null;
   }
 });

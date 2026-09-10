@@ -5,14 +5,18 @@ import ts from "typescript";
 
 const projectRoot = new URL("../", import.meta.url);
 
-test("project quota stays in billing without badges on work and creation surfaces", async () => {
+test("Free Project quota and paid editing seats are visible on the billing screen", async () => {
   const page = await readFile(new URL("../app/page.tsx", import.meta.url), "utf8");
   const billing = await readFile(new URL("../app/billing-view.tsx", import.meta.url), "utf8");
   const styles = await readFile(new URL("../app/globals.css", import.meta.url), "utf8");
   assert.doesNotMatch(page, /ProjectQuotaBadge/);
-  assert.doesNotMatch(billing, /ProjectQuotaBadge|이번 달 Project|현재 미적용/);
+  assert.doesNotMatch(billing, /ProjectQuotaBadge|현재 미적용/);
   assert.doesNotMatch(styles, /project-quota-badge/);
-  assert.match(billing, /<Usage label=\{t\("Project 생성"\)\} used=\{billing\.usage\.projects\.used\}/);
+  assert.match(billing, /이번 달 Project/);
+  assert.match(billing, /<ProjectUsage billing=\{billing\}/);
+  assert.match(billing, /<StorageUsage storage=\{billing\.usage\.storage\}/);
+  assert.match(billing, /billing\.usage\.projects/);
+  assert.match(billing, /<BillingSeats billing=\{billing\}/);
 });
 
 test("brands connection completion as OKRI while preserving workspace names", async () => {
@@ -600,10 +604,11 @@ test("ships workspace plans, fail-closed Payple billing, and one billing screen"
   assert.match(page, /<BillingView onNotice=\{showNotice\}/);
   assert.doesNotMatch(billingView, /안전한 사전 배포 상태|결제는 아직 활성화하지 않았습니다|운영 보안값|해외 카드는 현재 지원하지 않습니다/);
   assert.match(billingView, /PayPal로 결제/);
-  assert.match(billingView, /Project·AI는 한국시간 매월 1일 초기화/);
-  assert.match(billing, /free: \{ label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 5, aiBudgetWon: 500 \}/);
-  assert.match(billing, /team: \{ label: "Team", priceWon: 11_000, projectLimit: 100, editorLimit: 10, aiBudgetWon: 2_000 \}/);
-  assert.match(billing, /business: \{ label: "Business", priceWon: 55_000, projectLimit: null, editorLimit: null, aiBudgetWon: 10_000 \}/);
+  assert.match(billingView, /Project와 AI 사용량은 한국시간 매월 1일 초기화/);
+  assert.match(billing, /free: \{ label: "Free", seatPriceWon: 0, projectLimit: 30, editorLimit: 5, activityHistoryDays: 90/);
+  assert.match(billing, /team: \{ label: "Team", seatPriceWon: 2_900, projectLimit: null, editorLimit: null, activityHistoryDays: null/);
+  assert.match(billing, /business: \{ label: "Business", seatPriceWon: 4_900, projectLimit: null, editorLimit: null, activityHistoryDays: null/);
+  assert.match(billing, /storage_upload_reservations/);
   assert.match(billing, /BILLING_ENFORCEMENT_ENABLED\?\.toLocaleLowerCase\(\) === "true"/);
   assert.match(billing, /priorClaim.*billing_trial_claims/s);
   assert.match(billing, /\[1, 3, 5, 7\]/);
@@ -616,7 +621,7 @@ test("ships workspace plans, fail-closed Payple billing, and one billing screen"
   assert.match(workflow, /workflow_dispatch:/);
   assert.match(workflow, /cron: "17 \* \* \* \*"/);
   assert.match(workflow, /x-okri-signature/);
-  assert.match(terms, /Free 0원, Team 11,000원, Business 55,000원/);
+  assert.match(terms, /Team은 편집 멤버 1명당 월 2,900원, Business는 편집 멤버 1명당 월 4,900원/);
 });
 
 test("serves hashed assets with immutable browser and edge caching", async () => {

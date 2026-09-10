@@ -141,13 +141,15 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
     } });
     if (url.pathname === "/api/billing/ai-usage") return json(route, { workspaceId: "workspace-1", userId: "user-1", ai: { usedPercent: 24, remainingPercent: 76, resetsAt: "2026-09-30T15:00:00.000Z" } });
     if (url.pathname === "/api/billing/status") return json(route, {
-      plan: "free", planLabel: "Free", status: "free", nextPlan: null,
+      plan: "free", planLabel: "Free", seatPriceWon: 0, monthlyPriceWon: 0, billableEditors: 3,
+      status: "free", nextPlan: null,
       trialEndsAt: null, currentPeriodEndsAt: null, nextBillingAt: null,
       cancelAtPeriodEnd: false, graceEndsAt: null,
       usage: {
-        projects: { used: 4, limit: 10, remaining: 6, resetsAt: "2026-09-30T15:00:00.000Z" },
+        projects: { used: 4, limit: 30, remaining: 26, resetsAt: "2026-09-30T15:00:00.000Z" },
         editors: { used: 1, limit: 5, remaining: 4, enforced: false, graceEndsAt: null },
         ai: { usedWon: 120, limitWon: 500, remainingWon: 380, resetsAt: "2026-09-30T15:00:00.000Z" },
+        storage: { usedBytes: 268_435_456, limitBytes: 1_073_741_824, remainingBytes: 805_306_368 },
       },
       editorMembers: [{ id: "member-1", displayName: "테스트 사용자", email: "owner@example.com", role: workspaceRole, selected: true, writeAllowed: true }],
       paymentMethod: null, transactions: [], canManage: workspaceRole === "owner",

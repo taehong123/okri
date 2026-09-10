@@ -667,6 +667,41 @@ export const projectImages = sqliteTable(
   ],
 );
 
+export const storageUploadReservations = sqliteTable(
+  "storage_upload_reservations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    byteSize: integer("byte_size").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_storage_upload_reservations_workspace_expiry").on(table.workspaceId, table.expiresAt),
+    check("storage_upload_reservations_positive_size", sql`${table.byteSize} > 0`),
+  ],
+);
+
+export const documentImageAssets = sqliteTable(
+  "document_image_assets",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").notNull(),
+    targetId: text("target_id").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    objectKey: text("object_key").notNull(),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_document_image_assets_object_key").on(table.objectKey),
+    index("idx_document_image_assets_workspace_created").on(table.workspaceId, table.createdAt),
+    check("document_image_assets_target_kind", sql`${table.targetKind} IN ('project', 'task', 'routine')`),
+    check("document_image_assets_positive_size", sql`${table.byteSize} > 0`),
+  ],
+);
+
 export const projectTemplates = sqliteTable(
   "project_templates",
   {

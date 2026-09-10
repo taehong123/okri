@@ -4,23 +4,42 @@ import { bootstrap, installApiMocks, json } from "./api-mocks";
 
 function billingFixture() {
   return {
-    plan: "free", planLabel: "Free", status: "free", nextPlan: null, trialEndsAt: null, currentPeriodEndsAt: null,
+    plan: "free", planLabel: "Free", seatPriceWon: 0, monthlyPriceWon: 0, billableEditors: 3,
+    status: "free", nextPlan: null, trialEndsAt: null, currentPeriodEndsAt: null,
     nextBillingAt: null, cancelAtPeriodEnd: false, graceEndsAt: null,
-    usage: { projects: { used: 4, limit: 10, remaining: 6, resetsAt: "2099-10-01T00:00:00Z" },
+    usage: { projects: { used: 4, limit: 30, remaining: 26, resetsAt: "2099-10-01T00:00:00Z" },
       editors: { used: 3, limit: 5, remaining: 2, enforced: false, graceEndsAt: null },
-      ai: { usedPercent: 24, remainingPercent: 76, resetsAt: "2099-10-01T00:00:00Z" } },
+      ai: { usedPercent: 24, remainingPercent: 76, resetsAt: "2099-10-01T00:00:00Z" },
+      storage: { usedBytes: 268_435_456, limitBytes: 1_073_741_824, remainingBytes: 805_306_368 } },
     editorMembers: [], paymentMethod: null, transactions: [], canManage: true, enforcementEnabled: false, checkoutAvailable: true,
     providers: { payple: false, paypal: [{ plan: "team", currency: "USD", value: "9.00" }, { plan: "business", currency: "USD", value: "39.00" }] },
     paypal: null, paypalTransactions: [],
   };
 }
 
-async function installBilling(page: Page, language = "ko") {
+async function installBilling(page: Page, language = "ko", status = billingFixture()) {
   await installApiMocks(page, { preserveStorage: true });
   await page.route("**/api/bootstrap?**", (route) => json(route, { ...bootstrap,
     user: { ...bootstrap.user, preferences: { language, resolvedLanguage: language, revision: 1 } } }));
-  await page.route("**/api/billing/status", (route) => json(route, billingFixture()));
+  await page.route("**/api/billing/status", (route) => json(route, status));
 }
+
+test("pricing table shows per-editor prices and the current workspace total", async ({ page }, info) => {
+  await installBilling(page, "ko", { ...billingFixture(), providers: { payple: true, paypal: [] } });
+  await page.goto("/?view=billing");
+  const pricing = page.locator(".billing-plans-section");
+  await expect(pricing.getByText("추천 플랜", { exact: true })).toBeVisible();
+  await expect(pricing).toContainText("2,900원");
+  await expect(pricing).toContainText("2,900원 × 3명 = 8,700원/월");
+  await expect(pricing).toContainText("4,900원 × 3명 = 14,700원/월");
+  await expect(pricing).toContainText("ChatGPT·Claude와 제한 없이 사용");
+  await expect(pricing).toContainText("이미지 저장 공간 1GB");
+  await expect(page.locator(".billing-usage-section")).toContainText("256MB / 1GB");
+  await pricing.getByRole("button", { name: "Business 플랜 선택", exact: true }).click();
+  await expect(pricing.locator(".billing-plan-card.selected")).toContainText("Business");
+  await expect(page.locator(".billing-checkout-summary")).toContainText("4,900원 × 3명 = 14,700원/월");
+  await pricing.screenshot({ path: info.outputPath("pricing-desktop.png") });
+});
 
 test("PayPal checkout requires explicit consent, sends the displayed price and preserves state on failure", async ({ page }) => {
   await installBilling(page);
@@ -38,7 +57,7 @@ test("PayPal checkout requires explicit consent, sends the displayed price and p
   await expect(pay).toBeEnabled();
   await pay.focus(); await page.keyboard.press("Enter");
   await expect(page.getByText("요금이 변경되었습니다. 화면을 새로고침한 뒤 확인해 주세요.", { exact: true })).toBeVisible();
-  expect(body).toEqual({ plan: "team", currency: "USD", value: "9.00", contractAccepted: true });
+  expect(body).toEqual({ plan: "team", currency: "USD", value: "9.00", seats: 3, contractAccepted: true });
   await expect(panel.getByRole("checkbox")).toBeChecked();
   await expect(pay).toBeEnabled();
   await expect(page.locator(".billing-page")).not.toContainText("운영 보안값");

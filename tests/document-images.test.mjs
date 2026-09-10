@@ -14,13 +14,22 @@ async function moduleAt(path, imports = {}) {
   return loaded.exports;
 }
 const helpers = await moduleAt("../lib/document-images.ts");
-const imageHelpers = await moduleAt("../lib/project-images.ts", { "cloudflare:workers": { env: {} }, "@/lib/slack-daily": {} });
+class TestBillingLimitError extends Error {
+  constructor(code, message, details = {}) { super(message); this.code = code; this.details = details; }
+}
+const imageHelpers = await moduleAt("../lib/project-images.ts", {
+  "cloudflare:workers": { env: {} }, "@/lib/slack-daily": {},
+  "@/lib/billing": { BillingLimitError: TestBillingLimitError, reserveStorageUpload: async () => null, releaseStorageUpload: async () => {} },
+});
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
-async function fixture({ owner = "workspace", viewer = false, unauthorized = false, accessible = true, missingStorage = false, afterUpload = false } = {}) {
+async function fixture({ owner = "workspace", viewer = false, unauthorized = false, accessible = true, missingStorage = false, afterUpload = false, quotaExceeded = false } = {}) {
   const objects = new Map();
   const queries = [];
   const deleted = [];
+  const reservations = [];
+  const released = [];
+  const recorded = [];
   let uploaded = false;
   const runtime = {
     DB: { prepare: sql => ({ bind: (...values) => ({ first: async () => {
@@ -39,11 +48,21 @@ async function fixture({ owner = "workspace", viewer = false, unauthorized = fal
   };
   const routes = await moduleAt("../app/api/document-images/route.ts", {
     "cloudflare:workers": { env: runtime },
+    "@/lib/billing": {
+      BillingLimitError: TestBillingLimitError,
+      reserveStorageUpload: async (workspaceId, byteSize) => {
+        if (quotaExceeded) throw new TestBillingLimitError("storage_quota_exceeded", "full");
+        reservations.push({ workspaceId, byteSize });
+        return "reservation";
+      },
+      releaseStorageUpload: async id => { released.push(id); },
+      recordDocumentImageUsage: async input => { recorded.push(input); },
+    },
     "@/lib/document-images": helpers,
     "@/lib/project-images": imageHelpers,
     "@/lib/pace-data": { authorizeRequest: async request => unauthorized ? new Response(null, { status: 401 }) : viewer && request.method !== "GET" ? new Response(null, { status: 403 }) : { ownerId: owner, userId: "user" } },
   });
-  return { ...routes, objects, queries, deleted };
+  return { ...routes, objects, queries, deleted, reservations, released, recorded };
 }
 function upload(kind = "project", body = png, headers = { "Content-Type": "image/png" }, id = `${kind}-1`) {
   return new Request(`https://okri.test/api/document-images?targetKind=${kind}&targetId=${id}&name=한글%20image.png`, { method: "POST", headers, body });
@@ -67,7 +86,18 @@ test("image uploads and authenticated reads work for all three document types", 
     assert.equal(image.headers.get("x-content-type-options"), "nosniff");
     assert.equal(image.headers.get("content-type"), "image/png");
     assert.deepEqual(new Uint8Array(await image.arrayBuffer()), png);
+    assert.deepEqual(f.reservations, [{ workspaceId: "workspace", byteSize: png.length }]);
+    assert.deepEqual(f.released, ["reservation"]);
+    assert.equal(f.recorded.length, 2);
   }
+});
+test("storage quota blocks only the new image and keeps existing storage untouched", async () => {
+  const f = await fixture({ quotaExceeded: true });
+  const response = await f.POST(upload());
+  assert.equal(response.status, 402);
+  assert.deepEqual(await response.json(), { code: "storage_quota_exceeded" });
+  assert.equal(f.objects.size, 0);
+  assert.equal(f.recorded.length, 0);
 });
 test("unauthenticated, viewer and cross-workspace writes cannot store images", async () => {
   for (const [options, status] of [[{ unauthorized: true }, 401], [{ viewer: true }, 403], [{ owner: "other" }, 404], [{ accessible: false }, 404]]) {

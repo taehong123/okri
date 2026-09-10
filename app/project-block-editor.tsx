@@ -156,10 +156,13 @@ function ProjectBlockEditorBody({ initialContent, editable = true, onChange, dic
       const query = new URLSearchParams({ ...imageTarget, name: file.name });
       const response = await fetch(`/api/document-images?${query}`, { method: "POST", headers: { "Content-Type": file.type }, body: file });
       const result = await response.json() as { url?: string; code?: string };
+      if (result.code === "storage_quota_exceeded") throw new Error("storage_quota_exceeded");
       if (!response.ok || !result.url?.startsWith("/api/document-images?")) throw new Error("Upload failed");
       return result.url;
     } catch (error) {
-      setUploadError(t("이미지를 저장하지 못했습니다."));
+      setUploadError(error instanceof Error && error.message === "storage_quota_exceeded"
+        ? t("이미지 저장 공간을 모두 사용했습니다. 기존 이미지는 그대로 유지됩니다.")
+        : t("이미지를 저장하지 못했습니다."));
       throw error;
     } finally { setUploadCount(count => count - 1); }
   }

@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { BillingLimitError, recordDocumentImageUsage, releaseStorageUpload, reserveStorageUpload } from "@/lib/billing";
 import { authorizeRequest } from "@/lib/pace-data";
 import { verifiedImageType } from "@/lib/project-images";
 import { DOCUMENT_IMAGE_MAX_BYTES, documentImageUrl, readDocumentImageTarget, safeDocumentImageName, type DocumentImageTarget } from "@/lib/document-images";
@@ -37,13 +38,24 @@ export async function POST(request: Request) {
     const imageId = crypto.randomUUID();
     const name = safeDocumentImageName(query.get("name") ?? "image");
     const key = objectKey(authorization.ownerId, target, imageId);
-    await bucket.put(key, bytes, { httpMetadata: { contentType: mimeType }, customMetadata: {
-      ownerId: authorization.ownerId, ...target, name, createdBy: authorization.userId ?? "", byteSize: String(size),
-    } });
-    // Do not attach to an item archived/deleted while the upload was in flight.
-    if (!await canAccessTarget(authorization.ownerId, target)) { await bucket.delete(key); return failure(404, "not_found"); }
+    const reservation = await reserveStorageUpload(authorization.ownerId, size);
+    try {
+      await bucket.put(key, bytes, { httpMetadata: { contentType: mimeType }, customMetadata: {
+        ownerId: authorization.ownerId, ...target, name, createdBy: authorization.userId ?? "", byteSize: String(size),
+      } });
+      // Do not attach to an item archived/deleted while the upload was in flight.
+      if (!await canAccessTarget(authorization.ownerId, target)) { await bucket.delete(key); return failure(404, "not_found"); }
+      await recordDocumentImageUsage({ id: imageId, workspaceId: authorization.ownerId, ...target, byteSize: size,
+        objectKey: key, createdByUserId: authorization.userId });
+    } catch (error) {
+      await bucket.delete(key).catch(() => undefined);
+      throw error;
+    } finally { await releaseStorageUpload(reservation).catch(() => undefined); }
     return Response.json({ url: documentImageUrl(target, imageId), name }, { status: 201, headers: privateHeaders });
-  } catch { return failure(500, "upload_failed"); }
+  } catch (error) {
+    if (error instanceof BillingLimitError && error.code === "storage_quota_exceeded") return failure(402, error.code);
+    return failure(500, "upload_failed");
+  }
 }
 
 export async function GET(request: Request) {
@@ -64,6 +76,8 @@ export async function GET(request: Request) {
     const bytes = new Uint8Array(await image.arrayBuffer());
     const mimeType = verifiedImageType(bytes);
     if (!mimeType || mimeType !== image.httpMetadata?.contentType) return failure(404, "not_found");
+    await recordDocumentImageUsage({ id: imageId, workspaceId: authorization.ownerId, ...target, byteSize: image.size,
+      objectKey: objectKey(authorization.ownerId, target, imageId), createdByUserId: metadata.createdBy }).catch(() => undefined);
     return new Response(bytes, { headers: { ...privateHeaders, "Content-Type": mimeType,
       "Content-Disposition": `inline; filename*=UTF-8''${encodeURIComponent(safeDocumentImageName(metadata.name ?? "image"))}` } });
   } catch { return failure(500, "image_unavailable"); }
