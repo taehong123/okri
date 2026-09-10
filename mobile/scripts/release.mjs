@@ -9,6 +9,7 @@ import { git, sourceDigest } from "./release-lib.mjs";
 const platform = process.argv[2];
 const mobileRoot = fileURLToPath(new URL("../", import.meta.url));
 const artifacts = path.join(mobileRoot, "artifacts");
+process.env.NODE_ENV ??= "production";
 const required = name => {
   const value = process.env[name];
   if (!value) throw new Error("Missing release secret: " + name);

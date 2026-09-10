@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { Linking, Platform, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
-import * as Updates from "expo-updates";
 import { Download, RefreshCw } from "lucide-react-native";
 import { updateOffer } from "../../lib/mobile/release-policy";
 import { clientHeaders } from "./client-version";
@@ -11,7 +10,6 @@ import { Button, ErrorState, Txt } from "./ui";
 export function ReleaseStatus() {
   const { api, t } = useApp(), [linkError, setLinkError] = useState(false);
   const version = clientHeaders()["X-OKRI-App-Version"];
-  const pending = Updates.useUpdates().isUpdatePending;
   const policy = useQuery({
     queryKey: ["mobile-release-policy", Platform.OS],
     queryFn: ({ signal }) => api<unknown>("/api/mobile/v1/policy?platform=" + Platform.OS, { signal }),
@@ -21,7 +19,6 @@ export function ReleaseStatus() {
   return <View style={{ gap: 12 }}>
     <Txt role="section">{t("앱 업데이트")}</Txt>
     <Txt role="label" muted>OKRI {version}</Txt>
-    {pending && <Txt role="label">{t("받은 업데이트는 앱을 다음에 실행할 때 적용됩니다.")}</Txt>}
     {offer ? <>
       <Txt role="label">{t(offer.retired ? "이 버전의 지원 기간이 끝났습니다. 스토어에서 업데이트해 주세요." : "새 버전을 사용할 수 있습니다.")}</Txt>
       <Button secondary icon={Download} label={t("스토어에서 업데이트")} onPress={() => {

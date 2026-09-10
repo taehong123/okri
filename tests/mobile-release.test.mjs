@@ -35,7 +35,8 @@ test("production app updates only through store binaries and never reloads activ
   assert.match(config, /useEmbeddedUpdate: true/); assert.match(config, /enabled: false/);
   assert.doesNotMatch(config, /EAS_PROJECT|u\.expo\.dev|owner:/);
   const release = await read("mobile/src/release-status.tsx");
-  assert.doesNotMatch(release, /reloadAsync|reloadAppAsync/);
+  assert.doesNotMatch(release, /expo-updates|reloadAsync|reloadAppAsync/);
+  assert.doesNotMatch(await read("mobile/src/client-version.ts"), /expo-updates|X-OKRI-Update/);
   const entry = await read("mobile/scripts/export-preview.mjs");
   assert.doesNotMatch(entry, /writeFile|package\.json/);
 });
