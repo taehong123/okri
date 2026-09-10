@@ -131,6 +131,30 @@ export async function postSlackMessage(token: string, channel: string, text: str
   return { timestamp: result.ts };
 }
 
+export async function postSlackEphemeral(token: string, channel: string, user: string, threadTs: string,
+  text: string, blocks?: unknown[]) {
+  let response: Response;
+  try {
+    response = await fetch("https://slack.com/api/chat.postEphemeral", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
+      body: JSON.stringify({ channel, user, thread_ts: threadTs, text: text.slice(0, 3900), blocks }),
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    throw new SlackMessageError("개인 완료 처리를 표시하지 못했습니다.", "uncertain");
+  }
+  if (response.status === 429) {
+    const delay = Number(response.headers.get("Retry-After"));
+    throw new SlackMessageError("Slack 요청 한도에 도달했습니다.", "rejected", Number.isFinite(delay) && delay > 0 ? delay : 60);
+  }
+  let result: { ok?: boolean; error?: string; message_ts?: string; ts?: string };
+  try { result = await response.json() as typeof result; }
+  catch { throw new SlackMessageError("개인 완료 처리 응답을 확인하지 못했습니다.", "uncertain"); }
+  if (!response.ok || !result.ok) throw new SlackMessageError(slackErrorMessage(result.error), "rejected", 0, result.error);
+  return { timestamp: result.message_ts || result.ts || "" };
+}
+
 function escapeSlackText(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }

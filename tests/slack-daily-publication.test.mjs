@@ -123,3 +123,13 @@ test("shared Daily completion rejects another member, stale messages and permiss
   await assert.rejects(api.completePublishedDailyTask(input()));
   assert.equal(sqlite.prepare("SELECT COUNT(*) count FROM activity_log").get().count, 0);
 });
+
+test("private Daily completion controls validate the publication without exposing its public message timestamp", async (t) => {
+  const { sqlite, api, input } = fixture(t);
+  const result = await api.completePublishedDailyTask(input({
+    messageTs: "ephemeral-control",
+    value: JSON.stringify({ publicationId: "publication-a", taskId: "task", privateControl: true }),
+  }));
+  assert.equal(result.changed, true);
+  assert.equal(sqlite.prepare("SELECT status FROM items WHERE id='task'").get().status, "done");
+});
