@@ -86,6 +86,9 @@ Stronger text steps are selected when necessary to meet 4.5:1 WCAG contrast.
 
 Bright accents belong on controls, rails and badges, not large tinted panels.
 Status colors retain their meaning independently of the hierarchy palette.
+Default workflow states such as Todo and medium priority follow the active
+theme accent instead of introducing the blue information palette. Reserve
+`info-*` for actual informational feedback, and keep user-chosen blue groups.
 White navigation uses the same white canvas as the page, including the loading
 sidebar, mobile navigation and settings navigation. Hover and selection use
 neutral Gray steps. Generic guidance, default avatars, empty-state icons and

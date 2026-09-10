@@ -392,7 +392,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .task-table-row select:hover, .task-table-row > input:hover, .relation-cell:hover, .property-input:hover { background-color: var(--bg-surface); }
 .status-select { font-weight: 600; }
 .status-backlog { color: var(--text-secondary) !important; }
-.status-todo { color: var(--info-fg) !important; }
+.status-todo { color: var(--accent-fg) !important; }
 .status-policy_discussion { color: var(--purple-fg) !important; }
 .status-in_progress { color: var(--orange-fg) !important; }
 .status-developing { color: var(--orange-fg) !important; }
@@ -401,7 +401,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .status-blocked { color: var(--danger-fg) !important; }
 .status-archived { color: var(--text-secondary) !important; }
 .priority-low { color: var(--text-secondary) !important; }
-.priority-medium { color: var(--info-fg) !important; }
+.priority-medium { color: var(--accent-fg) !important; }
 .priority-high { color: var(--orange-fg) !important; }
 .priority-urgent { color: var(--danger-fg) !important; }
 .date-cell, .property-input { padding: 0 8px; }
@@ -433,7 +433,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .empty-column { padding: 15px; color: var(--faint); font-size: var(--type-meta); text-align: center; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--bg-hover); }
 .status-dot.status-backlog { background: var(--bg-hover); }
-.status-dot.status-todo { background: var(--info-fg); }
+.status-dot.status-todo { background: var(--accent-fg); }
 .status-dot.status-policy_discussion { background: var(--purple-fg); }
 .status-dot.status-in_progress { background: var(--orange-fg); }
 .status-dot.status-developing { background: var(--orange-fg); }
@@ -3267,7 +3267,7 @@ button.secondary:active:not(:disabled), button.cancel:active:not(:disabled) { ba
 .toast, .toast b, .toast small, .toast > svg, .toast button { color: var(--toast-fg); }
 .toast button:hover { background: transparent; outline: 1px solid currentColor; }
 .bulk-delete-bar > span, .bulk-delete-bar b { color: var(--toast-fg); }
-.status-todo, .priority-medium { color: var(--info-fg) !important; }
+.status-todo, .priority-medium { color: var(--accent-fg) !important; }
 .status-policy_discussion { color: var(--purple-fg) !important; }
 .priority-high { color: var(--warning-fg) !important; }
 .priority-urgent { color: var(--danger-fg) !important; }
