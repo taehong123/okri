@@ -139,6 +139,22 @@ test("Unsure stays undecided; Routine does not need an Initiative or invented ta
   } finally { db.close(); }
 });
 
+test("referenced conversation placeholders are rejected while concrete repair work remains valid", () => {
+  for (const input of [
+    { title: "문의 내용 확인" },
+    { title: "스레드 업무 내용 확인" },
+    { title: "스레드 원문 확인" },
+    { title: "업무 정리", description: "원본 스레드를 읽지 못해 내용이 보이면 다시 정리합니다." },
+    { title: "Review conversation context", description: "Unable to read the original thread." },
+  ]) assert.throws(() => intake.assertConcreteWorkInput(input), /nothing was saved/i);
+
+  assert.doesNotThrow(() => intake.assertConcreteWorkInput({
+    title: "Slack 스레드 읽기 오류 수정",
+    description: "봇이 원본 스레드를 읽지 못하는 문제를 해결한다.",
+  }));
+  assert.doesNotThrow(() => intake.assertConcreteWorkInput({ title: "명함 시안 확정" }));
+});
+
 function mcpFixture() {
   const fixtureData = fixture();
   const calls = [];
@@ -185,6 +201,12 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/routine-properties": routineProperties,
+    "@/lib/project-images": {
+      arrayBufferToBase64: () => "iVBORw==",
+      getProjectImage: async () => ({ image: { id: "image", projectId: "p", name: "error.png", mimeType: "image/png", byteSize: 8, source: "slack", createdAt: "now" }, data: new Uint8Array(8) }),
+      getProjectImageCounts: async () => ({ p: 1 }),
+      listProjectImages: async () => [{ id: "image", projectId: "p", name: "error.png", mimeType: "image/png", byteSize: 8, source: "slack", createdAt: "now" }],
+    },
     "@/lib/work-intake": intake,
     "@/lib/project-review": reviewCore,
     "@/lib/project-review-mcp": compile(reviewMcpSource, {
@@ -317,9 +339,29 @@ test("MCP contracts expose the single-read preparation, optional Routine/cycle, 
     const result = await f.call("prepare_work", { kind: "project" });
     assert.equal(result.context.parents[0].id, "ini");
     assert.equal(f.calls.length, 0);
+    const images = await f.call("list_project_images", { project_id: "p" });
+    assert.equal(images.count, 1);
+    const image = await f.tools.get("read_project_image").callback({ image_id: "image" });
+    assert.deepEqual(image.content[1], { type: "image", data: "iVBORw==", mimeType: "image/png" });
+    assert.match(f.tools.get("capture_item").definition.description, /cannot fetch a host conversation transcript/);
     for (const [name, { definition }] of f.tools) {
       assert.equal(intake.READ_ONLY_MCP_TOOLS.has(name), definition.annotations.readOnlyHint === true, name);
     }
+  } finally { f.db.close(); }
+});
+
+test("MCP rejects missing-thread placeholders before any write", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    assert.match(f.tools.get("capture_item").definition.description, /placeholder Task/);
+    for (const [name, input] of [
+      ["capture_item", { title: "스레드 업무 내용 확인", description: "원본 스레드를 읽지 못해 우선 저장합니다." }],
+      ["create_item", { kind: "task", title: "대화 내용 확인" }],
+      ["create_tasks", { titles: ["명함 시안 확정", "원본 메시지 업무 파악"], parent_id: "p" }],
+      ["manage_project", { title: "업무 정리", description: "Unable to read the original conversation context." }],
+    ]) await assert.rejects(() => f.call(name, input), /nothing was saved/i);
+    assert.equal(f.calls.length, 0);
   } finally { f.db.close(); }
 });
 

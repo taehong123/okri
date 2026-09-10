@@ -20,7 +20,9 @@ function fixture(t) {
   const db = new DatabaseSync(":memory:");
   for (const sql of migrations) db.exec(sql);
   db.exec(`INSERT INTO workspaces(id,name,owner_user_id) VALUES('a','Example A','owner'),('b','Example B','other');
-    INSERT INTO workspace_subscriptions(workspace_id,billing_owner_user_id) VALUES('a','owner'),('b','other');`);
+    INSERT INTO workspace_subscriptions(workspace_id,billing_owner_user_id) VALUES('a','owner'),('b','other');
+    INSERT INTO workspace_members(id,workspace_id,user_id,email,display_name,role,status)
+      VALUES('member-owner','a','owner','owner@example.com','Owner','owner','active');`);
   const d1 = {
     prepare(sql) {
       const bind = (...args) => ({ sql, args,
@@ -40,7 +42,7 @@ function fixture(t) {
     PAYPAL_WEBHOOK_ID: "WH-EXAMPLE", PAYPAL_TEAM_PLAN_ID: "P-TEAM", PAYPAL_BUSINESS_PLAN_ID: "P-BUSINESS", OKRI_PUBLIC_URL: "https://okri.example" };
   const api = compile(apiSource, { "cloudflare:workers": { env } });
   const service = compile(billingSource, { "cloudflare:workers": { env }, "./paypal-api": api });
-  const plan = { id: "P-TEAM", status: "ACTIVE", quantity_supported: false,
+  const plan = { id: "P-TEAM", status: "ACTIVE", quantity_supported: true,
     payment_preferences: { setup_fee: { value: "0" }, auto_bill_outstanding: false },
     billing_cycles: [{ tenure_type: "REGULAR", sequence: 1, total_cycles: 0, frequency: { interval_unit: "MONTH", interval_count: 1 }, pricing_scheme: { fixed_price: { currency_code: "USD", value: "9.00" } } }] };
   const remote = { id: "I-EXAMPLE", plan_id: "P-TEAM", custom_id: "", status: "APPROVAL_PENDING", quantity: "1", plan_overridden: false,
@@ -56,8 +58,14 @@ function fixture(t) {
     if (pathname === "/v1/billing/subscriptions") {
       const body = JSON.parse(init.body);
       remote.custom_id = body.custom_id;
+      remote.quantity = body.quantity;
       if (state.createLost) { state.createLost = false; throw new Error("connection lost after create"); }
       return response(remote, 201);
+    }
+    if (pathname.endsWith("/revise")) {
+      const body = JSON.parse(init.body);
+      state.revisionQuantity = body.quantity;
+      return response({ ...remote, links: [{ rel: "approve", href: "https://www.sandbox.paypal.com/webapps/billing/subscriptions?ba_token=REVISE" }] });
     }
     if (pathname.endsWith("/transactions")) return response({ transactions: state.transactions });
     if (pathname.endsWith("/cancel")) {
@@ -73,11 +81,11 @@ function fixture(t) {
     throw new Error(`Unexpected provider call: ${pathname}`);
   });
   t.after(() => db.close());
-  const create = () => service.createPayPalCheckout("a", "owner", "team", { currency: "USD", value: "9.00" });
+  const create = () => service.createPayPalCheckout("a", "owner", "team", { currency: "USD", value: "9.00", seats: 1 });
   const pay = () => {
     remote.status = "ACTIVE";
     state.transactions = [{ id: "SALE-EXAMPLE", status: "COMPLETED", time: new Date().toISOString(),
-      amount_with_breakdown: { gross_amount: { currency_code: "USD", value: "9.00" } } }];
+      amount_with_breakdown: { gross_amount: { currency_code: "USD", value: (9 * Number(remote.quantity)).toFixed(2) } } }];
   };
   const subscription = () => db.prepare("SELECT * FROM workspace_subscriptions WHERE workspace_id='a'").get();
   return { db, env, api, service, plan, remote, state, create, pay, subscription };
@@ -101,6 +109,7 @@ test("provider prices must be monthly, active, fixed, tax-inclusive and without 
     (p) => p.status = "INACTIVE", (p) => p.billing_cycles[0].frequency.interval_unit = "YEAR",
     (p) => p.billing_cycles[0].tenure_type = "TRIAL", (p) => p.payment_preferences.setup_fee.value = "10",
     (p) => p.payment_preferences.auto_bill_outstanding = true, (p) => p.taxes = { percentage: "10", inclusive: false },
+    (p) => p.quantity_supported = false,
     (p) => p.billing_cycles[0].pricing_scheme.fixed_price.value = "-1",
   ]) { const plan = structuredClone(f.plan); mutate(plan); assert.throws(() => f.api.validatePayPalPlan("team", "P-TEAM", plan), /paypal_plan_mismatch/); }
   assert.throws(() => f.api.safePayPalApprovalUrl("https://www.paypal.com.evil.example/"), /paypal_invalid_approval_url/);
@@ -135,6 +144,24 @@ test("ACTIVE approval does not grant access; a verified matching payment does", 
   assert.ok(f.subscription().current_period_ends_at > new Date().toISOString());
 });
 
+test("PayPal subscriptions use editor quantity and require approval when the editor count changes", async (t) => {
+  const f = fixture(t); await f.create(); f.pay(); await f.service.syncPayPalWorkspace("a");
+  f.db.exec(`INSERT INTO workspace_members(id,workspace_id,user_id,email,display_name,role,status)
+    VALUES('member-two','a','user-two','two@example.com','Member Two','member','active')`);
+  const revision = await f.service.revisePayPalSeats("a");
+  assert.equal(revision.seats, 2);
+  assert.match(revision.approvalUrl, /ba_token=REVISE/);
+  assert.equal(f.db.prepare("SELECT pending_seat_count FROM billing_paypal_subscriptions").get().pending_seat_count, 2);
+  assert.equal(f.remote.quantity, "1");
+  f.remote.quantity = f.state.revisionQuantity;
+  f.pay();
+  await f.service.syncPayPalWorkspace("a");
+  const stored = f.db.prepare("SELECT seat_count,pending_seat_count FROM billing_paypal_subscriptions").get();
+  assert.equal(stored.seat_count, 2);
+  assert.equal(stored.pending_seat_count, null);
+  assert.equal(f.state.transactions[0].amount_with_breakdown.gross_amount.value, "18.00");
+});
+
 test("mismatched subscription ownership, plan, amount and currency fail closed", async (t) => {
   const f = fixture(t); await f.create(); f.pay();
   const original = f.remote.custom_id; f.remote.custom_id = "other-workspace";
@@ -142,6 +169,9 @@ test("mismatched subscription ownership, plan, amount and currency fail closed",
   f.remote.custom_id = original; f.remote.plan_id = "P-OTHER";
   await assert.rejects(() => f.service.syncPayPalWorkspace("a"), /paypal_subscription_mismatch/);
   f.remote.plan_id = "P-TEAM"; f.state.transactions[0].amount_with_breakdown.gross_amount.currency_code = "EUR";
+  await assert.rejects(() => f.service.syncPayPalWorkspace("a"), /paypal_payment_mismatch/);
+  f.state.transactions[0].amount_with_breakdown.gross_amount.currency_code = "USD";
+  f.state.transactions[0].amount_with_breakdown.gross_amount.value = "9.50";
   await assert.rejects(() => f.service.syncPayPalWorkspace("a"), /paypal_payment_mismatch/);
   assert.equal(f.subscription().plan, "free");
 });
@@ -220,7 +250,10 @@ test("provider checkout exclusion covers existing cards and in-flight card sessi
 
 test("migration is LF and preserves payment records independently of workspace deletion", async (t) => {
   const sql = await source("drizzle/0051_paypal_billing.sql");
+  const seatSql = await source("drizzle/0060_editor_seat_billing.sql");
   assert.ok(!sql.includes("\r"));
+  assert.ok(!seatSql.includes("\r"));
+  assert.match(seatSql, /seat_count/);
   const f = fixture(t); await f.create(); f.pay(); await f.service.syncPayPalWorkspace("a");
   await f.service.cancelPayPalSubscription("a");
   f.db.exec("PRAGMA foreign_keys=ON; DELETE FROM workspaces WHERE id='a'");

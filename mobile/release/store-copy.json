@@ -5,11 +5,47 @@
   "supportUrl": "https://okri.ai/guide",
   "privacyUrl": "https://okri.ai/privacy",
   "termsUrl": "https://okri.ai/terms",
+  "accountDeletionUrl": "https://okri.ai/account-deletion?lang=en",
   "localizations": {
-    "ko-KR": { "subtitle": "목표부터 오늘 할 일까지", "description": "팀의 목표와 오늘의 업무를 한곳에서 확인하세요. OKR, Project, Task의 연결을 살펴보고, 담당 업무와 기한을 관리할 수 있습니다. Routine과 Project를 구분해 데일리를 작성하고, 내용을 확인한 뒤 팀에 제출하세요. 기존 OKRI 워크스페이스와 함께 사용합니다." },
-    "en-US": { "subtitle": "From goals to today's work", "description": "Keep your team's goals and daily work together. Explore the connection between OKRs, projects and tasks. Manage assignments and due dates, review your routines, and prepare a daily update before sharing it with your team. Works with your existing OKRI workspace." },
-    "ja": { "subtitle": "目標から今日の業務まで", "description": "チームの目標と毎日の業務をひとつに。OKR、プロジェクト、タスクのつながりを確認し、担当業務や期限を管理できます。ルーティンとプロジェクトを分けてデイリーをまとめ、内容を確認してからチームに共有します。既存のOKRIワークスペースと連携します。" },
-    "zh-Hans": { "subtitle": "从目标到今天的工作", "description": "将团队目标和日常工作集中管理。查看OKR、项目与任务之间的联系，管理负责人和截止日期。分别查看例行工作与项目，整理日报并确认后与团队分享。与现有OKRI工作区配合使用。" },
-    "es-ES": { "subtitle": "De objetivos a tareas diarias", "description": "Reúne los objetivos de tu equipo y el trabajo diario. Explora la relación entre OKR, proyectos y tareas. Gestiona responsables y fechas límite, revisa tus rutinas y prepara una actualización diaria antes de compartirla con tu equipo. Funciona con tu espacio de trabajo de OKRI." }
+    "ko-KR": {
+      "title": "OKRI",
+      "subtitle": "목표부터 오늘 할 일까지",
+      "shortDescription": "OKR과 Project, Task, Routine, 데일리를 하나의 흐름으로 관리하세요.",
+      "description": "팀의 목표와 오늘의 업무를 한곳에서 관리하세요.\n\nObjective와 Key Result에서 Initiative, Project, Task까지 연결된 구조를 살펴볼 수 있습니다. 내 담당 업무와 기한을 확인하고, Project와 Routine을 구분해 데일리를 작성한 뒤 팀에 제출할 수 있습니다.\n\n주요 기능\n- Objective, Key Result, Initiative 관계 보기\n- Project와 하위 Task 관리\n- 내 담당 업무와 마감일 확인\n- 반복 업무 Routine 관리\n- 개인 데일리 작성과 제출\n- Project 일정 간트 보기\n- 여러 워크스페이스 전환\n\nGoogle 계정으로 시작할 수 있으며 iOS에서는 Apple 로그인도 지원합니다. OKRI 웹 서비스와 같은 워크스페이스 데이터를 사용합니다.",
+      "keywords": "OKR,목표관리,프로젝트,업무,할일,루틴,데일리,간트,팀",
+      "releaseNotes": "OKRI의 첫 모바일 버전입니다. 목표부터 오늘의 업무, Routine과 데일리까지 한곳에서 관리할 수 있습니다."
+    },
+    "en-US": {
+      "title": "OKRI",
+      "subtitle": "From goals to today's work",
+      "shortDescription": "Manage OKRs, projects, tasks, routines and daily updates in one connected flow.",
+      "description": "Keep your team's goals and today's work together.\n\nExplore the connected structure from Objectives and Key Results to Initiatives, Projects and Tasks. Check assigned work and deadlines, manage Projects separately from recurring Routines, and review a Daily update before submitting it to your team.\n\nKey features\n- Objective, Key Result and Initiative hierarchy\n- Projects with their Tasks\n- Assigned work and due dates\n- Recurring Routines\n- Personal Daily preparation and submission\n- Read-only Project Gantt schedule\n- Multiple workspace switching\n\nStart with Google, or use Sign in with Apple on iOS. The app works with the same workspace data as the OKRI web service.",
+      "keywords": "OKR,goals,project,tasks,routines,daily,gantt,team,productivity",
+      "releaseNotes": "The first OKRI mobile release brings goals, assigned work, Routines and Daily updates into one connected workspace."
+    },
+    "ja": {
+      "title": "OKRI",
+      "subtitle": "目標から今日の業務まで",
+      "shortDescription": "OKR、プロジェクト、タスク、ルーティン、デイリーを一つの流れで管理します。",
+      "description": "チームの目標と今日の業務をひとつにまとめて管理できます。\n\nObjectiveとKey ResultからInitiative、Project、Taskまで、つながった構造を確認できます。自分の担当業務と期限を確認し、Projectと繰り返しのRoutineを分けて管理し、内容を確認してからデイリーをチームに提出できます。\n\n主な機能\n- Objective、Key Result、Initiativeの階層\n- Projectと配下のTask\n- 担当業務と期限\n- 繰り返し業務のRoutine\n- 個人デイリーの作成と提出\n- Project日程のガント表示\n- 複数ワークスペースの切り替え\n\nGoogleアカウントで開始でき、iOSではAppleでサインインにも対応しています。OKRIウェブサービスと同じワークスペースデータを使用します。",
+      "keywords": "OKR,目標管理,プロジェクト,タスク,ルーティン,デイリー,ガント,チーム",
+      "releaseNotes": "OKRI初のモバイル版です。目標、担当業務、Routine、デイリーを一つのワークスペースで管理できます。"
+    },
+    "zh-Hans": {
+      "title": "OKRI",
+      "subtitle": "从目标到今天的工作",
+      "shortDescription": "在一个相互关联的流程中管理OKR、项目、任务、例行工作和日报。",
+      "description": "将团队目标和今天的工作集中管理。\n\n查看从Objective、Key Result到Initiative、Project和Task的关联结构。检查分配给你的工作与截止日期，分别管理Project和重复的Routine，并在确认内容后向团队提交日报。\n\n主要功能\n- Objective、Key Result与Initiative层级\n- Project及其Task\n- 负责的工作与截止日期\n- 重复工作的Routine\n- 个人日报撰写与提交\n- Project日程甘特视图\n- 多工作区切换\n\n可以使用Google账户开始，iOS也支持通过Apple登录。应用与OKRI网页服务使用相同的工作区数据。",
+      "keywords": "OKR,目标管理,项目,任务,例行工作,日报,甘特图,团队,效率",
+      "releaseNotes": "OKRI首个移动版本，将目标、负责的工作、Routine和日报整合到同一工作区。"
+    },
+    "es-ES": {
+      "title": "OKRI",
+      "subtitle": "De objetivos a tareas diarias",
+      "shortDescription": "Gestiona OKR, proyectos, tareas, rutinas y Daily en un solo flujo.",
+      "description": "Reúne los objetivos del equipo y el trabajo de hoy.\n\nConsulta la estructura conectada desde Objectives y Key Results hasta Initiatives, Projects y Tasks. Revisa el trabajo asignado y sus fechas límite, gestiona los Projects por separado de las Routines recurrentes y confirma tu actualización Daily antes de enviarla al equipo.\n\nFunciones principales\n- Jerarquía de Objective, Key Result e Initiative\n- Projects con sus Tasks\n- Trabajo asignado y fechas límite\n- Routines recurrentes\n- Preparación y envío del Daily personal\n- Cronograma Gantt de Projects\n- Cambio entre varios espacios de trabajo\n\nEmpieza con Google o usa Iniciar sesión con Apple en iOS. La app utiliza los mismos datos de espacio de trabajo que el servicio web de OKRI.",
+      "keywords": "OKR,objetivos,proyectos,tareas,rutinas,daily,gantt,equipo,productividad",
+      "releaseNotes": "La primera versión móvil de OKRI reúne objetivos, trabajo asignado, Routines y Daily en un espacio conectado."
+    }
   }
 }

@@ -3,6 +3,7 @@
 # dependencies
 node_modules/
 preview-dist/
+native-export/
 test-results/
 credentials.json
 artifacts/

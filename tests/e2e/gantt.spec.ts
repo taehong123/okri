@@ -20,22 +20,50 @@ test("Gantt is a real menu view with Project bars and expandable Task milestones
   await openGantt(page, mobile);
 
   const schedule = page.getByRole("group", { name: "Project와 Task 일정표" });
+  const dateNavigation = page.getByRole("group", { name: "날짜", exact: true });
   const projectTitle = schedule.locator(".gantt-project-label .gantt-title").filter({ hasText: "모바일 사용성 개선" });
   const taskTitle = schedule.locator(".gantt-task-label .gantt-title").filter({ hasText: "오버레이 동작 점검" });
   await expect(schedule).toBeVisible();
+  await expect(dateNavigation.getByRole("button")).toHaveCount(3);
+  await expect(dateNavigation.getByRole("button", { name: "오늘", exact: true })).toHaveAttribute("aria-current", "date");
+  const dateButtonStyles = await dateNavigation.getByRole("button").evaluateAll((buttons) => buttons.map((button) => {
+    const style = getComputedStyle(button);
+    return { color: style.color, backgroundColor: style.backgroundColor, borderRadius: style.borderRadius };
+  }));
+  expect(new Set(dateButtonStyles.map((style) => JSON.stringify(style))).size).toBe(1);
+  await expect(page.locator(".gantt-scroll")).toHaveCSS("border-radius", "0px");
+  await dateNavigation.getByRole("button", { name: "다음", exact: true }).click();
+  await expect(dateNavigation.getByRole("button", { name: "오늘", exact: true })).not.toHaveAttribute("aria-current", "date");
+  await dateNavigation.getByRole("button", { name: "오늘", exact: true }).click();
+  await expect(dateNavigation.getByRole("button", { name: "오늘", exact: true })).toHaveAttribute("aria-current", "date");
   await expect(projectTitle).toBeVisible();
-  await expect(taskTitle).toBeVisible();
+  await expect(taskTitle).toHaveCount(0);
   await expect(schedule.locator(".gantt-bar")).toHaveCount(1);
-  await expect(schedule.locator(".gantt-milestone")).toHaveCount(1);
+  await expect(schedule.locator(".gantt-milestone")).toHaveCount(0);
   await expect(page.locator(".gantt-project-row")).toHaveClass(/overdue/);
+  const barVisual = await schedule.locator(".gantt-bar").evaluate((bar) => {
+    const style = getComputedStyle(bar);
+    const progress = getComputedStyle(bar.querySelector(".gantt-bar-progress")!);
+    return {
+      backgroundColor: style.backgroundColor,
+      borderTopWidth: style.borderTopWidth,
+      progressHeight: Number.parseFloat(progress.height),
+    };
+  });
+  expect(barVisual.backgroundColor).toBe("rgba(0, 0, 0, 0)");
+  expect(barVisual.borderTopWidth).toBe("0px");
+  expect(barVisual.progressHeight).toBeLessThanOrEqual(2.1);
 
   const expander = schedule.locator(".gantt-project-label .gantt-expand");
-  await expect(expander).toHaveAccessibleName(/모바일 사용성 개선 · 접기/);
-  await expander.click();
+  await expect(expander).toHaveAccessibleName(/모바일 사용성 개선 · 펼치기/);
   await expect(expander).toHaveAttribute("aria-expanded", "false");
-  await expect(taskTitle).toHaveCount(0);
   await expander.click();
+  await expect(expander).toHaveAttribute("aria-expanded", "true");
   await expect(taskTitle).toBeVisible();
+  await expect(schedule.locator(".gantt-milestone")).toHaveCount(1);
+  await expect(schedule.locator(".gantt-milestone svg")).toHaveCount(0);
+  await expander.click();
+  await expect(taskTitle).toHaveCount(0);
 
   await page.getByRole("button", { name: "월간", exact: true }).click();
   await expect(page.getByRole("button", { name: "월간", exact: true })).toHaveAttribute("aria-pressed", "true");
@@ -79,6 +107,7 @@ test("Gantt remains contained with 200 percent text and opens Project and Task d
   await expect(schedule).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
 
+  await schedule.locator(".gantt-project-label .gantt-expand").click();
   await schedule.locator(".gantt-task-label .gantt-title").filter({ hasText: "오버레이 동작 점검" }).click();
   await expect(page).toHaveURL(/task=task-1/);
   await page.goBack();

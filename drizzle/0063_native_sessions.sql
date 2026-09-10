@@ -1,4 +1,4 @@
--- Ensure native tables on databases where 0055 was deployed before 0054.
+-- Add native authentication tables after the currently deployed web migrations.
 CREATE TABLE IF NOT EXISTS native_auth_codes (
   code_hash TEXT PRIMARY KEY NOT NULL,
   user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

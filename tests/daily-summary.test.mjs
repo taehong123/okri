@@ -76,3 +76,31 @@ test("daily completion headings use all supported languages and skipped reports 
   assert.match(skipped[0], /오늘 데일리 스킵/);
   assert.doesNotMatch(skipped[0], /완료한 일/);
 });
+
+test("published Daily hides completion controls publicly and renders them only in the private card", async () => {
+  const tasks = Array.from({ length: 21 }, (_, index) => ({
+    taskId: `task-${index}`, taskTitle: index === 0 ? "Done <&>" : `Plan ${index}`,
+    parentTitle: "Launch", parentKind: "project", parentId: "project", status: "todo", isNew: false, sortOrder: index,
+  }));
+  const card = dailyCard(submission({ tasks }), undefined, {
+    publicationId: "publication", completedTaskIds: new Set(["task-0"]),
+  });
+  const publicButtons = card.blocks.flatMap((block) => block.accessory?.action_id === "daily_publication_complete" ? [block.accessory] : []);
+  assert.equal(publicButtons.length, 0);
+  const privateCard = dailyCard(submission({ tasks }), undefined, {
+    publicationId: "publication", completedTaskIds: new Set(["task-0"]), showCompletionButtons: true,
+  });
+  const buttons = privateCard.blocks.flatMap((block) => block.accessory?.action_id === "daily_publication_complete" ? [block.accessory] : []);
+  assert.equal(buttons.length, 19);
+  assert.ok(card.blocks.length < 50);
+  assert.match(JSON.stringify(card.blocks), /Project · Launch/);
+  assert.match(JSON.stringify(card.blocks), /~Done &lt;&amp;&gt;~/);
+  assert.match(JSON.stringify(card.blocks), /외 1개/);
+  assert.doesNotMatch(JSON.stringify(card.blocks.find((block) => block.text?.text?.includes("~Done"))), /daily_publication_complete/);
+  assert.deepEqual(JSON.parse(buttons[0].value), { publicationId: "publication", taskId: "task-1", privateControl: true });
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const t = await serverLanguage.serverTranslator(language);
+    const translated = dailyCard(submission({ tasks: tasks.slice(0, 1) }), t, { publicationId: "publication", showCompletionButtons: true });
+    assert.equal(translated.blocks.find((block) => block.accessory)?.accessory.text.text, t("완료"));
+  }
+});

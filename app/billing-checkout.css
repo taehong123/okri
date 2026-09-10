@@ -51,9 +51,104 @@
 .billing-page .billing-usage-grid {
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr));
 }
+.billing-page .billing-plan-grid {
+  gap: 0;
+  align-items: stretch;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+.billing-page .billing-plan-card {
+  grid-template-rows: auto auto auto auto 1fr;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--space-4);
+  border: 0;
+  border-left: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.billing-page .billing-plan-card:first-child { border-left: 0; }
+.billing-page .billing-plan-card.current { border-color: var(--line); box-shadow: none; }
+.billing-page .billing-plan-card.selected { box-shadow: inset 0 2px 0 var(--focus-ring); }
+.billing-page .billing-plan-heading { display: grid; gap: var(--space-2); }
+.billing-page .billing-plan-heading h4 { font-size: var(--type-section); }
+.billing-page .billing-plan-badges { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.billing-page .billing-plan-badges span {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0;
+  padding: 3px var(--space-2);
+  border-radius: 999px;
+  background: var(--selected-bg);
+  color: var(--selected-fg);
+  font-size: var(--type-meta);
+  font-weight: 700;
+}
+.billing-page .billing-plan-price { display: grid; gap: var(--space-1); margin: 0; }
+.billing-page .billing-plan-price strong {
+  color: var(--text-primary);
+  font-size: var(--type-page);
+  line-height: 1.25;
+}
+.billing-page .billing-plan-price > span,
+.billing-page .billing-plan-total,
+.billing-page .billing-plan-footnote {
+  color: var(--text-secondary);
+  font-size: var(--type-label);
+  line-height: 1.6;
+}
+.billing-page .billing-plan-total { min-height: calc(var(--type-label) * 1.6); margin: 0; }
+.billing-page .billing-plan-action { min-height: var(--control-height); display: flex; align-items: stretch; }
+.billing-page .billing-plan-action > button,
+.billing-page .billing-plan-action > span {
+  width: 100%;
+  min-height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-control);
+  font-size: var(--type-label);
+  font-weight: 700;
+  text-align: center;
+}
+.billing-page .billing-plan-action > span {
+  border: 1px solid var(--border-default);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+}
+.billing-page .billing-plan-card ul {
+  align-content: start;
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--line);
+}
+.billing-page .billing-plan-card li { font-size: var(--type-label); line-height: 1.6; }
+.billing-page .billing-plan-footnote { margin: var(--space-4) 0 0; }
+.billing-page .billing-checkout-summary {
+  display: grid;
+  gap: var(--space-1);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--line);
+}
+.billing-page .billing-checkout-summary > span { color: var(--text-tertiary); font-size: var(--type-meta); font-weight: 700; }
+.billing-page .billing-checkout-summary > b { color: var(--text-primary); font-size: var(--type-section); }
+.billing-page .billing-checkout-summary > p { margin: 0; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
 .billing-page .billing-usage-grid article > header { flex-wrap: wrap; }
 .billing-page .billing-usage-grid article > header b {
   min-width: 0;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+@media (max-width: 980px) {
+  .billing-page .billing-plan-grid { border-bottom: 0; }
+  .billing-page .billing-plan-card,
+  .billing-page .billing-plan-card:first-child {
+    padding: var(--space-6) 0;
+    border-left: 0;
+    border-top: 1px solid var(--line);
+  }
+  .billing-page .billing-plan-card:first-child { border-top: 0; }
+  .billing-page .billing-plan-card.selected { box-shadow: inset 2px 0 0 var(--focus-ring); }
+  .billing-page .billing-plan-action > button,
+  .billing-page .billing-plan-action > span { min-height: 44px; }
 }

@@ -77,8 +77,10 @@ test("web reads reference context and rules for the authenticated workspace, wit
       authorizeRequest: async () => ({ ownerId: "workspace-a", userId: "user-a" }),
       ensureWorkspace: async (id) => calls.push(["ensure", id]),
       getWorkspaceRules: async (id) => { calls.push(["rules", id]); return { reviewBeforeCreate: true }; },
-      getAiUsageSummary: async () => ({ requestsThisMinute: 0, requestsToday: 0 }),
-      recordAiUsageEvent: async (event) => calls.push(["usage", event.ownerId]),
+      getAiUsageSummary: async () => ({ requestsThisMinute: 0, requestsToday: 0, workspaceRequestsThisMinute: 0, workspaceRequestsToday: 0 }),
+      reserveAiUsageEvent: async () => "reservation-a",
+      finalizeAiUsageEvent: async (id, event) => { assert.equal(id, "reservation-a"); calls.push(["usage", event.ownerId]); },
+      releaseAiUsageReservation: async () => {},
     },
     "@/lib/billing": { BillingLimitError: class extends Error {}, assertAiBudget: async () => ({ limitWon: null, spentWonMicros: 0 }) },
     "@/lib/work-intake": { ...intake, readWorkContext: async (db, ownerId, userId) => {

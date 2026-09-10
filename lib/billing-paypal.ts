@@ -8,6 +8,7 @@ import {
 type Row = {
   id: string; workspace_id: string; user_id: string; plan: PayPalPlan; provider_plan_id: string;
   provider_subscription_id: string | null; approval_url: string | null; currency: string; price_value: string;
+  seat_count: number; pending_seat_count: number | null;
   status: string; paid_through: string | null; closed_at: string | null; created_at: string;
 };
 
@@ -19,6 +20,7 @@ export async function ensurePayPalSchema() {
         id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, user_id TEXT NOT NULL,
         plan TEXT NOT NULL CHECK (plan IN ('team','business')), provider_plan_id TEXT NOT NULL,
         provider_subscription_id TEXT UNIQUE, approval_url TEXT, currency TEXT NOT NULL, price_value TEXT NOT NULL,
+        seat_count INTEGER NOT NULL DEFAULT 1, pending_seat_count INTEGER,
         status TEXT NOT NULL DEFAULT 'CREATING', paid_through TEXT, closed_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
       env.DB.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_paypal_open_workspace ON billing_paypal_subscriptions(workspace_id) WHERE closed_at IS NULL"),
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS billing_paypal_transactions (
@@ -62,6 +64,12 @@ export async function payPalCheckoutOptions() {
   catch (error) { console.error("PayPal checkout readiness", error instanceof PayPalError ? error.code : "request_failed"); return []; }
 }
 
+async function billableEditorCount(workspaceId: string) {
+  const row = await env.DB.prepare(`SELECT count(*) AS count FROM workspace_members
+    WHERE workspace_id=? AND status='active' AND role IN ('owner','admin','member')`).bind(workspaceId).first<{ count: number }>();
+  return Math.max(1, Number(row?.count ?? 0));
+}
+
 export async function withWorkspaceLock<T>(workspaceId: string, action: () => Promise<T>) {
   const holder = crypto.randomUUID();
   const key = `paypal:${workspaceId}`;
@@ -75,10 +83,11 @@ export async function withWorkspaceLock<T>(workspaceId: string, action: () => Pr
   finally { await env.DB.prepare("DELETE FROM billing_leases WHERE lease_key = ? AND holder_id = ?").bind(key, holder).run(); }
 }
 
-export async function createPayPalCheckout(workspaceId: string, userId: string, plan: PayPalPlan, quoted: { currency: unknown; value: unknown }) {
+export async function createPayPalCheckout(workspaceId: string, userId: string, plan: PayPalPlan, quoted: { currency: unknown; value: unknown; seats: unknown }) {
   return withWorkspaceLock(workspaceId, async () => {
     const price = await getPayPalPrice(plan);
-    if (quoted.currency !== price.currency || quoted.value !== price.value) throw new PayPalError("billing_price_changed", 409);
+    const seats = await billableEditorCount(workspaceId);
+    if (quoted.currency !== price.currency || quoted.value !== price.value || quoted.seats !== seats) throw new PayPalError("billing_price_changed", 409);
     const other = await env.DB.prepare(`SELECT 1 FROM workspace_subscriptions WHERE workspace_id = ? AND plan != 'free'
       AND NOT EXISTS (SELECT 1 FROM billing_paypal_subscriptions WHERE workspace_id = ? AND closed_at IS NULL)`)
       .bind(workspaceId, workspaceId).first();
@@ -92,8 +101,8 @@ export async function createPayPalCheckout(workspaceId: string, userId: string, 
       const now = new Date().toISOString();
       const id = crypto.randomUUID();
       await env.DB.prepare(`INSERT INTO billing_paypal_subscriptions
-        (id,workspace_id,user_id,plan,provider_plan_id,currency,price_value,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`)
-        .bind(id, workspaceId, userId, plan, price.planId, price.currency, price.value, now, now).run();
+        (id,workspace_id,user_id,plan,provider_plan_id,currency,price_value,seat_count,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+        .bind(id, workspaceId, userId, plan, price.planId, price.currency, price.value, seats, now, now).run();
       row = (await getPayPalSubscription(workspaceId))!;
     }
     if (row.provider_subscription_id) {
@@ -106,7 +115,7 @@ export async function createPayPalCheckout(workspaceId: string, userId: string, 
     const origin = paypalPublicOrigin();
     const remote = await paypalRequest<PayPalSubscription>("/v1/billing/subscriptions", {
       method: "POST", requestId: row.id, body: {
-        plan_id: row.provider_plan_id, custom_id: row.id, quantity: "1",
+        plan_id: row.provider_plan_id, custom_id: row.id, quantity: String(row.seat_count),
         application_context: { brand_name: "OKRI", shipping_preference: "NO_SHIPPING", user_action: "SUBSCRIBE_NOW",
           return_url: `${origin}/?view=billing&paypal=return`, cancel_url: `${origin}/?view=billing&paypal=cancel` },
       },
@@ -138,15 +147,22 @@ export function paidMonthEndsAt(value: string, startTime = value) {
   return end.toISOString();
 }
 
-export function validatePayPalSubscription(row: Pick<Row, "id" | "provider_plan_id" | "provider_subscription_id">, remote: PayPalSubscription) {
+export function validatePayPalSubscription(row: Pick<Row, "id" | "provider_plan_id" | "provider_subscription_id" | "seat_count" | "pending_seat_count">, remote: PayPalSubscription) {
+  const quantityMatches = remote.quantity === String(row.seat_count)
+    || (row.pending_seat_count !== null && remote.quantity === String(row.pending_seat_count));
   if (remote.id !== row.provider_subscription_id || remote.plan_id !== row.provider_plan_id || remote.custom_id !== row.id
-    || (remote.quantity && remote.quantity !== "1") || remote.plan_overridden) throw new PayPalError("paypal_subscription_mismatch", 409);
+    || !quantityMatches || remote.plan_overridden) throw new PayPalError("paypal_subscription_mismatch", 409);
 }
 
 async function syncSubscription(row: Row) {
   if (!row.provider_subscription_id) throw new PayPalError("billing_reconciliation_required", 409);
   const remote = await paypalRequest<PayPalSubscription>(`/v1/billing/subscriptions/${encodeURIComponent(row.provider_subscription_id)}`);
   validatePayPalSubscription(row, remote);
+  if (row.pending_seat_count !== null && remote.quantity === String(row.pending_seat_count)) {
+    await env.DB.prepare(`UPDATE billing_paypal_subscriptions SET seat_count=?,pending_seat_count=NULL,approval_url=NULL,updated_at=? WHERE id=?`)
+      .bind(row.pending_seat_count, new Date().toISOString(), row.id).run();
+    row = { ...row, seat_count: row.pending_seat_count, pending_seat_count: null, approval_url: null };
+  }
   const now = new Date().toISOString();
   const start = new Date(Date.now() - 31 * 24 * 60 * 60_000).toISOString();
   const query = new URLSearchParams({ start_time: start, end_time: now });
@@ -154,7 +170,10 @@ async function syncSubscription(row: Row) {
   const statements = [];
   for (const payment of history.transactions || []) {
     const amount = payment.amount_with_breakdown?.gross_amount;
-    if (!amount || amount.currency_code !== row.currency || Number(amount.value) !== Number(row.price_value)) {
+    const unitPrice = Number(row.price_value);
+    const quantity = Number(amount?.value) / unitPrice;
+    const wholeQuantity = Math.abs(quantity - Math.round(quantity)) < 1e-9;
+    if (!amount || amount.currency_code !== row.currency || !Number.isFinite(unitPrice) || unitPrice <= 0 || !wholeQuantity || quantity < 1) {
       throw new PayPalError("paypal_payment_mismatch", 409);
     }
     if (!Number.isFinite(Date.parse(payment.time)) || Date.parse(payment.time) > Date.now() + 60_000) throw new PayPalError("paypal_invalid_payment_time");
@@ -194,6 +213,46 @@ export async function syncPayPalWorkspace(workspaceId: string) {
     const row = await getPayPalSubscription(workspaceId);
     if (!row) return { entitled: false, pending: false };
     return syncSubscription(row);
+  });
+}
+
+export async function revisePayPalSeats(workspaceId: string) {
+  return withWorkspaceLock(workspaceId, async () => {
+    let row = await getPayPalSubscription(workspaceId);
+    if (!row?.provider_subscription_id) throw new PayPalError("billing_subscription_not_found", 409);
+    const subscriptionId = row.provider_subscription_id;
+    const remote = await paypalRequest<PayPalSubscription>(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}`);
+    validatePayPalSubscription(row, remote);
+    if (remote.status !== "ACTIVE") throw new PayPalError("billing_subscription_not_active", 409);
+    if (row.pending_seat_count !== null && remote.quantity === String(row.pending_seat_count)) {
+      await env.DB.prepare(`UPDATE billing_paypal_subscriptions SET seat_count=?,pending_seat_count=NULL,approval_url=NULL,updated_at=? WHERE id=?`)
+        .bind(row.pending_seat_count, new Date().toISOString(), row.id).run();
+      row = { ...row, seat_count: row.pending_seat_count, pending_seat_count: null, approval_url: null };
+    }
+    const seats = await billableEditorCount(workspaceId);
+    if (remote.quantity === String(seats)) {
+      await env.DB.prepare(`UPDATE billing_paypal_subscriptions SET seat_count=?,pending_seat_count=NULL,approval_url=NULL,updated_at=? WHERE id=?`)
+        .bind(seats, new Date().toISOString(), row.id).run();
+      return { changed: false, seats };
+    }
+    if (row.pending_seat_count !== null && row.approval_url) {
+      return { changed: true, seats: row.pending_seat_count, approvalUrl: safePayPalApprovalUrl(row.approval_url) };
+    }
+    const origin = paypalPublicOrigin();
+    const revised = await paypalRequest<PayPalSubscription>(`/v1/billing/subscriptions/${encodeURIComponent(subscriptionId)}/revise`, {
+      method: "POST", body: {
+        plan_id: row.provider_plan_id,
+        quantity: String(seats),
+        application_context: { brand_name: "OKRI", shipping_preference: "NO_SHIPPING", user_action: "SUBSCRIBE_NOW",
+          return_url: `${origin}/?view=billing&paypal=return`, cancel_url: `${origin}/?view=billing&paypal=cancel` },
+      },
+    });
+    const approval = revised.links?.find((link) => link.rel === "approve")?.href;
+    if (!approval) throw new PayPalError("paypal_invalid_subscription");
+    const approvalUrl = safePayPalApprovalUrl(approval);
+    await env.DB.prepare(`UPDATE billing_paypal_subscriptions SET pending_seat_count=?,approval_url=?,updated_at=? WHERE id=?`)
+      .bind(seats, approvalUrl, new Date().toISOString(), row.id).run();
+    return { changed: true, seats, approvalUrl };
   });
 }
 

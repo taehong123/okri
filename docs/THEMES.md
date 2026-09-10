@@ -1,5 +1,22 @@
 # OKRI design and theme contract
 
+## First-login setup
+
+- `app/first-run-setup.tsx` uses the existing dialog, Pretendard and semantic
+  typography/field/focus roles. One conversational question is shown at a time:
+  personal/team, workspace, Objective, KR, optional Initiative, review, feature guide.
+- Examples are placeholders, never persisted sample data. The final review
+  contains the user's answers; edits clear its confirmation checkbox.
+- `app/first-run-setup.css` is a focused form surface, not another theme.
+  No viewport font scaling, decorative banner, nested cards or new palette.
+- Close saves and pauses while preserving the underlying business route.
+  Existing accounts and invitation/OAuth/detail links are not intercepted.
+- Drafts belong to the account, not browser storage. New accounts opt in during
+  registration; legacy NULL values never automatically start setup.
+- `tests/onboarding.test.mjs` covers migration, atomic writes, access, conflict
+  and retries. `tests/e2e/onboarding.spec.ts` verifies personal/team/resume/viewer,
+  response-loss and responsive flows with mocked writes.
+
 ## Design source and structure preservation
 
 The upstream design source is [ALLVIBE Design v1.0.0](https://github.com/all-vibe/all-vibe-agent-toolkit/blob/4f927714f728abcbe8920a3c39aad49692758c46/plugins/all-vibe-design/skills/all-vibe-design/SKILL.md), shared by 조성배 on 2026-08-24.
@@ -60,7 +77,7 @@ Stronger text steps are selected when necessary to meet 4.5:1 WCAG contrast.
 
 | Theme | Neutral | KR and main accent | Initiative |
 | --- | --- | --- | --- |
-| White | Gray | Ink / Gray | Slate |
+| White | Gray | Ink / Gray | Gray |
 | Beige | Sand | Gold | Teal |
 | Gray | Slate | Teal | Violet |
 | Dark | Gray Dark | Blue Dark | Violet Dark |
@@ -69,6 +86,16 @@ Stronger text steps are selected when necessary to meet 4.5:1 WCAG contrast.
 
 Bright accents belong on controls, rails and badges, not large tinted panels.
 Status colors retain their meaning independently of the hierarchy palette.
+Default workflow states such as Todo and medium priority follow the active
+theme accent instead of introducing the blue information palette. Reserve
+`info-*` for actual informational feedback, and keep user-chosen blue groups.
+White navigation uses the same white canvas as the page, including the loading
+sidebar, mobile navigation and settings navigation. Hover and selection use
+neutral Gray steps. Generic guidance, default avatars, empty-state icons and
+setup steps use text/icon/surface roles, never the blue information-status role.
+White Initiative labels and rails are neutral Gray as well. Keep informational
+alerts, workflow statuses, user-chosen group colors and external brands distinct;
+do not desaturate them or replace a user's saved theme.
 Upstream licenses are retained with the font assets and in
 `public/RADIX-COLORS-LICENSE.txt`. Font reference:
 [Pretendard variable subsets](https://github.com/orioncactus/pretendard#%EA%B0%80%EB%B3%80-%EB%8B%A4%EC%9D%B4%EB%82%98%EB%AF%B9-%EC%84%9C%EB%B8%8C%EC%85%8B).
@@ -126,6 +153,29 @@ Do not apply desktop sidebar padding or navigation margins to the mobile bar.
   navigation, settings header separation and keyboard close, and six-theme
   conversation contrast. All application requests use fictional fixtures.
 ### Create and edit surfaces
+
+Detail views are read-first documents. Project, Task and Routine properties use
+`DocumentProperties`: a compact summary, a collapsed read-only definition list,
+and a separate `변경` dialog for existing edit controls. Opening or expanding a
+document must not write data. Saved values, custom property names, hide/restore
+behavior, permissions and Routine draft/discard confirmation remain intact.
+`app/document-view.css` shares this layout after the existing field styles.
+Project content uses one column; the recent-update feed remains visible, while
+bot enable controls and template tools stay out of the default reading surface.
+Titles are headings, not permanent input fields. Completion stays a direct work
+action. The `document-view.spec.ts` checks read/edit separation, nested-dialog
+focus, Viewer access, six themes, actual fonts and 320–3840px/200% layouts.
+
+Document edit mode uses the existing BlockNote controls in a small, wrapping
+formatting row. Template actions share the Change button's height, typography
+and semantic action states; do not stretch the final action across mobile rows.
+Reading mode has no toolbar. Autosave must preserve cursor and undo history;
+replace the editor only when explicitly applying a template, not after saving.
+Project, Task and custom Routine images use authenticated, workspace-scoped R2
+objects. Accept only verified PNG/JPEG/WebP/GIF up to 5 MB, with bounded reads,
+no public image caching and server-side target/role checks. Image bytes never
+belong in document JSON or browser storage. `document-editor.spec.ts` and
+`document-images.test.mjs` cover persistence, failures, permissions and layout.
 
 `app/item-editor.css` is the shared field/layout layer loaded after `globals.css`
 and `workspace-design.css`.

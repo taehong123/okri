@@ -91,6 +91,42 @@ test("first paint preserves every saved theme and tolerates missing, invalid or 
   assert.equal(root.dataset.theme, DEFAULT_THEME);
 });
 
+test("white chrome is strictly neutral while semantic status colors retain meaning", () => {
+  const white = THEMES.find((theme) => theme.mode === "white").tokens;
+  const roles = ["bg-page", "bg-sidebar", "bg-surface", "bg-subtle", "bg-hover", "bg-raised", "text-primary", "text-secondary", "text-tertiary", "text-link", "icon-default", "border-default", "border-control", "menu-bg", "menu-fg", "modal-bg", "input-bg", "input-fg", "selected-bg", "selected-fg", "initiative-badge-bg", "initiative-badge-text", "initiative-rail"];
+  for (const role of roles) {
+    const channels = white[role].slice(1).match(/../g).map((part) => parseInt(part, 16));
+    assert.equal(new Set(channels).size, 1, `${role} must have no color cast`);
+  }
+  assert.equal(white["bg-sidebar"], white["bg-page"]);
+  assert.notEqual(white["danger-fg"], white["text-primary"]);
+  assert.notEqual(white["success-fg"], white["text-primary"]);
+  assert.notEqual(white["info-fg"], white["text-primary"]);
+  assert.doesNotMatch(css, /var\(--blue\)/, "legacy blue must not style generic UI");
+  const rules = postcss.parse(css);
+  rules.walkRules((rule) => {
+    if (!/^\.(assistant-stage|assistant-example|chat-okr-context|general-routine-icon|system-badge|integration-service-icon|workspace-daily-bot-heading|integration-oauth-flow)/.test(rule.selector)) return;
+    rule.walkDecls((decl) => assert.doesNotMatch(decl.value, /var\(--info-(?:fg|bg)\)/, `${rule.selector} is not a status alert`));
+  });
+});
+
+test("default workflow states use the theme accent while informational blue stays semantic", () => {
+  const rules = postcss.parse(css);
+  for (const selector of [".status-todo", ".priority-medium", ".status-dot.status-todo"]) {
+    const declarations = [];
+    rules.walkRules((rule) => {
+      if (rule.selector?.split(",").map((entry) => entry.trim()).includes(selector)) {
+        rule.walkDecls((declaration) => declarations.push(declaration.value));
+      }
+    });
+    assert.ok(declarations.length > 0, `${selector} must be styled`);
+    assert.ok(declarations.some((value) => /var\(--accent(?:-fg)?\)/.test(value)), `${selector} must follow the active accent`);
+    assert.ok(declarations.every((value) => !/var\(--info-(?:fg|bg)\)/.test(value)), `${selector} must not introduce informational blue`);
+  }
+  assert.match(css, /\.toast-info\s*\{[^}]*var\(--info-bg\)/, "informational feedback keeps its semantic palette");
+  assert.match(css, /\.group-blue\s*\{[^}]*var\(--info-bg\)/, "user-chosen blue groups stay blue");
+});
+
 test("readability uses scalable roles instead of per-screen font patches or CSS zoom", () => {
   const root = postcss.parse(css);
   const roles = { "--type-body": "1rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.125rem", "--type-page": "1.5rem" };
@@ -114,6 +150,12 @@ test("readability uses scalable roles instead of per-screen font patches or CSS 
   const white = THEMES.find((theme) => theme.mode === "white").tokens;
   assert.equal(white["text-link"], white["text-primary"]);
   assert.equal(white["focus-ring"], white["text-primary"]);
+});
+
+test("mobile daily completion stays compact without shrinking its touch target", () => {
+  assert.match(css, /\.app-shell \.scrum-toolbar > div \{[^}]*grid-template-columns: minmax\(0, 1fr\) auto;/);
+  assert.match(css, /\.app-shell \.scrum-toolbar > div > button\.primary-action \{[^}]*width: auto;[^}]*min-width: max-content;[^}]*border-radius: 999px;/);
+  assert.match(css, /\.app-shell \.scrum-toolbar > div > button\.primary-action \{[^}]*justify-self: end;/);
 });
 
 test("hierarchy colors change with each theme instead of sharing fixed rails", () => {

@@ -2,6 +2,29 @@
 export const WORK_KINDS = ["task", "project", "routine", "objective", "key_result", "initiative", "unsure"] as const;
 export type WorkKind = (typeof WORK_KINDS)[number];
 
+const GENERIC_CONTEXT_PLACEHOLDER = /^(?:(?:원본|위|이|해당|관련)\s*)?(?:Slack\s*)?(?:스레드|대화|메시지|채팅|원문)(?:(?:\s*(?:업무|작업|내용|원문|컨텍스트)){0,2})\s*(?:확인|파악|읽기|검토|조회|정리)(?:하기)?$|^(?:check|read|review|inspect)\s+(?:the\s+)?(?:original\s+)?(?:thread|conversation|message|context)(?:\s+(?:content|source))?$/iu;
+const KOREAN_MISSING_CONTEXT_REPORT = /(?:원본\s*)?(?:스레드|대화|원문|메시지)[\s\S]{0,120}(?:읽지\s*못|확인할\s*수\s*없|접근할\s*수\s*없|보이지\s*않|내용이?\s*(?:보이면|확인되면)|다시\s*정리)/iu;
+const ENGLISH_MISSING_CONTEXT_REPORT = /(?:(?:thread|conversation|context|message)[\s\S]{0,100}(?:not\s+(?:available|provided|visible)|becomes?\s+available)|(?:could(?:\s+not|n't)|unable\s+to)\s+(?:read|access|see)[\s\S]{0,60}(?:thread|conversation|context|message))/iu;
+const CONCRETE_REPAIR_WORK = /(?:수정|고치|해결|구현|지원|복구|조사|디버그|fix|resolve|implement|support|restore|investigate|debug)/iu;
+
+const GENERIC_INQUIRY_PLACEHOLDER = /^(?:문의|요청)\s*(?:내용|원문)?\s*(?:확인|파악|검토)(?:하기)?$/u;
+
+export function assertConcreteWorkInput(input: { title: string; description?: string }) {
+  const title = input.title.trim();
+  const combined = `${title}\n${input.description ?? ""}`;
+  const unresolvedReference = KOREAN_MISSING_CONTEXT_REPORT.test(combined)
+    || ENGLISH_MISSING_CONTEXT_REPORT.test(combined);
+  if (GENERIC_CONTEXT_PLACEHOLDER.test(title)
+    || GENERIC_INQUIRY_PLACEHOLDER.test(title)
+    || (unresolvedReference && !CONCRETE_REPAIR_WORK.test(title))) {
+    throw new Error(
+      "Referenced conversation content was not included in this tool call, so nothing was saved. "
+      + "Use the messages already visible to the host model and call again with the concrete work. "
+      + "If those messages are not visible, tell the user that no record was created; never create a placeholder Task.",
+    );
+  }
+}
+
 export const WORK_CLASSIFICATION = {
   task: "한 가지 완료 결과를 가진 실행. 내부 순서는 체크리스트. 소요 시간이나 제목의 '개선/개발'만으로 Project로 올리지 않는다.",
   project: "여러 독립 Task를 묶어 달성하는 종료 가능한 결과물. 범위/완료 기준이 있고 담당·기한·상태를 별도로 관리할 필요가 있다.",
@@ -67,6 +90,7 @@ export const CONVERSATION_POLICY = [
 
 export const WORKFLOW_INSTRUCTIONS = [
   "OKRI fast intake: understand and classify in the current conversation; do not call another LLM or create placeholder records to classify work.",
+  "The MCP server receives only tool arguments and cannot fetch the host conversation transcript by itself. The host model can use messages visible in its current context, including a ChatGPT conversation or a Slack thread supplied by the bridge. When the user says 'this', 'above', 'this thread', or similar, extract the concrete work from that visible context and pass it in the tool arguments. Never say that OKRI tried and failed to read the thread. If the relevant messages are not visible, make no write call, state that nothing was saved, and ask the user to include or quote the missing content. Never create a Task whose purpose is to inspect, recover, or re-read unavailable conversation context.",
   CONVERSATION_POLICY,
   "Task = one independently completable action/result (small internal steps are a checklist). Project = a finite deliverable with scope/completion criteria and multiple independently managed Tasks. Routine = repeated work triggered by time/event/state, independent of OKR. Classify by completion boundary, not duration, keywords, or number of verbs. Respect a user's explicit type; explain a structural conflict instead of silently changing it.",
   "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee and only incomplete/complete lifecycle states; Project DRI/workers, workflow statuses, progress, managed properties and block documents are Project-only.",
@@ -77,6 +101,7 @@ export const WORKFLOW_INSTRUCTIONS = [
   "PROJECT APPROVAL IS MANDATORY and overrides reviewBeforeCreate and conflicting workspace defaults: a generic creation request does not authorize picking an Initiative. Read Initiative descriptions and their KR/Objective context. Recommend at most 3 only with concrete contribution reasons, not recency or vague keywords. Present title/scope, owners, deadline, every defaulted/provided property and recommended paths using manage_project. The user chooses and confirms in this conversation; accept edits here and call manage_project again with action=confirm. If the client exposes only legacy create_item, keep its returned same_tool_confirmation value internal and reuse it after approval. Do not require a browser visit, a separate chat, an @OKRI mention, or an ID pasted by the user. Never fabricate consent, select the first/only parent automatically, add unseen fields at save time, or bypass review. If the user already explicitly approved this exact proposal and connection, do not ask the same confirmation again. A clear Task may still use General.",
   "Use create_tasks once for explicitly supplied Tasks sharing a container and common fields. Use create_item for non-Project items and manage_project for the full Project lifecycle. Never generate extra Tasks. Routine children use routine_id. Children inherit the selected parent's cycle_id. A pending/failed review is NOT a created Project. If compatibility tools are available, get_project_review can refresh candidates and confirm_project can repeat an identical lost confirmation; otherwise keep using manage_project or the legacy create_item same-tool flow. Never make another proposal after an uncertain save. cancel_project_review cancels a pending draft in this conversation.",
   "After a successful write, use the returned record as confirmation: do not list everything again. Reply briefly with saved type/title, actual container, owner/date when present, and important unset fields. Never claim a draft was saved or a notification delivered. On an uncertain write failure, look for the saved record before retrying. Read-only planning must not create data. Deletions, invitations and external actions retain their own permission/confirmation rules.",
+  "Projects may include images copied from a Slack creation thread. Project records expose imageCount; use list_project_images, then read_project_image to inspect the actual visual before answering screenshot-, design-, error-, or diagram-dependent requests. Do not infer image contents from the filename alone.",
 ].join("\n");
 
 export type WorkContextInput = {
@@ -91,6 +116,7 @@ export type WorkContextInput = {
 export const READ_ONLY_MCP_TOOLS = new Set([
   "prepare_work", "get_project_review", "get_workspace_rules", "list_items", "review_period", "list_properties",
   "get_project_document", "list_project_templates", "list_checklist_items", "get_daily_scrum",
+  "list_project_images", "read_project_image",
   "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members",
 ]);
 

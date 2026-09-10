@@ -503,7 +503,7 @@ export function OkrFileSurface({
     {error && <div className="okr-file-refresh-state error" role="status"><AlertTriangle size={12} />{error}</div>}
     {readFile.objective ? <section className="okr-file-read-tree">
       <div id={`okr-search-${readFile.objective.id}`} tabIndex={-1} className={`okr-file-read-objective ${focusId === readFile.objective.id ? "search-target" : ""}`}>
-        <span className="type-icon type-objective">O</span>
+        <Target className="okr-read-objective-icon" size={24} aria-hidden="true" />
         <div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div>
         {!readOnly && <button type="button" className="icon-button" onClick={() => void beginEdit()} disabled={editLoading} aria-busy={editLoading} aria-label={t("파일 수정")} title={editLoading ? t("편집 준비 중") : t("파일 수정")}>
           {editLoading ? <LoaderCircle className="spin" size={16} /> : <Pencil size={16} />}
@@ -550,19 +550,19 @@ function OkrReadKeyResult({
   const keyResultExpanded = expandedRows.has(keyResultId);
   const initiativesId = `okr-tree-${keyResultId}`;
   const hasInitiatives = keyResult.initiatives.length > 0;
+  const summary = <>
+    <span className="okr-tree-copy"><small>{t("Key Result")} {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
+    <span className="okr-tree-metrics">
+      <span><small>{t("진척도")}</small><b className="okr-tree-progress">{keyResult.progress}%</b></span>
+      <span className="okr-tree-count"><small>{t("Initiative")}</small><b>{keyResult.initiatives.length}</b></span>
+    </span>
+  </>;
   return <section id={`okr-search-${keyResultId}`} tabIndex={-1} className={`okr-file-read-kr ${focusId === keyResultId ? "search-target" : ""}`}>
     {hasInitiatives ? <button type="button" className="okr-tree-row okr-tree-kr-row" aria-expanded={keyResultExpanded} aria-controls={initiativesId} onClick={() => onToggle(keyResultId)}>
+      {summary}
       <TreeChevron expanded={keyResultExpanded} />
-      <span className="type-icon type-key_result">KR</span>
-      <span className="okr-tree-copy"><small>{t("Key Result")}{keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
-      <span className="okr-tree-count">{t("{kind} · {count}", { kind: t("Initiative"), count: keyResult.initiatives.length })}</span>
-      <b className="okr-tree-progress">{keyResult.progress}%</b>
     </button> : <div className="okr-tree-row okr-tree-kr-row static">
-      <span className="okr-tree-chevron-placeholder" />
-      <span className="type-icon type-key_result">KR</span>
-      <span className="okr-tree-copy"><small>{t("Key Result")}{keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
-      <span className="okr-tree-count empty">{t("Initiative 없음")}</span>
-      <b className="okr-tree-progress">{keyResult.progress}%</b>
+      {summary}
     </div>}
     {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" id={initiativesId} role="group" aria-label={t("{value1}의 Initiative", { value1: messageValue(keyResult.title) })}>
       {keyResult.initiatives.map((initiative, initiativeIndex) => {
@@ -573,13 +573,11 @@ function OkrReadKeyResult({
         return <section id={`okr-search-${initiativeId}`} tabIndex={-1} className={`okr-file-read-initiative ${focusId === initiativeId ? "search-target" : ""}`} key={initiativeId}>
           {projects.length ? <button type="button" className="okr-tree-row okr-tree-initiative-row" aria-expanded={initiativeExpanded} aria-controls={projectsId} onClick={() => onToggle(initiativeId)}>
             <TreeChevron expanded={initiativeExpanded} />
-            <span className="type-icon type-initiative">I</span>
-            <span className="okr-tree-copy"><small>{t("Initiative")}{initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
+            <span className="okr-tree-copy"><small>{t("Initiative")} {initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
             <span className="okr-tree-count">{t("{kind} · {count}", { kind: t("Project"), count: projects.length })}</span>
           </button> : <div className="okr-tree-row okr-tree-initiative-row static">
             <span className="okr-tree-chevron-placeholder" />
-            <span className="type-icon type-initiative">I</span>
-            <span className="okr-tree-copy"><small>{t("Initiative")}{initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
+            <span className="okr-tree-copy"><small>{t("Initiative")} {initiativeIndex + 1}</small><strong>{initiative.title}</strong></span>
             <span className="okr-tree-count empty">{t("미완료 Project 없음")}</span>
           </div>}
           {projects.length > 0 && initiativeExpanded && <div className="okr-tree-projects" id={projectsId} role="group" aria-label={t("{value1}의 미완료 Project", { value1: messageValue(initiative.title) })}>

@@ -51,7 +51,7 @@ function seed(neutral: Scale, accent: Scale, secondary: Scale, scheme: "light" |
   const secondaryText = contrast(secondary[10], secondary[2]) >= 4.5 ? secondary[10] : secondary[11];
   return {
     scheme, page: monochrome ? "#FFFFFF" : neutral[0], surface: neutral[1], raised: dark ? neutral[1] : "#FFFFFF",
-    subtle: neutral[2], hover: neutral[3], sidebar: dark ? neutral[0] : neutral[1],
+    subtle: neutral[2], hover: neutral[3], sidebar: monochrome ? "#FFFFFF" : dark ? neutral[0] : neutral[1],
     text: neutral[11], muted: neutral[10], faint: neutral[10], line: neutral[5], control: neutral[9],
     primary, onPrimary: foreground, primaryHover, primaryActive: monochrome ? neutral[11] : accent[11],
     accent: accentText, accentSoft: accent[2], link: accentText, focus: accentText,
@@ -60,7 +60,7 @@ function seed(neutral: Scale, accent: Scale, secondary: Scale, scheme: "light" |
 }
 
 const themeSeeds = {
-  white: { label: "화이트", description: "화이트와 잉크", ...seed(radix.gray, radix.gray, radix.slate, "light", true) },
+  white: { label: "화이트", description: "화이트와 잉크", ...seed(radix.gray, radix.gray, radix.gray, "light", true) },
   beige: { label: "베이지", description: "샌드와 골드", ...seed(radix.sand, radix.gold, radix.teal, "light") },
   gray: { label: "그레이", description: "슬레이트와 청록", ...seed(radix.slate, radix.teal, radix.violet, "light") },
   dark: { label: "다크", description: "차콜과 블루", ...seed(radix.grayDark, radix.blueDark, radix.violetDark, "dark") },

@@ -15,8 +15,18 @@
   translates skip to the existing skipReason contract; selecting work can resume
   without discarding Tasks. Native office/remote controls are explicitly deferred
   to the next native UI release and are not claimed in this candidate.
-- Native schema repair 0056 retains 0054 unchanged and covers environments that
-  already applied 0055 before native authentication was deployed.
+- Native schema migration 0063 retains the frozen 0054 schema and runs after the
+  web migrations that were already deployed before native authentication.
+- Web Project images and rich work documents are additive server capabilities.
+  Native v1 keeps plain descriptions and does not claim image/document editing;
+  those editors require a later binary and dedicated upload/privacy validation.
+- Web first-run goal coaching remains web-only. Native first sign-in creates the
+  same empty personal workspace and exposes the core creation screens directly.
+- Windows local-agent setup, integration administration and PayPal/card billing
+  remain web-only. Native v1 contains no purchase link, plan promotion or payment
+  SDK, so store commerce declarations remain false.
+- Store review readiness adds a public five-language account deletion flow,
+  recent-auth deletion protection and actionable Apple/Google review alerts.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

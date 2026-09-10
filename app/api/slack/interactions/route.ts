@@ -1,7 +1,7 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { createExplicitDailyTask, currentDailyMember, normalizeDailySkipReason, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
-import { createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders, updateDailyChecklistView } from "@/lib/slack-daily";
+import { completePublishedDailyTask, createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders, slackApi, slackTokenForConnection, updateDailyChecklistView } from "@/lib/slack-daily";
 import { editDailyChecklistTask, handleDailyChecklist, retryDailyChecklist } from "@/lib/slack-daily-checklist";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { memberMessageLanguage, workspaceMessageLanguage } from "@/lib/language-preferences";
@@ -20,7 +20,7 @@ type SlackInteraction = {
   channel?: { id?: string };
   message?: { ts?: string };
   state?: { values?: Record<string, Record<string, Record<string, unknown>>> };
-  actions?: Array<{ action_id?: string; value?: string }>;
+  actions?: Array<{ action_id?: string; value?: string; action_ts?: string }>;
   view?: {
     id?: string;
     hash?: string;
@@ -50,6 +50,12 @@ export async function POST(request: Request) {
     waitUntil(processInteraction(payload, request).catch((error) => logDailyInteractionFailure(payload, "resolve", error)));
     return new Response(null, { status: 200 });
   }
+  const publicationCompletion = payload.type === "block_actions"
+    && payload.actions?.some((action) => action.action_id === "daily_publication_complete");
+  if (publicationCompletion) {
+    waitUntil(processInteraction(payload, request).catch((error) => logDailyInteractionFailure(payload, "publication_complete", error)));
+    return new Response(null, { status: 200 });
+  }
   return processInteraction(payload, request);
 }
 
@@ -62,10 +68,37 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
   const linked = await dailyMemberBySlack(teamId, slackUserId);
   if (!linked) {
     const link = await createSlackMemberLinkUrl(connection.ownerId, teamId, slackUserId, request);
+    if (payload.actions?.some((action) => action.action_id === "daily_publication_complete")) {
+      const channel = payload.container?.channel_id ?? payload.channel?.id ?? "";
+      if (channel) await slackApi(await slackTokenForConnection(connection), "chat.postEphemeral", {
+        channel, user: slackUserId, text: workspaceT("OKRI 계정을 먼저 연결해 주세요: {link}", { link }),
+      }).catch((error) => logDailyInteractionFailure(payload, "publication_link", error));
+      return new Response(null, { status: 200 });
+    }
     return Response.json({ response_type: "ephemeral", text: workspaceT("OKRI 계정을 먼저 연결해 주세요: {link}", { link }) });
   }
   const t = await serverTranslator(await memberMessageLanguage(env.DB, linked.authorization.ownerId, linked.memberId));
   const managementActor = { ...linked, teamId, slackUserId };
+  const publicationCompletion = payload.type === "block_actions"
+    ? payload.actions?.find((action) => action.action_id === "daily_publication_complete") : undefined;
+  if (publicationCompletion?.value) {
+    const channelId = payload.container?.channel_id ?? payload.channel?.id ?? "";
+    const messageTs = payload.container?.message_ts ?? payload.message?.ts ?? "";
+    try {
+      if (!channelId || !messageTs) throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+      await completePublishedDailyTask({ authorization: linked.authorization, memberId: linked.memberId,
+        teamId, slackUserId, channelId, messageTs, actionTs: publicationCompletion.action_ts ?? "", value: publicationCompletion.value });
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : "";
+      const translated = t(rawMessage);
+      const message = translated !== rawMessage || /^[가-힣\s·]+[가-힣\s·‘’]*[.?!]?$/.test(rawMessage)
+        ? translated : t("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
+      if (channelId) await slackApi(await slackTokenForConnection(connection), "chat.postEphemeral", {
+        channel: channelId, user: slackUserId, text: message,
+      }).catch((failure) => logDailyInteractionFailure(payload, "publication_error", failure));
+    }
+    return new Response(null, { status: 200 });
+  }
   if (payload.type === "block_suggestion" && payload.action_id?.startsWith("mg_")) {
     try { return Response.json(await managementEditorOptions(managementActor, payload.view?.private_metadata ?? "", payload.action_id, payload.value ?? "", t)); }
     catch { return Response.json({ options: [] }); }

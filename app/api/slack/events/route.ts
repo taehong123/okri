@@ -3,6 +3,7 @@ import { getSlackConnectionByTeam } from "@/lib/pace-data";
 import { handleDeliveredDailyReminder, repairSlackDailyReminders } from "@/lib/slack-daily";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { handleSlackWorkCommandEvent, parseSlackWorkCommand } from "@/lib/slack-work-command";
+import { handleSlackMcpConversation } from "@/lib/slack-mcp-agent";
 
 type SlackEventEnvelope = {
   type?: string;
@@ -56,9 +57,15 @@ export async function POST(request: Request) {
     ? commandEvent.text.replace(/^<@[A-Z0-9]+>\s*/i, "")
     : commandEvent?.text;
   const parsedCommand = commandText ? parseSlackWorkCommand(commandText) : null;
+  const mcpConversation = commandEvent?.type === "app_mention";
+  const naturalCreation = !parsedCommand && commandText?.trim()
+    && commandEvent?.channel_type === "im"
+    ? { command: "work_create" as const, query: commandText.trim().slice(0, 240) }
+    : null;
+  const workCommand = mcpConversation ? null : parsedCommand ?? naturalCreation;
   const dailyMessage = event?.type === "message" && event.channel_type === "im" && event.user === connection.botUserId;
-  const commandMessage = Boolean(parsedCommand && commandEvent);
-  if (!dailyMessage && !commandMessage) {
+  const commandMessage = Boolean(workCommand && commandEvent);
+  if (!dailyMessage && !commandMessage && !mcpConversation) {
     const shouldRepair = Boolean(event?.type
       && (event.type !== "message" || (event.channel_type === "im" && event.user !== connection.botUserId)));
     if (!shouldRepair) return new Response(null, { status: 200 });
@@ -68,25 +75,37 @@ export async function POST(request: Request) {
     if (receipt.meta.changes) waitUntil(repairSlackDailyReminders(connection.ownerId));
     return new Response(null, { status: 200 });
   }
-  const receiptId = commandMessage && commandEvent
+  const receiptId = (commandMessage || mcpConversation) && commandEvent
     ? slackCommandReceiptId(teamId, commandEvent)
     : eventId;
   const receipt = await env.DB.prepare(`INSERT OR IGNORE INTO slack_event_receipts (event_id, team_id, event_type, received_at)
     VALUES (?, ?, ?, ?)`)
     .bind(receiptId, teamId, event?.type ?? "", new Date().toISOString()).run();
   if (!receipt.meta.changes) return new Response(null, { status: 200 });
-  if (dailyMessage && event?.channel && event.user) {
+  if (mcpConversation && commandEvent) {
+    waitUntil(handleSlackMcpConversation(request, connection, {
+      channel: commandEvent.channel,
+      channelType: commandEvent.channel_type ?? "channel",
+      user: commandEvent.user,
+      text: commandEvent.text,
+      ts: commandEvent.ts,
+      threadTs: commandEvent.thread_ts,
+    }, commandText?.trim().slice(0, 4_000) || "사용할 수 있는 기능을 짧게 안내해 줘.").then(() => import("@/lib/slack-task-changes"))
+      .then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB))
+      .catch((error) => console.error("Slack MCP conversation failed", error)));
+  } else if (dailyMessage && event?.channel && event.user) {
     const blockIds = (event.blocks ?? []).flatMap((block) => block.block_id ? [block.block_id] : []);
     waitUntil(handleDeliveredDailyReminder({ teamId, channelId: event.channel, botId: event.user, blockIds }).then(() => undefined));
-  } else if (parsedCommand && commandEvent
+  } else if (workCommand && commandEvent
     && ["im", "channel", "group"].includes(commandEvent.channel_type ?? (commandEvent.type === "app_mention" ? "channel" : ""))) {
     waitUntil(handleSlackWorkCommandEvent(request, connection, {
       channel: commandEvent.channel,
       channelType: commandEvent.channel_type ?? (commandEvent.type === "app_mention" ? "channel" : ""),
       user: commandEvent.user,
       text: commandEvent.text,
+      ts: commandEvent.ts,
       threadTs: commandEvent.thread_ts,
-    }, parsedCommand).then(() => import("@/lib/slack-task-changes")).then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)).catch((error) => console.error("Slack work command failed", error)));
+    }, workCommand).then(() => import("@/lib/slack-task-changes")).then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)).catch((error) => console.error("Slack work command failed", error)));
   }
   return new Response(null, { status: 200 });
 }

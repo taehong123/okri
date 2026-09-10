@@ -32,7 +32,8 @@ const config: ExpoConfig = {
   userInterfaceStyle: "automatic",
   ios: {
     bundleIdentifier: "ai.okri.app",
-    supportsTablet: true,
+    // The first store candidate is iPhone-only; iPad is a separately verified release target.
+    supportsTablet: false,
     usesAppleSignIn: true,
     infoPlist: { ITSAppUsesNonExemptEncryption: false },
     privacyManifests: {

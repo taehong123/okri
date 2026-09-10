@@ -3,10 +3,12 @@ import {
   authorizeRequest,
   clearWorkspaceAvatar,
   countAiUsageEvents,
+  finalizeAiUsageEvent,
   getAiUsageSummary,
   getManageableWorkspaceForAvatar,
   getWorkspaceAvatarForUser,
-  recordAiUsageEvent,
+  releaseAiUsageReservation,
+  reserveAiUsageEvent,
   saveWorkspaceAvatar,
   type RequestAuthorization,
 } from "@/lib/pace-data";
@@ -21,6 +23,12 @@ type AvatarRuntimeEnv = typeof env & {
   OKRPTR_AI_FREE_BUDGET_WON?: string;
   OKRI_AI_MAX_REQUESTS_PER_MINUTE?: string;
   OKRPTR_AI_MAX_REQUESTS_PER_MINUTE?: string;
+  OKRI_AI_MAX_REQUESTS_PER_DAY?: string;
+  OKRPTR_AI_MAX_REQUESTS_PER_DAY?: string;
+  OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE?: string;
+  OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE?: string;
+  OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_DAY?: string;
+  OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_DAY?: string;
   OKRI_AI_MAX_IMAGE_REQUESTS_PER_DAY?: string;
   OKRPTR_AI_MAX_IMAGE_REQUESTS_PER_DAY?: string;
   OKRI_AI_IMAGE_COST_WON?: string;
@@ -81,8 +89,8 @@ export async function POST(request: Request) {
     avatarBucket();
     const payload = await request.json().catch(() => ({})) as Record<string, unknown>;
     const prompt = typeof payload.prompt === "string" ? payload.prompt.trim().slice(0, 240) : "";
-    const limitResponse = await checkImageUsageLimit(runtime, authorization);
-    if (limitResponse) return limitResponse;
+    const limit = await checkImageUsageLimit(runtime, authorization);
+    if (limit instanceof Response) return limit;
     const apiKey = runtime.OPENAI_API_KEY?.trim();
     if (!apiKey) return Response.json({ error: "AI image generation is not configured" }, { status: 503 });
 
@@ -92,44 +100,62 @@ export async function POST(request: Request) {
       prompt ? `Creative direction: ${prompt}.` : "Use a confident, friendly abstract symbol with a distinctive color palette.",
       "No words, letters, numbers, trademarks, UI mockups, borders, or photorealistic people. Center the subject and keep it legible at 32 pixels.",
     ].join(" ");
-    const response = await fetch("https://api.openai.com/v1/images/generations", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
-      body: JSON.stringify({
-        model,
-        prompt: imagePrompt,
-        n: 1,
-        size: "1024x1024",
-        quality: "low",
-        output_format: "webp",
-        background: "opaque",
-        moderation: "auto",
-      }),
-    });
-    const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-    if (!response.ok) {
-      const providerMessage = openAiErrorMessage(data);
-      return Response.json({ error: providerMessage || "AI image generation failed" }, { status: response.status === 429 ? 429 : 502 });
-    }
-    const encoded = generatedBase64(data);
-    if (!encoded) return Response.json({ error: "AI image response was empty" }, { status: 502 });
-    const bytes = decodeBase64(encoded);
-    if (!bytes.length || bytes.length > MAX_UPLOAD_BYTES || verifiedImageType(bytes) !== "image/webp") {
-      return Response.json({ error: "AI returned an invalid image" }, { status: 502 });
-    }
-    const usage = imageUsage(data);
-    await recordAiUsageEvent({
+    const reservationId = await reserveAiUsageEvent({
       ownerId: authorization.ownerId,
       userId: authorization.userId,
       model,
       source: AVATAR_SOURCE,
       inputChars: imagePrompt.length,
-      inputTokens: usage.inputTokens,
-      outputTokens: usage.outputTokens,
-      estimatedCostWonMicros: imageCostWonMicros(runtime),
+      inputTokens: 0,
+      outputTokens: 0,
+      estimatedCostWonMicros: limit.reservedCostWonMicros,
+      limits: limit.rateLimits,
     });
-    const avatar = await replaceWorkspaceAvatar(authorization, workspace.id, bytes, "image/webp");
-    return Response.json({ ...avatar, revisedPrompt: typeof data.revised_prompt === "string" ? data.revised_prompt : null });
+    if (!reservationId) return Response.json({ error: "AI 요청이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요." }, { status: 429 });
+    let finalized = false;
+    try {
+      const response = await fetch("https://api.openai.com/v1/images/generations", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model,
+          prompt: imagePrompt,
+          n: 1,
+          size: "1024x1024",
+          quality: "low",
+          output_format: "webp",
+          background: "opaque",
+          moderation: "auto",
+        }),
+      });
+      const data = await response.json().catch(() => ({})) as Record<string, unknown>;
+      if (!response.ok) {
+        const providerMessage = openAiErrorMessage(data);
+        return Response.json({ error: providerMessage || "AI image generation failed" }, { status: response.status === 429 ? 429 : 502 });
+      }
+      const encoded = generatedBase64(data);
+      if (!encoded) return Response.json({ error: "AI image response was empty" }, { status: 502 });
+      const bytes = decodeBase64(encoded);
+      if (!bytes.length || bytes.length > MAX_UPLOAD_BYTES || verifiedImageType(bytes) !== "image/webp") {
+        return Response.json({ error: "AI returned an invalid image" }, { status: 502 });
+      }
+      const usage = imageUsage(data);
+      await finalizeAiUsageEvent(reservationId, {
+        ownerId: authorization.ownerId,
+        userId: authorization.userId,
+        model,
+        source: AVATAR_SOURCE,
+        inputChars: imagePrompt.length,
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        estimatedCostWonMicros: imageCostWonMicros(runtime),
+      });
+      finalized = true;
+      const avatar = await replaceWorkspaceAvatar(authorization, workspace.id, bytes, "image/webp");
+      return Response.json({ ...avatar, revisedPrompt: typeof data.revised_prompt === "string" ? data.revised_prompt : null });
+    } finally {
+      if (!finalized) await releaseAiUsageReservation(reservationId);
+    }
   } catch (error) {
     return avatarError(error);
   }
@@ -221,8 +247,17 @@ function imageUsage(data: Record<string, unknown>) {
 async function checkImageUsageLimit(runtime: AvatarRuntimeEnv, authorization: RequestAuthorization) {
   const summary = await getAiUsageSummary(authorization.ownerId, authorization.userId);
   const minuteLimit = positiveNumber(runtime.OKRI_AI_MAX_REQUESTS_PER_MINUTE ?? runtime.OKRPTR_AI_MAX_REQUESTS_PER_MINUTE, 5);
-  if (summary.requestsThisMinute >= minuteLimit) {
+  const dayLimit = positiveNumber(runtime.OKRI_AI_MAX_REQUESTS_PER_DAY ?? runtime.OKRPTR_AI_MAX_REQUESTS_PER_DAY, 40);
+  const workspaceMinuteLimit = Math.max(minuteLimit, positiveNumber(runtime.OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE ?? runtime.OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_MINUTE, 12));
+  if (summary.requestsThisMinute >= minuteLimit || (summary.workspaceRequestsThisMinute ?? 0) >= workspaceMinuteLimit) {
     return Response.json({ error: "AI 요청이 너무 빠르게 반복되고 있습니다. 잠시 후 다시 시도해 주세요." }, { status: 429 });
+  }
+  const workspaceDayLimit = Math.max(
+    dayLimit,
+    positiveNumber(runtime.OKRI_AI_MAX_WORKSPACE_REQUESTS_PER_DAY ?? runtime.OKRPTR_AI_MAX_WORKSPACE_REQUESTS_PER_DAY, 120),
+  );
+  if ((summary.workspaceRequestsToday ?? 0) >= workspaceDayLimit) {
+    return Response.json({ error: "오늘의 워크스페이스 AI 사용 한도를 모두 사용했습니다." }, { status: 429 });
   }
   const dayStart = new Date();
   dayStart.setUTCHours(0, 0, 0, 0);
@@ -239,7 +274,15 @@ async function checkImageUsageLimit(runtime: AvatarRuntimeEnv, authorization: Re
     if (error instanceof BillingLimitError) return Response.json({ error: error.message, code: error.code, ...error.details }, { status: 402 });
     throw error;
   }
-  return null;
+  return {
+    reservedCostWonMicros: imageCostWonMicros(runtime),
+    rateLimits: {
+      userMinute: minuteLimit,
+      userDay: dayLimit,
+      workspaceMinute: workspaceMinuteLimit,
+      workspaceDay: workspaceDayLimit,
+    },
+  };
 }
 
 function imageCostWonMicros(runtime: AvatarRuntimeEnv) {

@@ -27,6 +27,33 @@ async function pageFits(page: Page, context: string) {
   expect(clippedNavigation, `${context}/mobile navigation`).toEqual([]);
 }
 
+test("home action stays singular and centered across desktop and mobile topbars", async ({ page }, info) => {
+  for (const width of [390, 768, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    await page.goto("/?view=work");
+
+    const desktopHome = page.locator(".workspace-brand");
+    const mobileHome = page.locator(".workspace-mobile-home");
+    const visibleHome = width <= 700 ? mobileHome : desktopHome;
+    await expect(visibleHome).toBeVisible();
+    await expect(width <= 700 ? desktopHome : mobileHome).toBeHidden();
+
+    const geometry = await visibleHome.evaluate((button) => {
+      const icon = button.querySelector("svg");
+      if (!icon) throw new Error("Home action icon is missing");
+      const buttonBox = button.getBoundingClientRect();
+      const iconBox = icon.getBoundingClientRect();
+      return {
+        xDelta: Math.abs((buttonBox.left + buttonBox.width / 2) - (iconBox.left + iconBox.width / 2)),
+        yDelta: Math.abs((buttonBox.top + buttonBox.height / 2) - (iconBox.top + iconBox.height / 2)),
+      };
+    });
+    expect(geometry.xDelta, `${width}px horizontal centering`).toBeLessThanOrEqual(0.5);
+    expect(geometry.yDelta, `${width}px vertical centering`).toBeLessThanOrEqual(0.5);
+    await page.screenshot({ path: info.outputPath(`home-action-${width}.png`) });
+  }
+});
+
 test("working views share document layout and stable typography from 320px to 4K", async ({ page }, info) => {
   test.setTimeout(180_000);
   const errors: string[] = [];
@@ -38,7 +65,9 @@ test("working views share document layout and stable typography from 320px to 4K
       await expect(page.locator(".page-header h1")).toBeVisible();
       await pageFits(page, `${width}/${view}`);
       expect(await page.locator(".page-header h1").evaluate((node) => getComputedStyle(node).fontSize)).toBe("24px");
-      expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+      // OKR deliberately starts at Objective without repeating a page subtitle.
+      if (view === "okr") await expect(page.locator(".page-header p")).toHaveCount(0);
+      else expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
       expect((await page.locator(".page-body").boundingBox())!.width).toBeLessThanOrEqual(1200);
       if (view === "work") {
         expect(await page.locator(".project-workspace").evaluate((node) => {

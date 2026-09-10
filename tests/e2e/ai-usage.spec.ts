@@ -74,9 +74,9 @@ test("billing uses percentage for AI and retains actual subscription prices", as
   await expect(meter).toContainText("24% 사용");
   await expect(meter).toContainText("76% 남음");
   await expect(meter).not.toContainText("원");
-  await expect(page.locator(".billing-plan-grid")).toContainText("11,000원");
-  await expect(page.locator(".billing-plan-grid")).toContainText("55,000원");
-  await expect(page.locator(".billing-plan-grid")).toContainText("Free의 4배");
+  await expect(page.locator(".billing-plan-grid")).toContainText("2,900원");
+  await expect(page.locator(".billing-plan-grid")).toContainText("4,900원");
+  await expect(page.locator(".billing-plan-grid")).toContainText("Team보다 2.5배");
   await expect(page.locator(".billing-plan-grid")).not.toContainText("500원 안전한도");
 });
 

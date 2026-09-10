@@ -48,7 +48,8 @@ export async function validateDailyWork(db: D1Database, ownerId: string, memberI
 
 export async function listDailyYesterdayWork(db: D1Database, ownerId: string, memberId: string, date: string, timezone: string): Promise<DailyWork[]> {
   const previousDate = addDays(date, -1);
-  const [previousStart, previousEnd] = zonedDayRange(previousDate, timezone);
+  const [previousStart] = zonedDayRange(previousDate, timezone);
+  const [, currentEnd] = zonedDayRange(date, timezone);
   const rows = await db.prepare(`SELECT * FROM (
     SELECT DISTINCT item.id, item.kind, item.title, item.status, item.priority,
       item.due_date AS dueDate, COALESCE(parent.title, routine.title, 'General') AS parentTitle,
@@ -59,7 +60,7 @@ export async function listDailyYesterdayWork(db: D1Database, ownerId: string, me
         WHERE activity.owner_id = item.owner_id AND activity.item_id = item.id AND activity.action = 'updated'
           AND json_valid(activity.payload)
           AND json_extract(activity.payload, '$.status') IN ('done', 'development_done')
-          AND (json_extract(activity.payload, '$.effectiveDate') = ?
+          AND (json_extract(activity.payload, '$.effectiveDate') IN (?, ?)
             OR (json_extract(activity.payload, '$.effectiveDate') IS NULL AND activity.created_at >= ? AND activity.created_at < ?))
       ) AS completedYesterday
     FROM items item JOIN item_assignments a ON a.item_id = item.id AND a.owner_id = item.owner_id
@@ -73,7 +74,7 @@ export async function listDailyYesterdayWork(db: D1Database, ownerId: string, me
         WHERE activity.owner_id = item.owner_id AND activity.item_id = item.id AND activity.action = 'updated'
           AND json_valid(activity.payload)
           AND json_extract(activity.payload, '$.status') IN ('done', 'development_done')
-          AND (json_extract(activity.payload, '$.effectiveDate') = ?
+          AND (json_extract(activity.payload, '$.effectiveDate') IN (?, ?)
             OR (json_extract(activity.payload, '$.effectiveDate') IS NULL AND activity.created_at >= ? AND activity.created_at < ?))
       ))
     UNION ALL
@@ -82,11 +83,11 @@ export async function listDailyYesterdayWork(db: D1Database, ownerId: string, me
       CASE WHEN completion.id IS NULL THEN 0 ELSE 1 END
     FROM routines r
     LEFT JOIN routine_completions completion ON completion.owner_id = r.owner_id
-      AND completion.routine_id = r.id AND completion.completion_date = ?
+      AND completion.routine_id = r.id AND completion.completion_date IN (?, ?)
     WHERE r.owner_id = ? AND r.assignee_member_id = ? AND r.active = 1 AND r.system_key IS NULL
   ) ORDER BY completedYesterday DESC, dueDate IS NULL, dueDate, title`)
-    .bind(previousDate, previousStart, previousEnd, ownerId, memberId,
-      previousDate, previousStart, previousEnd, previousDate, ownerId, memberId)
+    .bind(previousDate, date, previousStart, currentEnd, ownerId, memberId,
+      previousDate, date, previousStart, currentEnd, previousDate, date, ownerId, memberId)
     .all<Omit<DailyWork, "key" | "completedYesterday" | "willCompleteOnSubmit"> & { completedYesterday: number }>();
   return rows.results.map((work) => ({
     ...work,

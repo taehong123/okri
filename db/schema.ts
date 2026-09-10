@@ -107,6 +107,8 @@ export const users = sqliteTable(
     languagePreference: text("language_preference").notNull().default("ko"),
     resolvedLanguage: text("resolved_language").notNull().default("ko"),
     languageRevision: integer("language_revision").notNull().default(0),
+    // NULL preserves existing accounts; only new sign-ups opt into first-run setup.
+    onboardingState: text("onboarding_state"),
     displayName: text("display_name").notNull().default(""),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
@@ -547,6 +549,77 @@ export const activityLog = sqliteTable(
   ],
 );
 
+export const localAgentDevices = sqliteTable(
+  "local_agent_devices",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    name: text("name").notNull(),
+    platform: text("platform").notNull().default("unknown"),
+    tokenHash: text("token_hash").notNull(),
+    tokenPrefix: text("token_prefix").notNull(),
+    lastSeenAt: text("last_seen_at"),
+    revokedAt: text("revoked_at"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_local_agent_devices_token_hash").on(table.tokenHash),
+    index("idx_local_agent_devices_account").on(table.workspaceId, table.userId, table.revokedAt),
+    index("idx_local_agent_devices_last_seen").on(table.lastSeenAt),
+  ],
+);
+
+export const localAgentPairings = sqliteTable(
+  "local_agent_pairings",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    codeHash: text("code_hash").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    claimedAt: text("claimed_at"),
+    deviceId: text("device_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_local_agent_pairings_code_hash").on(table.codeHash),
+    index("idx_local_agent_pairings_account").on(table.workspaceId, table.userId, table.createdAt),
+    index("idx_local_agent_pairings_expiry").on(table.expiresAt),
+  ],
+);
+
+export const localAgentJobs = sqliteTable(
+  "local_agent_jobs",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    userId: text("user_id").notNull(),
+    deviceId: text("device_id").references(() => localAgentDevices.id, { onDelete: "set null" }),
+    targetKind: text("target_kind").notNull(),
+    targetId: text("target_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    targetTitle: text("target_title").notNull(),
+    instruction: text("instruction").notNull(),
+    contextJson: text("context_json").notNull().default("{}"),
+    status: text("status").notNull().default("queued"),
+    leaseId: text("lease_id"),
+    leaseExpiresAt: text("lease_expires_at"),
+    progressText: text("progress_text"),
+    resultText: text("result_text"),
+    errorText: text("error_text"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    startedAt: text("started_at"),
+    completedAt: text("completed_at"),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_local_agent_jobs_account").on(table.workspaceId, table.userId, table.createdAt),
+    index("idx_local_agent_jobs_device_status").on(table.deviceId, table.status, table.createdAt),
+    index("idx_local_agent_jobs_target").on(table.workspaceId, table.targetKind, table.targetId, table.createdAt),
+  ],
+);
+
 export const propertyDefinitions = sqliteTable(
   "property_definitions",
   {
@@ -605,6 +678,63 @@ export const projectDocuments = sqliteTable(
   (table) => [
     uniqueIndex("idx_project_documents_project").on(table.ownerId, table.projectId),
     index("idx_project_documents_owner_updated").on(table.ownerId, table.updatedAt),
+  ],
+);
+
+export const projectImages = sqliteTable(
+  "project_images",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    name: text("name").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    objectKey: text("object_key").notNull(),
+    source: text("source").notNull().default("slack"),
+    sourceRef: text("source_ref").notNull(),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_project_images_object_key").on(table.objectKey),
+    uniqueIndex("idx_project_images_source").on(table.ownerId, table.projectId, table.source, table.sourceRef),
+    index("idx_project_images_project_created").on(table.ownerId, table.projectId, table.createdAt),
+  ],
+);
+
+export const storageUploadReservations = sqliteTable(
+  "storage_upload_reservations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    byteSize: integer("byte_size").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_storage_upload_reservations_workspace_expiry").on(table.workspaceId, table.expiresAt),
+    check("storage_upload_reservations_positive_size", sql`${table.byteSize} > 0`),
+  ],
+);
+
+export const documentImageAssets = sqliteTable(
+  "document_image_assets",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    targetKind: text("target_kind").notNull(),
+    targetId: text("target_id").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    objectKey: text("object_key").notNull(),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_document_image_assets_object_key").on(table.objectKey),
+    index("idx_document_image_assets_workspace_created").on(table.workspaceId, table.createdAt),
+    check("document_image_assets_target_kind", sql`${table.targetKind} IN ('project', 'task', 'routine')`),
+    check("document_image_assets_positive_size", sql`${table.byteSize} > 0`),
   ],
 );
 
@@ -784,6 +914,10 @@ export const routines = sqliteTable(
     triggerPoint: text("trigger_point").notNull().default(""),
     actionPlace: text("action_place").notNull().default(""),
     actionSteps: text("action_steps").notNull().default(""),
+    documentContent: text("document_content").notNull().default("[]"),
+    documentPlainText: text("document_plain_text").notNull().default(""),
+    documentVersion: integer("document_version").notNull().default(0),
+    documentUpdatedAt: text("document_updated_at"),
     propertiesJson: text("properties_json").notNull().default("{}"),
     cadence: text("cadence").notNull().default("daily"),
     active: integer("active", { mode: "boolean" }).notNull().default(true),
@@ -1407,6 +1541,7 @@ export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;
 export type ItemPropertyValue = typeof itemPropertyValues.$inferSelect;
 export type ProjectHiddenProperty = typeof projectHiddenProperties.$inferSelect;
 export type ProjectDocument = typeof projectDocuments.$inferSelect;
+export type ProjectImage = typeof projectImages.$inferSelect;
 export type ProjectTemplate = typeof projectTemplates.$inferSelect;
 export type ChecklistItem = typeof checklistItems.$inferSelect;
 export type DailyScrum = typeof dailyScrums.$inferSelect;
@@ -1474,6 +1609,23 @@ export const slackDailyChecklists = sqliteTable("slack_daily_checklists", {
   expiresAt: text("expires_at").notNull(),
 }, (table) => [index("idx_slack_daily_checklists_expiry").on(table.expiresAt)]);
 
+export const storeReviewFeedback = sqliteTable("store_review_feedback", {
+  id: text("id").primaryKey(),
+  source: text("source").notNull(),
+  sourceEventId: text("source_event_id").notNull(),
+  eventType: text("event_type").notNull(),
+  state: text("state").notNull().default(""),
+  deliveryStatus: text("delivery_status").notNull().default("received"),
+  attempts: integer("attempts").notNull().default(1),
+  receivedAt: text("received_at").notNull(),
+  occurredAt: text("occurred_at").notNull(),
+  deliveredAt: text("delivered_at"),
+  lastError: text("last_error").notNull().default(""),
+}, (table) => [
+  uniqueIndex("idx_store_review_feedback_source_event").on(table.source, table.sourceEventId),
+  index("idx_store_review_feedback_delivery").on(table.deliveryStatus, table.receivedAt),
+]);
+
 export type SlackDailySettings = typeof slackDailySettings.$inferSelect;
 export type SlackDailyReminder = typeof slackDailyReminders.$inferSelect;
 export type SlackDailyPublication = typeof slackDailyPublications.$inferSelect;
@@ -1482,3 +1634,6 @@ export type WorkspaceSubscription = typeof workspaceSubscriptions.$inferSelect;
 export type BillingPaymentMethod = typeof billingPaymentMethods.$inferSelect;
 export type BillingTransaction = typeof billingTransactions.$inferSelect;
 export type TrashRecord = typeof trashRecords.$inferSelect;
+export type LocalAgentDevice = typeof localAgentDevices.$inferSelect;
+export type LocalAgentPairing = typeof localAgentPairings.$inferSelect;
+export type LocalAgentJob = typeof localAgentJobs.$inferSelect;

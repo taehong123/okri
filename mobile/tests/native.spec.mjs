@@ -1,6 +1,19 @@
 import { test, expect } from "../../node_modules/@playwright/test/index.mjs";
 import { mkdir } from "node:fs/promises";
+import { once } from "node:events";
+import { createPreviewServer } from "../scripts/serve-preview.mjs";
 const screenshots = new URL("../test-results/screenshots/", import.meta.url);
+let previewServer;
+test.beforeAll(async () => {
+  previewServer = createPreviewServer();
+  await once(previewServer, "listening");
+});
+test.afterAll(async () => {
+  await new Promise(resolveClose => {
+    previewServer.close(resolveClose);
+    previewServer.closeAllConnections();
+  });
+});
 test.beforeEach(async ({ page }) => {
   await page.route("**/*", route => {
     const host = new URL(route.request().url()).hostname;

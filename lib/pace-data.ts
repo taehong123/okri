@@ -1,7 +1,12 @@
 import { env } from "cloudflare:workers";
 import { newAccountLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
 import { serverTranslator } from "./server-language";
-import { parseRoutineProperties, prepareRoutineProperties } from "./routine-properties";
+import {
+  defaultRoutineClassificationMigrationId,
+  ensureDefaultRoutineClassification,
+  parseRoutineProperties,
+  prepareRoutineProperties,
+} from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
@@ -42,7 +47,6 @@ import {
   workspaces,
   type PaceItem,
   type PropertyDefinition,
-  type ProjectDocument,
   type ProjectTemplate,
   type WorkspaceGroup,
   type WorkspaceGroupMember,
@@ -150,6 +154,8 @@ export type AiUsageSummary = {
   spentWonMicros: number;
   requestsToday: number;
   requestsThisMinute: number;
+  workspaceRequestsToday: number;
+  workspaceRequestsThisMinute: number;
 };
 
 export type OkrPlanInput = {
@@ -978,6 +984,10 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       workspace.avatar_updated_at,
       routine.system_key,
       routine.assignee_member_id,
+      routine.document_content,
+      routine.document_plain_text,
+      routine.document_version,
+      routine.document_updated_at,
       property.default_value,
       property.system_key,
       property.active,
@@ -1150,6 +1160,7 @@ export async function ensureWorkspace(ownerId: string) {
       await migrateLegacyHierarchy(ownerId);
       await removeLegacySeedWorkspaceData(ownerId);
       await seedProjectExecutionProperties(ownerId);
+      await ensureDefaultRoutineClassification((env as RuntimeEnv).DB, ownerId);
       await migrateLegacyItemAssignments(ownerId);
       await ensureActiveOkrCycle(ownerId);
       const general = await ensureGeneralRoutine(ownerId);
@@ -1251,6 +1262,8 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
         WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ITEM_TITLES)})) AS seed_item_exists,
       EXISTS(SELECT 1 FROM routines
         WHERE owner_id = ? AND title IN (${placeholders(LEGACY_SEED_ROUTINE_TITLES)})) AS seed_routine_exists,
+      EXISTS(SELECT 1 FROM app_migrations
+        WHERE id = ?) AS routine_classification_current,
       EXISTS(SELECT 1
       FROM items AS current_item
       WHERE current_item.owner_id = ? AND (
@@ -1271,18 +1284,21 @@ async function workspaceInitializationIsCurrent(ownerId: string) {
     ...LEGACY_SEED_ITEM_TITLES,
     ownerId,
     ...LEGACY_SEED_ROUTINE_TITLES,
+    defaultRoutineClassificationMigrationId(ownerId),
     ownerId,
   ).first<{
     property_count: number;
     general_exists: number;
     seed_item_exists: number;
     seed_routine_exists: number;
+    routine_classification_current: number;
     legacy_hierarchy_exists: number;
   }>();
   return Number(row?.property_count ?? 0) === executionPropertyNames.length
     && Boolean(row?.general_exists)
     && !row?.seed_item_exists
     && !row?.seed_routine_exists
+    && Boolean(row?.routine_classification_current)
     && !row?.legacy_hierarchy_exists;
 }
 
@@ -1739,27 +1755,23 @@ export function serializeWorkspaceRules(rule: WorkspaceRule) {
 
 export async function getAiUsageSummary(ownerId: string, userId: string): Promise<AiUsageSummary> {
   await ensureSchema();
-  const ownerAndUser = and(eq(aiUsageEvents.ownerId, ownerId), eq(aiUsageEvents.userId, userId));
-  const [lifetime] = await getDb()
-    .select({ spentWonMicros: sql<number>`coalesce(sum(${aiUsageEvents.estimatedCostWonMicros}), 0)` })
-    .from(aiUsageEvents)
-    .where(ownerAndUser);
-  const [today] = await getDb()
-    .select({ requestsToday: sql<number>`count(*)` })
-    .from(aiUsageEvents)
-    .where(and(ownerAndUser, sql`${aiUsageEvents.createdAt} >= datetime('now', 'start of day')`));
-  const [minute] = await getDb()
-    .select({ requestsThisMinute: sql<number>`count(*)` })
-    .from(aiUsageEvents)
-    .where(and(ownerAndUser, sql`${aiUsageEvents.createdAt} >= datetime('now', '-1 minute')`));
+  const [summary] = await getDb().select({
+    spentWonMicros: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} then ${aiUsageEvents.estimatedCostWonMicros} else 0 end), 0)`,
+    requestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
+    requestsThisMinute: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.createdAt} >= datetime('now', '-1 minute') then 1 else 0 end), 0)`,
+    workspaceRequestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
+    workspaceRequestsThisMinute: sql<number>`coalesce(sum(case when ${aiUsageEvents.createdAt} >= datetime('now', '-1 minute') then 1 else 0 end), 0)`,
+  }).from(aiUsageEvents).where(eq(aiUsageEvents.ownerId, ownerId));
   return {
-    spentWonMicros: Number(lifetime?.spentWonMicros ?? 0),
-    requestsToday: Number(today?.requestsToday ?? 0),
-    requestsThisMinute: Number(minute?.requestsThisMinute ?? 0),
+    spentWonMicros: Number(summary?.spentWonMicros ?? 0),
+    requestsToday: Number(summary?.requestsToday ?? 0),
+    requestsThisMinute: Number(summary?.requestsThisMinute ?? 0),
+    workspaceRequestsToday: Number(summary?.workspaceRequestsToday ?? 0),
+    workspaceRequestsThisMinute: Number(summary?.workspaceRequestsThisMinute ?? 0),
   };
 }
 
-export async function recordAiUsageEvent(input: {
+export type AiUsageEventInput = {
   ownerId: string;
   userId: string;
   model: string;
@@ -1768,7 +1780,16 @@ export async function recordAiUsageEvent(input: {
   inputTokens: number;
   outputTokens: number;
   estimatedCostWonMicros: number;
-}) {
+};
+
+export type AiUsageRateLimits = {
+  userMinute: number;
+  userDay: number;
+  workspaceMinute: number;
+  workspaceDay: number;
+};
+
+export async function recordAiUsageEvent(input: AiUsageEventInput) {
   await ensureSchema();
   await getDb().insert(aiUsageEvents).values({
     id: crypto.randomUUID(),
@@ -1781,6 +1802,54 @@ export async function recordAiUsageEvent(input: {
     outputTokens: Math.max(0, Math.round(input.outputTokens)),
     estimatedCostWonMicros: Math.max(0, Math.round(input.estimatedCostWonMicros)),
   });
+}
+
+/**
+ * Claims a request slot in one SQL statement so concurrent web, Slack and image
+ * requests cannot all pass the same company-wide counter before usage is saved.
+ */
+export async function reserveAiUsageEvent(input: AiUsageEventInput & { limits: AiUsageRateLimits }) {
+  await ensureSchema();
+  const d1 = (env as RuntimeEnv).DB;
+  await d1.prepare("DELETE FROM ai_usage_events WHERE owner_id = ? AND source LIKE 'pending:%' AND created_at < datetime('now', '-10 minutes')")
+    .bind(input.ownerId).run();
+  const id = crypto.randomUUID();
+  const source = `pending:${input.source ?? "web"}`;
+  const result = await d1.prepare(`INSERT INTO ai_usage_events
+    (id, owner_id, user_id, model, source, input_chars, input_tokens, output_tokens, estimated_cost_won_micros, created_at)
+    SELECT ?, ?, ?, ?, ?, ?, 0, 0, ?, CURRENT_TIMESTAMP
+    WHERE (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND created_at >= datetime('now', '-1 minute')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND created_at >= datetime('now', 'start of day')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at >= datetime('now', '-1 minute')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at >= datetime('now', 'start of day')) < ?`)
+    .bind(
+      id, input.ownerId, input.userId, input.model, source,
+      Math.max(0, Math.round(input.inputChars)), Math.max(0, Math.round(input.estimatedCostWonMicros)),
+      input.ownerId, input.userId, input.limits.userMinute,
+      input.ownerId, input.userId, input.limits.userDay,
+      input.ownerId, input.limits.workspaceMinute,
+      input.ownerId, input.limits.workspaceDay,
+    ).run();
+  return result.meta.changes ? id : null;
+}
+
+export async function finalizeAiUsageEvent(reservationId: string, input: AiUsageEventInput) {
+  await ensureSchema();
+  const result = await (env as RuntimeEnv).DB.prepare(`UPDATE ai_usage_events
+    SET model = ?, source = ?, input_chars = ?, input_tokens = ?, output_tokens = ?, estimated_cost_won_micros = ?
+    WHERE id = ? AND owner_id = ? AND user_id = ? AND source = ?`)
+    .bind(
+      input.model, input.source ?? "web", Math.max(0, Math.round(input.inputChars)),
+      Math.max(0, Math.round(input.inputTokens)), Math.max(0, Math.round(input.outputTokens)),
+      Math.max(0, Math.round(input.estimatedCostWonMicros)), reservationId, input.ownerId, input.userId,
+      `pending:${input.source ?? "web"}`,
+    ).run();
+  if (!result.meta.changes) throw new Error("AI usage reservation is no longer available");
+}
+
+export async function releaseAiUsageReservation(reservationId: string) {
+  await ensureSchema();
+  await (env as RuntimeEnv).DB.prepare("DELETE FROM ai_usage_events WHERE id = ? AND source LIKE 'pending:%'").bind(reservationId).run();
 }
 
 export async function createGoogleOAuthState(ownerId: string, userId: string, returnTo = "/") {
@@ -2533,7 +2602,7 @@ export async function authorizeRequest(
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
   if (googleSession) {
     try {
-      const canonicalUserId = await canonicalUserIdForVerifiedIdentity(googleSession.sub, googleSession.email, googleSession.name, request, "google", googleSession.expiresAt - 7 * 24 * 60 * 60);
+      const canonicalUserId = await canonicalUserIdForVerifiedIdentity(googleSession.sub, googleSession.email, googleSession.name, request, "google", googleSession.issuedAt ?? googleSession.expiresAt - 7 * 24 * 60 * 60);
       const membership = await resolveWorkspaceMembership(canonicalUserId, googleSession.email, googleSession.name, requestedWorkspaceId(request));
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
@@ -2592,7 +2661,8 @@ export async function canonicalUserIdForVerifiedIdentity(subject: string, emailI
   const [emailUser] = await getDb().select().from(users).where(eq(users.emailNormalized, email)).limit(1);
   const userId = emailUser?.id ?? crypto.randomUUID();
   if (!emailUser) {
-    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), createdAt: now, updatedAt: now }).onConflictDoNothing();
+    const { initialOnboarding } = await import("@/lib/onboarding");
+    await getDb().insert(users).values({ id: userId, emailNormalized: email, displayName, ...newAccountLanguage(request), onboardingState: JSON.stringify(initialOnboarding()), createdAt: now, updatedAt: now }).onConflictDoNothing();
   }
   await getDb().insert(authIdentities).values({
     id: crypto.randomUUID(),
@@ -5097,20 +5167,39 @@ export function serializePropertyDefinition(property: PropertyDefinition, valueC
 }
 
 export async function getProjectDocument(ownerId: string, projectId: string) {
-  const project = await getItem(ownerId, projectId);
-  if (!project || project.kind !== "project") throw new Error("Project not found");
+  const document = await getItemBackedDocument(ownerId, projectId, "project");
+  return {
+    id: document.id,
+    projectId: document.targetId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
+}
+
+async function getItemBackedDocument(ownerId: string, itemId: string, expectedKind: "project" | "task") {
+  const item = await getItem(ownerId, itemId);
+  if (!item || item.kind !== expectedKind) throw new Error(`${expectedKind === "project" ? "Project" : "Task"} not found`);
   const [document] = await getDb().select().from(projectDocuments).where(and(
     eq(projectDocuments.ownerId, ownerId),
-    eq(projectDocuments.projectId, projectId),
+    eq(projectDocuments.projectId, itemId),
   )).limit(1);
-  if (document) return serializeProjectDocument(document);
+  if (document) return {
+    id: document.id,
+    targetId: itemId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
   return {
     id: null,
-    projectId,
-    content: JSON.stringify(blocksFromPlainText(project.description)),
-    plainText: project.description,
+    targetId: itemId,
+    content: JSON.stringify(blocksFromPlainText(item.description)),
+    plainText: item.description,
     version: 0,
-    updatedAt: project.updatedAt,
+    updatedAt: item.updatedAt,
   };
 }
 
@@ -5119,14 +5208,32 @@ export async function saveProjectDocument(
   projectId: string,
   input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
 ) {
-  const project = await getItem(ownerId, projectId);
-  if (!project || project.kind !== "project") throw new Error("Project not found");
-  if (project.archivedAt) throw new Error("Restore the Project before changing its document");
+  const document = await saveItemBackedDocument(ownerId, projectId, "project", input);
+  return {
+    id: document.id,
+    projectId: document.targetId,
+    content: document.content,
+    plainText: document.plainText,
+    version: document.version,
+    updatedAt: document.updatedAt,
+  };
+}
+
+async function saveItemBackedDocument(
+  ownerId: string,
+  itemId: string,
+  expectedKind: "project" | "task",
+  input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
+) {
+  const item = await getItem(ownerId, itemId);
+  const label = expectedKind === "project" ? "Project" : "Task";
+  if (!item || item.kind !== expectedKind) throw new Error(`${label} not found`);
+  if (item.archivedAt) throw new Error(`Restore the ${label} before changing its document`);
   const content = normalizeBlockContent(input.content);
   const plainText = normalizeDocumentText(input.plainText);
   const [current] = await getDb().select().from(projectDocuments).where(and(
     eq(projectDocuments.ownerId, ownerId),
-    eq(projectDocuments.projectId, projectId),
+    eq(projectDocuments.projectId, itemId),
   )).limit(1);
   const currentVersion = current?.version ?? 0;
   if (input.expectedVersion !== currentVersion) throw new Error("Document version conflict");
@@ -5137,11 +5244,11 @@ export async function saveProjectDocument(
     ? d1.prepare(`UPDATE project_documents
         SET content = ?, plain_text = ?, version = ?, updated_by_user_id = ?, updated_at = ?
         WHERE owner_id = ? AND project_id = ? AND version = ?`)
-      .bind(content, plainText, nextVersion, input.userId ?? null, now, ownerId, projectId, currentVersion)
+      .bind(content, plainText, nextVersion, input.userId ?? null, now, ownerId, itemId, currentVersion)
     : d1.prepare(`INSERT INTO project_documents
         (id, owner_id, project_id, content, plain_text, version, updated_by_user_id, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-      .bind(crypto.randomUUID(), ownerId, projectId, content, plainText, nextVersion, input.userId ?? null, now, now);
+      .bind(crypto.randomUUID(), ownerId, itemId, content, plainText, nextVersion, input.userId ?? null, now, now);
   await d1.batch([
     documentStatement,
     d1.prepare(`UPDATE items SET description = ?, updated_at = ?
@@ -5149,16 +5256,76 @@ export async function saveProjectDocument(
           SELECT 1 FROM project_documents
           WHERE owner_id = ? AND project_id = ? AND version = ? AND updated_at = ?
         )`)
-      .bind(plainText, now, ownerId, projectId, ownerId, projectId, nextVersion, now),
+      .bind(plainText, now, ownerId, itemId, ownerId, itemId, nextVersion, now),
   ]);
   const [saved] = await getDb().select().from(projectDocuments).where(and(
     eq(projectDocuments.ownerId, ownerId),
-    eq(projectDocuments.projectId, projectId),
+    eq(projectDocuments.projectId, itemId),
   )).limit(1);
-  if (!saved) throw new Error("Project document could not be saved");
+  if (!saved) throw new Error(`${label} document could not be saved`);
   if (saved.version !== nextVersion || saved.updatedAt !== now) throw new Error("Document version conflict");
-  await logActivity(ownerId, projectId, "project_document_updated", "web", { version: nextVersion });
-  return serializeProjectDocument(saved);
+  await logActivity(ownerId, itemId, `${expectedKind}_document_updated`, "web", { version: nextVersion });
+  return {
+    id: saved.id,
+    targetId: itemId,
+    content: saved.content,
+    plainText: saved.plainText,
+    version: saved.version,
+    updatedAt: saved.updatedAt,
+  };
+}
+
+export type WorkDocumentTargetKind = "task" | "routine";
+
+export async function getWorkDocument(ownerId: string, targetKind: WorkDocumentTargetKind, targetId: string) {
+  if (targetKind === "task") {
+    return { ...(await getItemBackedDocument(ownerId, targetId, "task")), targetKind };
+  }
+  const routine = await getRoutine(ownerId, targetId);
+  if (!routine || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Routine not found");
+  const fallback = [routine.description, routine.actionSteps].map((value) => value.trim()).filter(Boolean).join("\n\n");
+  return {
+    id: routine.documentVersion > 0 ? routine.id : null,
+    targetKind,
+    targetId,
+    content: routine.documentVersion > 0 ? routine.documentContent : JSON.stringify(blocksFromPlainText(fallback)),
+    plainText: routine.documentVersion > 0 ? routine.documentPlainText : fallback,
+    version: routine.documentVersion,
+    updatedAt: routine.documentUpdatedAt ?? routine.updatedAt,
+  };
+}
+
+export async function saveWorkDocument(
+  ownerId: string,
+  targetKind: WorkDocumentTargetKind,
+  targetId: string,
+  input: { content: string; plainText: string; expectedVersion: number; userId?: string | null },
+) {
+  if (targetKind === "task") {
+    return { ...(await saveItemBackedDocument(ownerId, targetId, "task", input)), targetKind };
+  }
+  const routine = await getRoutine(ownerId, targetId);
+  if (!routine || routine.systemKey === GENERAL_ROUTINE_SYSTEM_KEY) throw new Error("Routine not found");
+  if (input.expectedVersion !== routine.documentVersion) throw new Error("Document version conflict");
+  const content = normalizeBlockContent(input.content);
+  const plainText = normalizeDocumentText(input.plainText);
+  const nextVersion = routine.documentVersion + 1;
+  const now = new Date().toISOString();
+  await (env as RuntimeEnv).DB.prepare(`UPDATE routines
+      SET document_content = ?, document_plain_text = ?, document_version = ?, document_updated_at = ?, updated_at = ?
+      WHERE owner_id = ? AND id = ? AND system_key IS NULL AND document_version = ?`)
+    .bind(content, plainText, nextVersion, now, now, ownerId, targetId, routine.documentVersion).run();
+  const saved = await getRoutine(ownerId, targetId);
+  if (!saved || saved.documentVersion !== nextVersion || saved.documentUpdatedAt !== now) throw new Error("Document version conflict");
+  return {
+    id: saved.id,
+    targetKind,
+    targetId,
+    content: saved.documentContent,
+    plainText: saved.documentPlainText,
+    version: saved.documentVersion,
+    updatedAt: saved.documentUpdatedAt ?? saved.updatedAt,
+  };
 }
 
 export async function listProjectTemplates(ownerId: string) {
@@ -5255,17 +5422,6 @@ export function prepareProjectTemplateDocument(template: { content: string; plai
   ]));
   const plainText = normalizeDocumentText([template.plainText.trim(), description.trim()].filter(Boolean).join("\n\n"));
   return { content, plainText };
-}
-
-function serializeProjectDocument(document: ProjectDocument) {
-  return {
-    id: document.id,
-    projectId: document.projectId,
-    content: document.content,
-    plainText: document.plainText,
-    version: document.version,
-    updatedAt: document.updatedAt,
-  };
 }
 
 function serializeProjectTemplate(template: ProjectTemplate) {

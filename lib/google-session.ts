@@ -15,6 +15,7 @@ export type GoogleSession = {
   sub: string;
   email: string;
   name: string;
+  issuedAt?: number;
   expiresAt: number;
 };
 
@@ -70,6 +71,7 @@ export async function createGoogleSessionCookie(profile: GoogleProfile, secret: 
     sub: profile.sub,
     email: profile.email.trim().toLocaleLowerCase(),
     name: profile.name.trim() || profile.email.split("@")[0],
+    issuedAt: Math.floor(Date.now() / 1000),
     expiresAt: Math.floor(Date.now() / 1000) + SESSION_DURATION_SECONDS,
   };
   const payload = bytesToBase64Url(new TextEncoder().encode(JSON.stringify(session)));
@@ -98,6 +100,7 @@ export async function readGoogleSession(request: Request, secret: string | undef
   try {
     const session = JSON.parse(new TextDecoder().decode(base64UrlToBytes(payload))) as Partial<GoogleSession>;
     if (session.provider !== "google" || !session.sub || !session.email || !session.name || !session.expiresAt) return null;
+    if (session.issuedAt !== undefined && (!Number.isFinite(session.issuedAt) || session.issuedAt > Math.floor(Date.now() / 1000) + 300)) return null;
     if (session.expiresAt <= Math.floor(Date.now() / 1000)) return null;
     return session as GoogleSession;
   } catch {

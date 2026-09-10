@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-09-10",
+  "identity": {
+    "name": "OKRI",
+    "bundleId": "ai.okri.app",
+    "packageName": "ai.okri.app",
+    "version": "1.0.0",
+    "category": "PRODUCTIVITY",
+    "supportEmail": "taehong0613@gmail.com",
+    "supportUrl": "https://okri.ai/guide",
+    "privacyUrl": "https://okri.ai/privacy",
+    "termsUrl": "https://okri.ai/terms",
+    "accountDeletionUrl": "https://okri.ai/account-deletion?lang=en"
+  },
+  "access": {
+    "loginRequired": true,
+    "instructions": "Sign in with any reviewer-controlled Google account. On iOS, Sign in with Apple is also available. A new sign-in creates an empty personal workspace, so no invitation, payment, demo code or special role is required.",
+    "paidAccessRequired": false,
+    "demoCredentialCommitted": false
+  },
+  "privacy": {
+    "dataEncryptedInTransit": true,
+    "tracking": false,
+    "advertisingId": false,
+    "ads": false,
+    "sellsData": false,
+    "optionalDeletion": false,
+    "collected": [
+      { "type": "Email address", "required": true, "linkedToUser": true, "purpose": ["Account management", "App functionality"] },
+      { "type": "Name", "required": true, "linkedToUser": true, "purpose": ["Account management", "App functionality"] },
+      { "type": "User IDs", "required": true, "linkedToUser": true, "purpose": ["Account management", "App functionality"] },
+      { "type": "User content", "required": false, "linkedToUser": true, "purpose": ["App functionality"] }
+    ],
+    "notCollected": ["Contacts", "Location", "Photos and videos", "Audio files", "Health and fitness", "Browsing history", "Advertising data"]
+  },
+  "content": {
+    "madeForKids": false,
+    "minimumAgeInTerms": 14,
+    "userGeneratedPublicContent": false,
+    "violence": false,
+    "sexualContent": false,
+    "gambling": false,
+    "regulatedGoods": false,
+    "medicalAdvice": false
+  },
+  "commerce": {
+    "digitalPurchaseInApp": false,
+    "paymentLinkInApp": false,
+    "subscriptionPromotionInApp": false
+  },
+  "apple": {
+    "supportsTablet": false,
+    "signInWithApple": true,
+    "usesNonExemptEncryption": false,
+    "reviewNotes": "OKRI is an authenticated team productivity companion. Sign in with Apple or Google to create an empty personal workspace. Core OKR, Project, Task, Routine and Daily features are available without payment. Account deletion is in More > Settings. No subscription purchase or external payment steering appears in the app."
+  },
+  "googlePlay": {
+    "targetAudience": "Adults and workplace teams; not designed for children",
+    "appAccessInstructions": "Use any reviewer-controlled Google account. No invitation, OTP, payment or organization approval is required. Account deletion is available in More > Settings and at the public deletion URL.",
+    "containsAds": false
+  }
+}

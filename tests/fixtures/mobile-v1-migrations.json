@@ -52,5 +52,12 @@
   "drizzle/0052_daily_team_digest.sql": "a910113fa757dd70d6600cdbaedc847ffd9d15031a6b9dfc1018fb1e2f4db543",
   "drizzle/0053_slack_daily_checklist_repair.sql": "d96c7db9c6a1b4cc894dd932cfbdec2e1c59ee741edf6f3f0b2f4842ce59c335",
   "drizzle/0054_native_sessions.sql": "083a17ea5d115017663c7a7a4ae79a430b44bb8e77e44c23f8010e87c7425c82",
-  "drizzle/0055_daily_work_status.sql": "98f08987e7e7e6b15f88e8535c6cbe87a68cfc66d0160747332eba8e1c3b5cf8"
+  "drizzle/0055_daily_work_status.sql": "98f08987e7e7e6b15f88e8535c6cbe87a68cfc66d0160747332eba8e1c3b5cf8",
+  "drizzle/0056_project_images.sql": "94a4fe86bdd7b65f63707ac8830ceda076715196f9ab6ac8b0041c4a0f8f2319",
+  "drizzle/0057_work_documents.sql": "0051f9a0e3ce3ec485834cc23438ac5a5a0af77b80af12aa5f2d7ea1791a702c",
+  "drizzle/0058_account_onboarding.sql": "d73a6f9e5c199d24a8149880077b622da70aefc31b7042ff50c1ed3891947ec5",
+  "drizzle/0059_local_agent.sql": "a8ddf564e185ffb760152cc01915c8aa4d174d5a255889bb66179a1e04452ca2",
+  "drizzle/0060_editor_seat_billing.sql": "b8f4f4c293e0da8038892beb68c28dfe1b0f47b1184506bd36edfc27a8d8b36f",
+  "drizzle/0061_storage_upload_reservations.sql": "d8b73801f667031f7de8ac439f7911e6647e6647a94dc7d392ee935ed5b909a6",
+  "drizzle/0062_document_image_assets.sql": "47ffb23f0179760325d8db1ae5cbdada3c69b5a10ba0bb2aa7302afe86fc8edc"
 }

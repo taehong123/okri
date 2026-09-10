@@ -47,7 +47,7 @@ requires an explicit account/plan/key setup and a new binary.
 1. Authenticate Expo/EAS and select the actual Apple/Google developer organizations.
 2. Confirm `ai.okri.app` in both stores. Link the real EAS project using `eas init`.
    Supply `EXPO_OWNER` and `EXPO_PUBLIC_EAS_PROJECT_ID` to the build environment.
-3. Review and deploy the backend with migration `0054_native_sessions.sql` before
+3. Review and deploy the backend with migration `0063_native_sessions.sql` before
    enabling native login. Keep SQL LF and existing guards intact.
 4. Configure server secrets `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`
    and `APPLE_BUNDLE_ID=ai.okri.app`; reuse the existing token encryption key.

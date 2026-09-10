@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Diamond, FolderKanban } from "lucide-react";
+import { Check, ChevronDown, ChevronLeft, ChevronRight, Diamond, FolderKanban } from "lucide-react";
 import { useMemo, useState, type CSSProperties } from "react";
 import { displayDate, getClientLocale, messageValue, t, useLanguage } from "@/lib/client-language";
 
@@ -100,7 +100,7 @@ function assigneeLabel(project: GanttItem) {
 }
 
 export default function GanttView({ items, onOpenProject, onOpenTask }: GanttViewProps) {
-  const language = useLanguage().language;
+  useLanguage();
   const today = useMemo(() => localToday(), []);
   const todayIso = isoDate(today);
   const [zoom, setZoom] = useState<Zoom>("fortnight");
@@ -122,14 +122,14 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
     for (const tasks of result.values()) tasks.sort((left, right) => (left.dueDate ?? "9999-12-31").localeCompare(right.dueDate ?? "9999-12-31") || left.title.localeCompare(right.title));
     return result;
   }, [items]);
-  const [expanded, setExpanded] = useState(() => new Set(projects.map((project) => project.id)));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const { start, end } = useMemo(() => rangeFor(anchor, zoom), [anchor, zoom]);
   const days = useMemo(() => Array.from({ length: dateDifference(start, end) + 1 }, (_, index) => addDays(start, index)), [start, end]);
   const overdueCount = projects.filter((project) => project.dueDate && project.dueDate < todayIso && !isComplete(project.status)).length;
   const undatedCount = projects.filter((project) => !project.dueDate).length;
   const locale = getClientLocale();
-  const weekdayFormat = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" }), [locale, language]);
-  const dateFormat = useMemo(() => new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", timeZone: "UTC" }), [locale, language]);
+  const weekdayFormat = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" }), [locale]);
+  const dateFormat = useMemo(() => new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", timeZone: "UTC" }), [locale]);
   const timelineStyle = { "--gantt-day-count": days.length, "--gantt-day-width": zoom === "fortnight" ? "3.5rem" : "2.25rem" } as CSSProperties;
 
   function moveRange(direction: -1 | 1) {
@@ -154,9 +154,11 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
     <section className="gantt-view" aria-label={t("Project 일정")}>
       <header className="gantt-toolbar">
         <div className="gantt-range-control">
-          <button className="icon-button" type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
-          <button className="secondary" type="button" onClick={() => setAnchor(today)}>{t("오늘")}</button>
-          <button className="icon-button" type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
+          <div className="gantt-range-navigation" role="group" aria-label={t("날짜")}>
+            <button type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
+            <button className="gantt-today" type="button" aria-current={isoDate(anchor) === todayIso ? "date" : undefined} onClick={() => setAnchor(today)}>{t("오늘")}</button>
+            <button type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
+          </div>
           <strong>{rangeLabel(start, end, locale)}</strong>
         </div>
         <div className="gantt-zoom" role="group" aria-label={t("일정 범위")}>
@@ -166,9 +168,9 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
       </header>
 
       <div className="gantt-summary" aria-label={t("일정 요약")}>
-        <span><FolderKanban size={15} />{t("Project {count}개", { count: projects.length })}</span>
-        <span className={overdueCount ? "danger" : ""}><CircleAlert size={15} />{t("기한 초과")} {messageValue(overdueCount)}</span>
-        <span><CalendarDays size={15} />{t("기한 없음")} {messageValue(undatedCount)}</span>
+        <span>{t("Project {count}개", { count: projects.length })}</span>
+        <span className={overdueCount ? "danger" : ""}>{t("기한 초과")} {messageValue(overdueCount)}</span>
+        <span>{t("기한 없음")} {messageValue(undatedCount)}</span>
       </div>
 
       {!projects.length ? (
@@ -228,7 +230,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
                     <div className="gantt-label gantt-task-label"><span className={`gantt-task-icon ${isComplete(task.status) ? "complete" : ""}`}>{isComplete(task.status) ? <Check size={13} /> : <Diamond size={12} />}</span><button className="gantt-title" type="button" onClick={() => onOpenTask(task.id)}><b>{task.title}</b><small><span>{statusLabel(task.status)}</span><span>{task.dueDate ? displayDate(task.dueDate) : t("기한 없음")}</span></small></button></div>
                     <div className="gantt-track" aria-label={`${task.title} · ${task.dueDate ? displayDate(task.dueDate) : t("기한 없음")}`}>
                       {days.map((day) => <span className={`gantt-cell ${day.getUTCDay() === 0 || day.getUTCDay() === 6 ? "weekend" : ""} ${isoDate(day) === todayIso ? "today" : ""}`} key={isoDate(day)} />)}
-                      {taskPosition && <button type="button" className={`gantt-milestone ${isComplete(task.status) ? "complete" : task.dueDate! < todayIso ? "overdue" : ""} ${taskPosition.edge ? `edge-${taskPosition.edge}` : ""}`} style={{ gridColumn: `${taskPosition.index + 1}` }} onClick={() => onOpenTask(task.id)} aria-label={`${task.title} · ${displayDate(task.dueDate!)}`} title={`${task.title} · ${displayDate(task.dueDate!)}`}><span><Diamond size={13} /></span></button>}
+                      {taskPosition && <button type="button" className={`gantt-milestone ${isComplete(task.status) ? "complete" : task.dueDate! < todayIso ? "overdue" : ""} ${taskPosition.edge ? `edge-${taskPosition.edge}` : ""}`} style={{ gridColumn: `${taskPosition.index + 1}` }} onClick={() => onOpenTask(task.id)} aria-label={`${task.title} · ${displayDate(task.dueDate!)}`} title={`${task.title} · ${displayDate(task.dueDate!)}`}><span /></button>}
                       {!taskDue && <span className="gantt-no-date">{t("기한 없음")}</span>}
                     </div>
                   </div>;
