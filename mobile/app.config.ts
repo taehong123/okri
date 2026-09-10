@@ -3,7 +3,7 @@ import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import updatePolicy from "./release/update-policy.json";
 
-const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID;
+const projectId = process.env.EXPO_PUBLIC_EAS_PROJECT_ID ?? "ceef3e46-c20b-4ae1-875b-9aff91267a4f";
 const certificate = "./release/update-certificate.pem";
 const hasCertificate = existsSync(resolve(__dirname, certificate));
 if (projectId && updatePolicy.ota === "signed" && !hasCertificate) {
@@ -12,7 +12,7 @@ if (projectId && updatePolicy.ota === "signed" && !hasCertificate) {
 const config: ExpoConfig = {
   name: "OKRI",
   slug: "okri",
-  owner: process.env.EXPO_OWNER,
+  owner: process.env.EXPO_OWNER ?? "taehong0613",
   version: "1.0.0",
   runtimeVersion: { policy: "fingerprint" },
   updates: {
