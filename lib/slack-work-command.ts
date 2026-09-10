@@ -629,7 +629,8 @@ async function attachSlackThreadImages(
     const notStored = result.skipped + result.failed;
     return [
       stored ? `\n${t("이미지 {count}개를 Project에 저장했습니다.", { count: stored })}` : "",
-      notStored ? `\n${t("형식·크기 또는 Slack 권한 때문에 이미지 {count}개는 저장하지 못했습니다.", { count: notStored })}` : "",
+      result.quotaExceeded ? `\n${t("이미지 저장 공간을 모두 사용했습니다. 기존 이미지는 그대로 유지됩니다.")}` : "",
+        notStored && !result.quotaExceeded ? `\n${t("형식·크기 또는 Slack 권한 때문에 이미지 {count}개는 저장하지 못했습니다.", { count: notStored })}` : "",
     ].join("");
   } catch (error) {
     console.error("Slack thread image attachment failed", error);

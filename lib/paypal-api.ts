@@ -82,7 +82,7 @@ type ProviderPlan = {
 export function validatePayPalPlan(plan: PayPalPlan, expectedId: string, data: ProviderPlan): PayPalPrice {
   const cycle = data.billing_cycles?.[0];
   const price = cycle?.pricing_scheme?.fixed_price;
-  if (data.id !== expectedId || data.status !== "ACTIVE" || data.quantity_supported
+  if (data.id !== expectedId || data.status !== "ACTIVE" || data.quantity_supported !== true
     || data.billing_cycles?.length !== 1 || cycle.tenure_type !== "REGULAR" || cycle.total_cycles !== 0
     || cycle.frequency?.interval_unit !== "MONTH" || cycle.frequency.interval_count !== 1
     || Number(data.payment_preferences?.setup_fee?.value || 0) !== 0

@@ -831,6 +831,27 @@ test("creates private Project image metadata with ownership and cascade guards",
   db.close();
 });
 
+test("creates bounded storage upload reservations with workspace cleanup", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("PRAGMA foreign_keys = ON;");
+  const [workspaceMigration, reservationMigration] = await Promise.all([
+    readFile(new URL("../drizzle/0005_wet_roland_deschain.sql", import.meta.url), "utf8"),
+    readFile(new URL("../drizzle/0058_storage_upload_reservations.sql", import.meta.url), "utf8"),
+  ]);
+  assert.ok(!reservationMigration.includes("\r"));
+  db.exec(workspaceMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(reservationMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(`INSERT INTO workspaces (id, name, owner_user_id) VALUES ('workspace', 'Team', 'owner');
+    INSERT INTO storage_upload_reservations (id, workspace_id, byte_size, expires_at)
+    VALUES ('reservation', 'workspace', 1024, '2099-01-01T00:00:00.000Z');`);
+  assert.equal(db.prepare("SELECT byte_size FROM storage_upload_reservations WHERE id = 'reservation'").get().byte_size, 1024);
+  assert.throws(() => db.exec(`INSERT INTO storage_upload_reservations (id, workspace_id, byte_size, expires_at)
+    VALUES ('empty', 'workspace', 0, '2099-01-01T00:00:00.000Z')`), /CHECK/i);
+  db.exec("DELETE FROM workspaces WHERE id = 'workspace'");
+  assert.equal(db.prepare("SELECT count(*) AS count FROM storage_upload_reservations").get().count, 0);
+  db.close();
+});
+
 test("creates revocable workspace-scoped integration tokens", async () => {
   const db = new DatabaseSync(":memory:");
   db.exec("PRAGMA foreign_keys = ON;");

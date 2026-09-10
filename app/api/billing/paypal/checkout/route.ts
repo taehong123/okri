@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   try {
     await getWorkspaceSubscription(authorization.ownerId);
     return Response.json(await createPayPalCheckout(authorization.ownerId, authorization.userId, input.plan as "team" | "business", {
-      currency: input.currency, value: input.value,
+      currency: input.currency, value: input.value, seats: input.seats,
     }), { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) { return billingErrorResponse(error); }
 }

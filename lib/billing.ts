@@ -4,10 +4,15 @@ import { aiUsagePercent } from "@/lib/ai-usage";
 import { cancelPayPalSubscription, ensurePayPalSchema, expirePayPalEntitlement, getPayPalSubscription,
   payPalCheckoutOptions, reconcilePayPalSubscriptions, refundPayPalFirstPayment, withWorkspaceLock } from "@/lib/billing-paypal";
 
+const GIB = 1024 ** 3;
+
 export const BILLING_PLANS = {
-  free: { label: "Free", priceWon: 0, projectLimit: 10, editorLimit: 5, aiBudgetWon: 500 },
-  team: { label: "Team", priceWon: 11_000, projectLimit: 100, editorLimit: 10, aiBudgetWon: 2_000 },
-  business: { label: "Business", priceWon: 55_000, projectLimit: null, editorLimit: null, aiBudgetWon: 10_000 },
+  free: { label: "Free", seatPriceWon: 0, projectLimit: 30, editorLimit: 5, activityHistoryDays: 90,
+    storageBaseBytes: GIB, storagePerEditorBytes: 0, aiBudgetBaseWon: 500, aiBudgetPerEditorWon: 0 },
+  team: { label: "Team", seatPriceWon: 2_900, projectLimit: null, editorLimit: null, activityHistoryDays: null,
+    storageBaseBytes: 0, storagePerEditorBytes: 5 * GIB, aiBudgetBaseWon: 0, aiBudgetPerEditorWon: 600 },
+  business: { label: "Business", seatPriceWon: 4_900, projectLimit: null, editorLimit: null, activityHistoryDays: null,
+    storageBaseBytes: 0, storagePerEditorBytes: 20 * GIB, aiBudgetBaseWon: 0, aiBudgetPerEditorWon: 1_500 },
 } as const;
 
 export type BillingPlan = keyof typeof BILLING_PLANS;
@@ -33,6 +38,21 @@ type BillingRuntimeEnv = typeof env & {
 
 export const PAYMENT_RETRY_DAYS = [1, 3, 5, 7] as const;
 
+export function planMonthlyPriceWon(plan: BillingPlan, editorCount: number) {
+  if (plan === "free") return 0;
+  return BILLING_PLANS[plan].seatPriceWon * Math.max(1, Math.floor(editorCount));
+}
+
+export function planAiBudgetWon(plan: BillingPlan, editorCount: number) {
+  const limits = BILLING_PLANS[plan];
+  return limits.aiBudgetBaseWon + limits.aiBudgetPerEditorWon * (plan === "free" ? 0 : Math.max(1, Math.floor(editorCount)));
+}
+
+export function planStorageLimitBytes(plan: BillingPlan, editorCount: number) {
+  const limits = BILLING_PLANS[plan];
+  return limits.storageBaseBytes + limits.storagePerEditorBytes * (plan === "free" ? 0 : Math.max(1, Math.floor(editorCount)));
+}
+
 function billingPublicUrl(runtime: BillingRuntimeEnv) {
   return String(runtime.OKRI_PUBLIC_URL || runtime.OKRPTR_PUBLIC_URL || "https://okri.ai").replace(/\/$/, "");
 }
@@ -57,7 +77,7 @@ type SubscriptionRow = {
 };
 
 export class BillingLimitError extends Error {
-  readonly code: "project_quota_exceeded" | "editor_quota_exceeded" | "ai_budget_exceeded" | "editor_read_only";
+  readonly code: "project_quota_exceeded" | "editor_quota_exceeded" | "storage_quota_exceeded" | "ai_budget_exceeded" | "editor_read_only";
   readonly details: Record<string, unknown>;
 
   constructor(code: BillingLimitError["code"], message: string, details: Record<string, unknown>) {
@@ -212,13 +232,27 @@ export async function getWorkspaceSubscription(workspaceId: string): Promise<Sub
   return row;
 }
 
+export async function getBillableEditorCount(workspaceId: string) {
+  await ensureBillingSchema();
+  const row = await (env as BillingRuntimeEnv).DB.prepare(`SELECT count(*) AS count FROM workspace_members
+    WHERE workspace_id = ? AND status = 'active' AND role IN ('owner','admin','member')`)
+    .bind(workspaceId).first<{ count: number }>();
+  return Number(row?.count ?? 0);
+}
+
+export async function getWorkspaceStorageUsage(workspaceId: string) {
+  const row = await (env as BillingRuntimeEnv).DB.prepare(`SELECT coalesce(sum(byte_size), 0) AS used
+    FROM project_images WHERE owner_id = ?`).bind(workspaceId).first<{ used: number }>();
+  return Math.max(0, Number(row?.used ?? 0));
+}
+
 export async function getBillingStatus(workspaceId: string, userId: string, role: string) {
   const d1 = (env as BillingRuntimeEnv).DB;
   const subscription = await getWorkspaceSubscription(workspaceId);
   const plan = validPlan(subscription.plan) ? subscription.plan : "free";
   const limits = BILLING_PLANS[plan];
   const period = kstPeriod();
-  const [projectUsage, editorRows, aiUsage, method, transactions, editorEnforcement] = await Promise.all([
+  const [projectUsage, editorRows, aiUsage, storageUsed, method, transactions, editorEnforcement] = await Promise.all([
     d1.prepare("SELECT created_count FROM project_monthly_usage WHERE workspace_id = ? AND period_key = ? LIMIT 1").bind(workspaceId, period.key).first<{ created_count: number }>(),
     d1.prepare(`SELECT member.id, member.display_name, member.email, member.role, member.created_at,
         CASE WHEN selection.selected = 1 THEN 1 ELSE 0 END AS explicitly_selected
@@ -229,6 +263,7 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
       ORDER BY explicitly_selected DESC, CASE WHEN member.role = 'owner' THEN 0 ELSE 1 END, member.created_at, member.id`)
       .bind(workspaceId).all<Record<string, string | number | null>>(),
     getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period),
+    getWorkspaceStorageUsage(workspaceId),
     d1.prepare("SELECT id, card_company, masked_card, created_at FROM billing_payment_methods WHERE workspace_id = ? AND active = 1 LIMIT 1").bind(workspaceId).first<Record<string, string>>(),
     d1.prepare(`SELECT id, kind, plan, price_won, status, receipt_url, created_at
       FROM billing_transactions WHERE workspace_id = ? ORDER BY created_at DESC LIMIT 20`).bind(workspaceId).all<Record<string, string | number | null>>(),
@@ -236,6 +271,9 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
   ]);
   const projectsUsed = Number(projectUsage?.created_count ?? 0);
   const editorsUsed = editorRows.results.length;
+  const monthlyPriceWon = planMonthlyPriceWon(plan, editorsUsed);
+  const aiBudgetWon = planAiBudgetWon(plan, editorsUsed);
+  const storageLimitBytes = planStorageLimitBytes(plan, editorsUsed);
   const hasExplicitEditorSelection = editorRows.results.some((row) => Boolean(row.explicitly_selected));
   const editorMembers = editorRows.results.map((row, index) => ({
     id: String(row.id),
@@ -253,7 +291,9 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
   return {
     plan,
     planLabel: limits.label,
-    priceWon: limits.priceWon,
+    seatPriceWon: limits.seatPriceWon,
+    monthlyPriceWon,
+    billableEditors: editorsUsed,
     vatIncluded: true,
     status: subscription.status,
     nextPlan: subscription.next_plan,
@@ -271,7 +311,8 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
         enforced: editorEnforcement.enforced,
         graceEndsAt: editorEnforcement.graceEndsAt,
       },
-      ai: { usedWon: Math.ceil(aiUsage / 1_000_000), limitWon: limits.aiBudgetWon, remainingWon: Math.max(0, limits.aiBudgetWon - Math.ceil(aiUsage / 1_000_000)), ...aiUsagePercent(aiUsage, limits.aiBudgetWon * 1_000_000), resetsAt: period.resetsAt },
+      ai: { usedWon: Math.ceil(aiUsage / 1_000_000), limitWon: aiBudgetWon, remainingWon: Math.max(0, aiBudgetWon - Math.ceil(aiUsage / 1_000_000)), ...aiUsagePercent(aiUsage, aiBudgetWon * 1_000_000), resetsAt: period.resetsAt },
+      storage: { usedBytes: storageUsed, limitBytes: storageLimitBytes, remainingBytes: Math.max(0, storageLimitBytes - storageUsed) },
     },
     editorMembers,
     paymentMethod: method ? { id: method.id, cardCompany: method.card_company, maskedCard: method.masked_card, createdAt: method.created_at } : null,
@@ -284,7 +325,8 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
     checkoutAvailable: paypleConfigured() || paypalPlans.length > 0,
     providers: { payple: paypleConfigured(), paypal: paypalPlans },
     paypal: paypal ? { plan: paypal.plan, status: paypal.status, paidThrough: paypal.paid_through,
-      currency: paypal.currency, value: paypal.price_value } : null,
+      currency: paypal.currency, value: paypal.price_value, seatCount: Number(paypal.seat_count || 1),
+      pendingSeatCount: paypal.pending_seat_count === null ? null : Number(paypal.pending_seat_count) } : null,
     paypalTransactions: paypalTransactions.results.map((row) => ({ id: row.id, plan: row.plan, status: row.status,
       currency: row.currency, value: row.price_value, createdAt: row.paid_at })),
     integrationsIncluded: true,
@@ -391,6 +433,40 @@ export async function releaseProjectCreation(reservation: { workspaceId: string;
     WHERE workspace_id = ? AND period_key = ?`).bind(reservation.workspaceId, reservation.periodKey).run();
 }
 
+export async function reserveStorageUpload(workspaceId: string, byteSize: number) {
+  const requestedBytes = Math.max(0, Math.floor(byteSize));
+  if (!billingEnforcementEnabled() || requestedBytes === 0) return null;
+  const subscription = await getWorkspaceSubscription(workspaceId);
+  const plan = validPlan(subscription.plan) ? subscription.plan : "free";
+  const editorCount = await getBillableEditorCount(workspaceId);
+  const limitBytes = planStorageLimitBytes(plan, editorCount);
+  const d1 = (env as BillingRuntimeEnv).DB;
+  const now = new Date();
+  const expiresAt = new Date(now.getTime() + 5 * 60_000).toISOString();
+  await d1.prepare("DELETE FROM storage_upload_reservations WHERE expires_at <= ?").bind(now.toISOString()).run();
+  const id = crypto.randomUUID();
+  const result = await d1.prepare(`INSERT INTO storage_upload_reservations
+      (id, workspace_id, byte_size, expires_at, created_at)
+    SELECT ?, ?, ?, ?, ?
+    WHERE coalesce((SELECT sum(byte_size) FROM project_images WHERE owner_id = ?), 0)
+      + coalesce((SELECT sum(byte_size) FROM storage_upload_reservations WHERE workspace_id = ? AND expires_at > ?), 0)
+      + ? <= ?`)
+    .bind(id, workspaceId, requestedBytes, expiresAt, now.toISOString(), workspaceId, workspaceId, now.toISOString(), requestedBytes, limitBytes).run();
+  if (!result.meta.changes) {
+    const usedBytes = await getWorkspaceStorageUsage(workspaceId);
+    throw new BillingLimitError("storage_quota_exceeded", "이미지 저장 공간을 모두 사용했습니다. 기존 이미지는 그대로 유지됩니다.", {
+      usedBytes, limitBytes, remainingBytes: Math.max(0, limitBytes - usedBytes), upgradeUrl: "/?view=billing",
+    });
+  }
+  return id;
+}
+
+export async function releaseStorageUpload(reservationId: string | null) {
+  if (!reservationId) return;
+  await (env as BillingRuntimeEnv).DB.prepare("DELETE FROM storage_upload_reservations WHERE id = ?")
+    .bind(reservationId).run();
+}
+
 export async function assertEditorSeatAvailable(workspaceId: string, role: string) {
   if (!billingEnforcementEnabled() || role === "viewer") return;
   if (!(await getEditorEnforcementState(workspaceId)).enforced) return;
@@ -470,8 +546,11 @@ export async function getAiUsageStatus(workspaceId: string) {
   const subscription = await getWorkspaceSubscription(workspaceId);
   const plan = validPlan(subscription.plan) ? subscription.plan : "free";
   const period = kstPeriod();
-  const used = await getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period);
-  const percent = aiUsagePercent(used, BILLING_PLANS[plan].aiBudgetWon * 1_000_000);
+  const [used, editorCount] = await Promise.all([
+    getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan, period),
+    getBillableEditorCount(workspaceId),
+  ]);
+  const percent = aiUsagePercent(used, planAiBudgetWon(plan, editorCount) * 1_000_000);
   if (!percent) throw new Error("AI 사용량을 확인하지 못했습니다.");
   return { ...percent, resetsAt: period.resetsAt };
 }
@@ -480,8 +559,11 @@ export async function assertAiBudget(workspaceId: string, userId: string) {
   if (!billingEnforcementEnabled()) return { limitWon: null, spentWonMicros: 0, resetsAt: kstPeriod().resetsAt };
   const subscription = await getWorkspaceSubscription(workspaceId);
   const plan = validPlan(subscription.plan) ? subscription.plan : "free";
-  const spentWonMicros = await getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan);
-  const limitWon = BILLING_PLANS[plan].aiBudgetWon;
+  const [spentWonMicros, editorCount] = await Promise.all([
+    getAiMonthlyUsage(workspaceId, subscription.billing_owner_user_id, plan),
+    getBillableEditorCount(workspaceId),
+  ]);
+  const limitWon = planAiBudgetWon(plan, editorCount);
   if (spentWonMicros >= limitWon * 1_000_000) {
     throw new BillingLimitError("ai_budget_exceeded", "이번 달 AI 안전 한도에 도달했습니다. 작성 중인 내용은 유지됩니다.", {
       spentWon: Math.ceil(spentWonMicros / 1_000_000), limitWon, resetsAt: kstPeriod().resetsAt, upgradeUrl: "/?view=billing", userId,
@@ -517,10 +599,12 @@ export async function createPaypleSession(workspaceId: string, userId: string, p
   const tokenHash = await sha256(token);
   const now = new Date();
   const runtime = env as BillingRuntimeEnv;
+  const billableEditors = await getBillableEditorCount(workspaceId);
+  const monthlyPriceWon = planMonthlyPriceWon(plan, billableEditors);
   await runtime.DB.prepare(`INSERT INTO billing_sessions
     (token_hash, workspace_id, user_id, plan, price_won, consented_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .bind(tokenHash, workspaceId, userId, plan, BILLING_PLANS[plan].priceWon, now.toISOString(), new Date(now.getTime() + 30 * 60_000).toISOString()).run();
+    .bind(tokenHash, workspaceId, userId, plan, monthlyPriceWon, now.toISOString(), new Date(now.getTime() + 30 * 60_000).toISOString()).run();
   return {
     sessionToken: token,
     expiresAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
@@ -530,7 +614,9 @@ export async function createPaypleSession(workspaceId: string, userId: string, p
     merchantId: runtime.PAYPLE_CST_ID,
     returnUrl: `${billingPublicUrl(runtime)}/api/billing/payple/result`,
     plan,
-    priceWon: BILLING_PLANS[plan].priceWon,
+    seatPriceWon: BILLING_PLANS[plan].seatPriceWon,
+    billableEditors,
+    priceWon: monthlyPriceWon,
   };
   });
 }
@@ -561,12 +647,16 @@ export async function completePaypleRegistration(input: {
   const now = new Date();
   const trialEnds = new Date(now.getTime() + 30 * 24 * 60 * 60_000);
   const plan = String(session.plan) as BillingPlan;
+  if (!validPlan(plan) || plan === "free") throw new Error("카드 등록 세션의 요금제가 올바르지 않습니다.");
+  const billableEditors = await getBillableEditorCount(input.workspaceId);
+  const monthlyPriceWon = planMonthlyPriceWon(plan, billableEditors);
+  if (Number(session.price_won) !== monthlyPriceWon) throw new Error("편집 멤버 수가 변경되었습니다. 현재 예상 요금을 확인하고 카드를 다시 등록해 주세요.");
   const methodId = crypto.randomUUID();
   const immediatePeriodEnd = new Date(now);
   immediatePeriodEnd.setUTCMonth(immediatePeriodEnd.getUTCMonth() + 1);
   const immediateOrderId = `okri-first-${tokenHash.slice(0, 24)}`;
   const immediatePayment = priorClaim
-    ? await paypleCharge(runtime, verified.billingKey, immediateOrderId, BILLING_PLANS[plan].priceWon)
+    ? await paypleCharge(runtime, verified.billingKey, immediateOrderId, monthlyPriceWon)
     : null;
   await runtime.DB.batch([
     runtime.DB.prepare("UPDATE billing_payment_methods SET active = 0, revoked_at = ?, updated_at = ? WHERE workspace_id = ? AND active = 1")
@@ -597,7 +687,7 @@ export async function completePaypleRegistration(input: {
         (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, payple_transaction_id, receipt_url,
          period_started_at, period_ends_at, retained_until, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'charge', ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(crypto.randomUUID(), input.workspaceId, immediateOrderId, immediateOrderId, plan, BILLING_PLANS[plan].priceWon,
+        .bind(crypto.randomUUID(), input.workspaceId, immediateOrderId, immediateOrderId, plan, monthlyPriceWon,
           immediatePayment.transactionId, immediatePayment.receiptUrl, now.toISOString(), immediatePeriodEnd.toISOString(), addYears(now, 5).toISOString(), now.toISOString(), now.toISOString()),
     ] : [
       runtime.DB.prepare(`INSERT OR IGNORE INTO billing_notifications
@@ -634,7 +724,10 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
     return { plan, status: current.status, unchanged: true };
   }
   const now = new Date().toISOString();
-  const upgrade = BILLING_PLANS[plan].priceWon > BILLING_PLANS[current.plan].priceWon;
+  const billableEditors = await getBillableEditorCount(workspaceId);
+  const currentPriceWon = planMonthlyPriceWon(current.plan, billableEditors);
+  const nextPriceWon = planMonthlyPriceWon(plan, billableEditors);
+  const upgrade = nextPriceWon > currentPriceWon;
   if (upgrade && current.plan === "free") {
     if (!paypleConfigured()) throw new Error("Payple 운영 설정이 완료되지 않아 유료 플랜을 다시 시작할 수 없습니다.");
     const runtime = env as BillingRuntimeEnv;
@@ -645,13 +738,13 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
     const periodEnd = new Date(periodStart);
     periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
     const orderId = `okri-reactivate-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.updated_at)}`;
-    const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, BILLING_PLANS[plan].priceWon);
+    const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, nextPriceWon);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
         (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, payple_transaction_id, receipt_url,
          period_started_at, period_ends_at, retained_until, created_at, updated_at)
         VALUES (?, ?, ?, ?, 'charge', ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)`)
-        .bind(crypto.randomUUID(), workspaceId, orderId, orderId, plan, BILLING_PLANS[plan].priceWon, paid.transactionId, paid.receiptUrl,
+        .bind(crypto.randomUUID(), workspaceId, orderId, orderId, plan, nextPriceWon, paid.transactionId, paid.receiptUrl,
           periodStart.toISOString(), periodEnd.toISOString(), addYears(periodStart, 5).toISOString(), now, now),
       runtime.DB.prepare(`UPDATE workspace_subscriptions SET plan = ?, status = 'active', next_plan = NULL,
         cancel_at_period_end = 0, retry_count = 0, grace_ends_at = NULL, current_period_started_at = ?,
@@ -659,7 +752,7 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
         last_paid_at = ?, updated_at = ? WHERE workspace_id = ?`)
         .bind(plan, periodStart.toISOString(), periodEnd.toISOString(), periodEnd.toISOString(), now, now, now, workspaceId),
     ]);
-    return { plan, nextPlan: null, effective: "immediate", priceWon: BILLING_PLANS[plan].priceWon, reactivated: true };
+    return { plan, nextPlan: null, effective: "immediate", priceWon: nextPriceWon, billableEditors };
   }
   if (upgrade && current.plan !== "free" && current.status === "active") {
     if (!paypleConfigured()) throw new Error("Payple 운영 설정이 완료되지 않아 즉시 상향할 수 없습니다.");
@@ -671,7 +764,7 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
     const periodEnd = current.current_period_ends_at ? Date.parse(current.current_period_ends_at) : Date.now() + 30 * 24 * 60 * 60_000;
     const fullPeriod = Math.max(1, periodEnd - periodStart);
     const remaining = Math.max(0, periodEnd - Date.now());
-    const difference = BILLING_PLANS[plan].priceWon - BILLING_PLANS[current.plan].priceWon;
+    const difference = nextPriceWon - currentPriceWon;
     const priceWon = Math.max(1, Math.ceil((difference * remaining) / fullPeriod));
     const orderId = `okri-upgrade-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.current_period_ends_at || current.updated_at)}`;
     const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, priceWon);
@@ -785,8 +878,10 @@ async function processDueSubscription(runtime: BillingRuntimeEnv, subscription: 
   const periodEnd = new Date(now);
   periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
   try {
+    const billableEditors = await getBillableEditorCount(subscription.workspace_id);
+    const monthlyPriceWon = planMonthlyPriceWon(plan, billableEditors);
     const billingKey = await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!);
-    const paid = await paypleCharge(runtime, billingKey, orderId, BILLING_PLANS[plan].priceWon);
+    const paid = await paypleCharge(runtime, billingKey, orderId, monthlyPriceWon);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
         (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, payple_transaction_id, receipt_url,
@@ -794,7 +889,7 @@ async function processDueSubscription(runtime: BillingRuntimeEnv, subscription: 
         VALUES (?, ?, ?, ?, 'charge', ?, ?, 'paid', ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(order_id) DO UPDATE SET status = 'paid', payple_transaction_id = excluded.payple_transaction_id,
           receipt_url = excluded.receipt_url, updated_at = excluded.updated_at`)
-        .bind(crypto.randomUUID(), subscription.workspace_id, orderId, orderId, plan, BILLING_PLANS[plan].priceWon,
+        .bind(crypto.randomUUID(), subscription.workspace_id, orderId, orderId, plan, monthlyPriceWon,
           paid.transactionId, paid.receiptUrl, now.toISOString(), periodEnd.toISOString(), addYears(now, 5).toISOString(), now.toISOString(), now.toISOString()),
       runtime.DB.prepare(`UPDATE workspace_subscriptions SET status = 'active', retry_count = 0, grace_ends_at = NULL,
         first_paid_at = coalesce(first_paid_at, ?), last_paid_at = ?, current_period_started_at = ?, current_period_ends_at = ?,

@@ -594,6 +594,21 @@ export const projectImages = sqliteTable(
   ],
 );
 
+export const storageUploadReservations = sqliteTable(
+  "storage_upload_reservations",
+  {
+    id: text("id").primaryKey(),
+    workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    byteSize: integer("byte_size").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    index("idx_storage_upload_reservations_workspace_expiry").on(table.workspaceId, table.expiresAt),
+    check("storage_upload_reservations_positive_size", sql`${table.byteSize} > 0`),
+  ],
+);
+
 export const projectTemplates = sqliteTable(
   "project_templates",
   {
