@@ -1250,10 +1250,15 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
 
 function dailyPrivateCompletionCard(submission: DailySubmissionValue, t: Translator, options: DailyCardOptions) {
   const card = dailyCard(submission, t, options);
-  const start = card.blocks.findIndex((block) => block.type === "section"
+  const blocks = card.blocks as Array<{
+    type?: string;
+    text?: { type?: string; text?: string };
+    accessory?: { action_id?: string };
+  }>;
+  const start = blocks.findIndex((block) => block.type === "section"
     && block.text?.type === "mrkdwn" && block.text.text === `*${t("오늘 할 일")}*`);
   if (start < 0) return null;
-  const controls = card.blocks.slice(start, -1).filter((block) => block.type !== "section"
+  const controls = blocks.slice(start, -1).filter((block) => block.type !== "section"
     || block.text?.text !== `• ${t("오늘 예정 없음")}`);
   if (!controls.some((block) => block.accessory?.action_id === "daily_publication_complete")) return null;
   return {

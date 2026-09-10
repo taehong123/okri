@@ -44,9 +44,9 @@ type BillingStatusData = {
 };
 
 const plans: Array<{ id: BillingPlanId; label: string; seatPrice: number; recommended?: boolean; features: string[] }> = [
-  { id: "free", label: "Free", seatPrice: 0, features: ["월 Project 30개", "최근 3개월 활동·변경 기록", "이미지 저장 공간 1GB", "매월 OKRI 기본 AI 체험 크레딧", "ChatGPT·Claude와 제한 없이 사용", "편집 멤버 5명"] },
-  { id: "team", label: "Team", seatPrice: 2_900, recommended: true, features: ["Project 무제한", "전체 활동·변경 기록", "편집 멤버당 이미지 5GB · 팀이 함께 사용", "편집 멤버마다 OKRI 기본 AI 제공", "ChatGPT·Claude와 제한 없이 사용", "30일 무료 체험"] },
-  { id: "business", label: "Business", seatPrice: 4_900, features: ["Project 무제한", "전체 활동·변경 기록", "편집 멤버당 이미지 20GB · 팀이 함께 사용", "Team보다 2.5배 많은 OKRI 기본 AI", "ChatGPT·Claude와 제한 없이 사용", "30일 무료 체험"] },
+  { id: "free", label: "Free", seatPrice: 0, features: ["월 Project 30개", "최근 3개월 활동·변경 기록", "이미지 저장 공간 100MB", "매월 OKRI 기본 AI 체험 크레딧", "ChatGPT·Claude와 제한 없이 사용", "편집 멤버 5명"] },
+  { id: "team", label: "Team", seatPrice: 2_900, recommended: true, features: ["Project 무제한", "전체 활동·변경 기록", "편집 멤버당 이미지 500MB · 팀이 함께 사용", "편집 멤버마다 OKRI 기본 AI 제공", "ChatGPT·Claude와 제한 없이 사용", "30일 무료 체험"] },
+  { id: "business", label: "Business", seatPrice: 4_900, features: ["Project 무제한", "전체 활동·변경 기록", "편집 멤버당 이미지 1GB · 팀이 함께 사용", "Team보다 2.5배 많은 OKRI 기본 AI", "ChatGPT·Claude와 제한 없이 사용", "30일 무료 체험"] },
 ];
 
 export default function BillingView({ onNotice }: { onNotice: (message: string, tone?: NoticeTone) => void }) {

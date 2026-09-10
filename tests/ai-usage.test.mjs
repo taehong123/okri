@@ -25,7 +25,7 @@ const routeSource = await read("../app/api/billing/ai-usage/route.ts");
 
 test("per-editor plan totals and AI budgets scale from one billable seat", () => {
   const ast = ts.createSourceFile("billing.ts", billingSource, ts.ScriptTarget.Latest, true);
-  const constants = ast.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => ["GIB", "BILLING_PLANS"].includes(d.name.getText(ast)))).map((node) => node.getText(ast)).join("\n");
+  const constants = ast.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => ["MIB", "GIB", "BILLING_PLANS"].includes(d.name.getText(ast)))).map((node) => node.getText(ast)).join("\n");
   const functions = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && ["planMonthlyPriceWon", "planAiBudgetWon", "planStorageLimitBytes"].includes(node.name?.text)).map((node) => node.getText(ast)).join("\n");
   const pricing = compile(`${constants}\n${functions}`);
   assert.equal(pricing.planMonthlyPriceWon("team", 1), 2_900);
@@ -34,9 +34,9 @@ test("per-editor plan totals and AI budgets scale from one billable seat", () =>
   assert.equal(pricing.planAiBudgetWon("free", 100), 500);
   assert.equal(pricing.planAiBudgetWon("team", 5), 3_000);
   assert.equal(pricing.planAiBudgetWon("business", 5), 7_500);
-  assert.equal(pricing.planStorageLimitBytes("free", 100), 1024 ** 3);
-  assert.equal(pricing.planStorageLimitBytes("team", 5), 25 * 1024 ** 3);
-  assert.equal(pricing.planStorageLimitBytes("business", 5), 100 * 1024 ** 3);
+  assert.equal(pricing.planStorageLimitBytes("free", 100), 100 * 1024 ** 2);
+  assert.equal(pricing.planStorageLimitBytes("team", 5), 2_500 * 1024 ** 2);
+  assert.equal(pricing.planStorageLimitBytes("business", 5), 5 * 1024 ** 3);
 });
 
 test("usage is calculated from precise metering units without changing cost enforcement", () => {
@@ -50,9 +50,9 @@ test("usage is calculated from precise metering units without changing cost enfo
   assert.match(billingSource, /free: \{[\s\S]*?aiBudgetBaseWon: 500, aiBudgetPerEditorWon: 0 \}/);
   assert.match(billingSource, /projectLimit: 30/);
   assert.match(billingSource, /activityHistoryDays: 90/);
-  assert.match(billingSource, /storageBaseBytes: GIB, storagePerEditorBytes: 0/);
-  assert.match(billingSource, /storagePerEditorBytes: 5 \* GIB/);
-  assert.match(billingSource, /storagePerEditorBytes: 20 \* GIB/);
+  assert.match(billingSource, /storageBaseBytes: 100 \* MIB, storagePerEditorBytes: 0/);
+  assert.match(billingSource, /storagePerEditorBytes: 500 \* MIB/);
+  assert.match(billingSource, /storagePerEditorBytes: GIB/);
   assert.match(billingSource, /FROM document_image_assets WHERE workspace_id = \?/);
 });
 
@@ -161,7 +161,7 @@ test("cache expires across monthly reset and late old requests cannot overwrite 
 test("lightweight summary preserves Free owner aggregation and paid workspace boundaries", async () => {
   const ast = ts.createSourceFile("billing.ts", billingSource, ts.ScriptTarget.Latest, true);
   const functions = ast.statements.filter((node) => ts.isFunctionDeclaration(node) && ["getAiUsageStatus", "getAiMonthlyUsage", "kstPeriod", "validPlan", "planAiBudgetWon"].includes(node.name?.text)).map((node) => node.getText(ast)).join("\n");
-  const constants = ast.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => ["GIB", "BILLING_PLANS"].includes(d.name.getText(ast)))).map((node) => node.getText(ast)).join("\n");
+  const constants = ast.statements.filter((node) => ts.isVariableStatement(node) && node.declarationList.declarations.some((d) => ["MIB", "GIB", "BILLING_PLANS"].includes(d.name.getText(ast)))).map((node) => node.getText(ast)).join("\n");
   for (const [plan, limit] of [["free", 500], ["team", 600], ["business", 1_500]]) {
     let query, params;
     const { getAiUsageStatus } = compile(`const { env, getWorkspaceSubscription, aiUsagePercent } = require("deps");\nconst getBillableEditorCount = async () => 1;\n${constants}\n${functions}`, {

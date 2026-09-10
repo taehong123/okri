@@ -10,7 +10,7 @@ function billingFixture() {
     usage: { projects: { used: 4, limit: 30, remaining: 26, resetsAt: "2099-10-01T00:00:00Z" },
       editors: { used: 3, limit: 5, remaining: 2, enforced: false, graceEndsAt: null },
       ai: { usedPercent: 24, remainingPercent: 76, resetsAt: "2099-10-01T00:00:00Z" },
-      storage: { usedBytes: 268_435_456, limitBytes: 1_073_741_824, remainingBytes: 805_306_368 } },
+      storage: { usedBytes: 26_214_400, limitBytes: 104_857_600, remainingBytes: 78_643_200 } },
     editorMembers: [], paymentMethod: null, transactions: [], canManage: true, enforcementEnabled: false, checkoutAvailable: true,
     providers: { payple: false, paypal: [{ plan: "team", currency: "USD", value: "9.00" }, { plan: "business", currency: "USD", value: "39.00" }] },
     paypal: null, paypalTransactions: [],
@@ -33,8 +33,8 @@ test("pricing table shows per-editor prices and the current workspace total", as
   await expect(pricing).toContainText("2,900원 × 3명 = 8,700원/월");
   await expect(pricing).toContainText("4,900원 × 3명 = 14,700원/월");
   await expect(pricing).toContainText("ChatGPT·Claude와 제한 없이 사용");
-  await expect(pricing).toContainText("이미지 저장 공간 1GB");
-  await expect(page.locator(".billing-usage-section")).toContainText("256MB / 1GB");
+  await expect(pricing).toContainText("이미지 저장 공간 100MB");
+  await expect(page.locator(".billing-usage-section")).toContainText("25MB / 100MB");
   await pricing.getByRole("button", { name: "Business 플랜 선택", exact: true }).click();
   await expect(pricing.locator(".billing-plan-card.selected")).toContainText("Business");
   await expect(page.locator(".billing-checkout-summary")).toContainText("4,900원 × 3명 = 14,700원/월");

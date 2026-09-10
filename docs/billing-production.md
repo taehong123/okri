@@ -7,7 +7,7 @@
 - Free의 활성 편집자 기준은 서버·화면·약관 모두 5명으로 변경했다.
 - Team은 활성 편집 멤버 1명당 월 2,900원, Business는 4,900원(VAT 포함)으로 변경했다.
 - Owner·Admin·Member 중 활성 상태만 과금하며 Viewer와 초대 대기자는 과금하지 않는다.
-- Free는 월 Project 30개, 최근 3개월 활동·변경 기록, 작업 이미지 1GB를 제공한다. Team은 편집 멤버당 5GB, Business는 20GB를 워크스페이스에서 합산해 사용하며 Project와 활동 기록 조회 기간은 제한하지 않는다.
+- Free는 월 Project 30개, 최근 3개월 활동·변경 기록, 작업 이미지 100MB를 제공한다. Team은 편집 멤버당 500MB, Business는 1GB를 워크스페이스에서 합산해 사용하며 Project와 활동 기록 조회 기간은 제한하지 않는다.
 - ChatGPT·Claude에서 OKRI를 사용하는 연결은 모든 플랜에서 OKRI 측 횟수 제한 없이 제공한다. 고객 가격표에는 MCP 대신 사용자가 아는 제품명을 표시한다.
 - 고객 화면의 운영 설정/사전 배포 설명은 제거했다. 실제로 검증한 결제 옵션만 노출한다.
 - PayPal REST 구독·거래 확인·서명 검증 webhook·해지·첫 결제 환불을 추가했다.
@@ -125,4 +125,4 @@ Worker 예약 실행과 별도로 GitHub의 시간당 복구 실행을 유지한
 
 ## 4. 한도 활성화
 
-Payple 운영 승인, 거래성 이메일, 시간당 실행, 취소·환불, 약관·개인정보처리방침을 모두 확인한 뒤에만 `BILLING_ENFORCEMENT_STARTED_AT`을 현재 시각으로 먼저 설정하고 `BILLING_ENFORCEMENT_ENABLED=true`로 변경한다. 이 값은 Free의 월 Project 30개, 이미지 1GB, AI 체험량과 편집 멤버 5명 제한을 함께 활성화한다. 시작 시각 이전에 생성된 팀은 결제 화면에 유예 종료일을 표시하며 30일 뒤에만 Free의 5명 초과 편집자를 읽기 전용으로 제한한다. 기존 Project·Task·Routine 본문과 이미지는 삭제하지 않는다.
+Payple 운영 승인, 거래성 이메일, 시간당 실행, 취소·환불, 약관·개인정보처리방침을 모두 확인한 뒤에만 `BILLING_ENFORCEMENT_STARTED_AT`을 현재 시각으로 먼저 설정하고 `BILLING_ENFORCEMENT_ENABLED=true`로 변경한다. 이 값은 Free의 월 Project 30개, 이미지 100MB, AI 체험량과 편집 멤버 5명 제한을 함께 활성화한다. 시작 시각 이전에 생성된 팀은 결제 화면에 유예 종료일을 표시하며 30일 뒤에만 Free의 5명 초과 편집자를 읽기 전용으로 제한한다. 기존 Project·Task·Routine 본문과 이미지는 삭제하지 않는다.

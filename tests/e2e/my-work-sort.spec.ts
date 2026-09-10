@@ -77,6 +77,18 @@ test("sort controls and priority labels remain readable in every theme", async (
     await expect(page.locator("html")).toHaveAttribute("data-theme", theme.mode);
     await page.getByRole("button", { name: "우선순위순", exact: true }).click();
     await expect(rows(page, "Task").first()).toHaveText("Task urgent");
+    const workflowColors = await page.locator(".my-work-priority.priority-medium").first().evaluate((node) => {
+      const probe = document.createElement("span");
+      document.body.appendChild(probe);
+      probe.style.color = "var(--accent-fg)";
+      const accent = getComputedStyle(probe).color;
+      probe.style.color = "var(--info-fg)";
+      const info = getComputedStyle(probe).color;
+      probe.remove();
+      return { rendered: getComputedStyle(node).color, accent, info };
+    });
+    expect(workflowColors.rendered).toBe(workflowColors.accent);
+    if (theme.mode === "gray") expect(workflowColors.rendered).not.toBe(workflowColors.info);
     const contrast = await new AxeBuilder({ page: page as never }).include(".my-work-view").withRules(["color-contrast"]).analyze();
     expect(contrast.violations, theme.mode).toEqual([]);
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), theme.mode).toBe(true);
