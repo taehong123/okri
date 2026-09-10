@@ -124,6 +124,19 @@ test("Queries escape LIKE patterns, preserve General fallback and disclose trunc
   } finally { db.close(); }
 });
 
+test("Task context ranks an older Project named in the source ahead of recent candidates", async () => {
+  const { db, d1 } = fixture();
+  try {
+    const result = await intake.readWorkContext(d1, "a", "user", {
+      kind: "task", limit: 1, sourceText: "**100%완료를** 거래 규칙 실행 앱으로 다듬기",
+    });
+    assert.equal(result.parents[0].id, "percent");
+    assert.equal(result.parents[0].sourceMatched, true);
+    assert.equal(result.truncated.project, true);
+    assert.match(result.nextStep, /General보다 우선/);
+  } finally { db.close(); }
+});
+
 test("Unsure stays undecided; Routine does not need an Initiative or invented task", async () => {
   const { db, d1 } = fixture();
   try {
@@ -181,6 +194,7 @@ function mcpFixture() {
     updateItem: async (_owner, id, input) => { calls.push({ method: "update", input }); return fullItem({ id, status: "in_progress", ...input }); },
     createLinkedTasks: async (_owner, input) => { calls.push({ method: "batch", input }); return input.titles.map((title) => fullItem({ title, cycleId: "cycle-a", parentId: input.projectId, dueDate: input.dueDate })); },
     archiveProject: async (_owner, _user, id) => { calls.push({ method: "archive", id }); return { project: fullItem({ id, kind: "project", title: "Archived", archivedAt: "now" }), affectedCount: 3 }; },
+    trashItems: async (_owner, _user, input) => { calls.push({ method: "trash-task", input }); return { trashedRootIds: input.itemIds, projectCount: 0, taskCount: 1, affectedItemCount: 1 }; },
     restoreProject: async (_owner, id) => { calls.push({ method: "restore", id }); return { project: fullItem({ id, kind: "project", title: "Restored" }), affectedCount: 3 }; },
     getItemPropertiesByName: async (_owner, ids) => { calls.push({ method: "properties", ids }); return {}; },
     getItemAssignmentMap: async () => ({}),
@@ -332,12 +346,13 @@ test("MCP does not tell users to approve closed or uncertain reviews", async () 
   } finally { f.db.close(); }
 });
 
-test("MCP contracts expose the single-read preparation, optional Routine/cycle, and all read-only hints match policy", async () => {
+test("MCP contracts expose source-aware preparation, optional Routine/cycle, and all read-only hints match policy", async () => {
   const f = mcpFixture();
   try {
     await f.init();
-    const result = await f.call("prepare_work", { kind: "project" });
-    assert.equal(result.context.parents[0].id, "ini");
+    const result = await f.call("prepare_work", { kind: "task", source_text: "100%완료를 다듬기", limit: 1 });
+    assert.equal(result.context.parents[0].id, "percent");
+    assert.equal(result.context.parents[0].sourceMatched, true);
     assert.equal(f.calls.length, 0);
     const images = await f.call("list_project_images", { project_id: "p" });
     assert.equal(images.count, 1);
@@ -347,6 +362,23 @@ test("MCP contracts expose the single-read preparation, optional Routine/cycle, 
     for (const [name, { definition }] of f.tools) {
       assert.equal(intake.READ_ONLY_MCP_TOOLS.has(name), definition.annotations.readOnlyHint === true, name);
     }
+  } finally { f.db.close(); }
+});
+
+test("MCP moves an explicitly confirmed Task to recoverable trash with existing permission guards", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const { z } = require("zod");
+    const definition = f.tools.get("trash_task").definition;
+    const schema = z.object(definition.inputSchema);
+    assert.equal(schema.safeParse({ id: "task" }).success, false);
+    assert.equal(schema.safeParse({ id: "task", confirmed: false }).success, false);
+    assert.equal(definition.annotations.destructiveHint, true);
+    const result = await f.call("trash_task", { id: "task", confirmed: true });
+    assert.deepEqual(result, { trashed: true, title: "Task", taskCount: 1 });
+    assert.deepEqual(f.calls.find((call) => call.method === "trash-task")?.input, { itemIds: ["task"] });
+    await assert.rejects(() => f.call("trash_task", { id: "p", confirmed: true }), /Task not found/);
   } finally { f.db.close(); }
 });
 
