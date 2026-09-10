@@ -331,6 +331,8 @@ const messages = {
   "펼치기": "Expand",
   "완료": "Done",
   "완료 처리": "Mark done",
+  "내 데일리 완료 처리": "Complete my Daily tasks",
+  "이 완료 처리는 나에게만 보입니다.": "Only you can see these completion controls.",
   "할 일": "To do",
   "진행 중": "In progress",
   "막힘": "Blocked",

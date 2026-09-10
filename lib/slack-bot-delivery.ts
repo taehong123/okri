@@ -1,10 +1,11 @@
 import { env } from "cloudflare:workers";
 import { decryptSlackSecret, type SlackRuntimeEnv } from "@/lib/slack-oauth";
-import { postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
+import { postSlackEphemeral, postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
 
 type BotKind = "management" | "automation" | "daily_publication" | "daily_manual" | "daily_digest";
 type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string;
-  reportKey?: string; pageIndex?: number; pageCount?: number };
+  reportKey?: string; pageIndex?: number; pageCount?: number;
+  privateControl?: { user: string; text: string; blocks?: unknown[] } };
 type Row = {
   id: string; owner_id: string; bot_kind: BotKind; subject_id: string; event_key: string;
   connection_key: string; policy: string; payload: string; status: string; attempts: number;
@@ -211,6 +212,11 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
       receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id });
     }
     status = "sent"; messageTs = receipt.timestamp;
+    if (payload.privateControl?.user && receipt.timestamp) {
+      await postSlackEphemeral(token, payload.channel, payload.privateControl.user, receipt.timestamp,
+        payload.privateControl.text, payload.privateControl.blocks)
+        .catch(() => console.error("slack_daily_private_control_failed", { ownerId: row.owner_id, publicationId: row.subject_id }));
+    }
   } catch (failure) {
     error = (failure instanceof Error ? failure.message : "Slack 전송 실패").slice(0, 500);
     if (failure instanceof CancelledDelivery) status = "cancelled";

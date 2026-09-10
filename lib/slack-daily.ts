@@ -744,7 +744,7 @@ export async function publishDailySubmission(ownerId: string, submissionId: stri
   for (const publication of publications.results) {
     const now = new Date().toISOString();
     try {
-      const message = await dailyPublicationCard(ownerId, String(publication.id), submission, t);
+      const message = await dailyPublicationDeliveryPayload(ownerId, String(publication.id), submission, t);
       const receipt = await env.DB.prepare("SELECT id FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_publication' AND event_key = ?")
         .bind(ownerId, publication.id).first();
       if (!receipt && Number(publication.attempts) > 0 && !publication.slack_message_ts) {
@@ -810,7 +810,7 @@ export async function republishLatestDailySubmission(ownerId: string, memberId: 
       WHERE owner_id = ? AND submission_id = ? AND channel_id = ? LIMIT 1`)
       .bind(ownerId, submission.id, channel.channel_id).first<{ id: string }>();
     if (!publication) throw new Error("데일리 공유 기록을 만들지 못했습니다.");
-    const message = await dailyPublicationCard(ownerId, publication.id, submission, t);
+    const message = await dailyPublicationDeliveryPayload(ownerId, publication.id, submission, t);
     const receipt = await deliverSlackBotMessage(env.DB, {
       ownerId, botKind: "daily_publication", subjectId: publication.id,
       eventKey: `republish:${publication.id}:${normalizedRequestId}`,
@@ -1011,19 +1011,37 @@ async function loadSubmission(id: string, ownerId: string) {
   } satisfies DailySubmissionValue;
 }
 
-type DailyCardOptions = { publicationId?: string; completedTaskIds?: ReadonlySet<string> };
+type DailyCardOptions = { publicationId?: string; completedTaskIds?: ReadonlySet<string>; showCompletionButtons?: boolean };
 
-async function dailyPublicationCard(ownerId: string, publicationId: string, submission: DailySubmissionValue, t: Translator) {
+async function dailyCompletedTaskIds(ownerId: string, submission: DailySubmissionValue) {
   const taskIds = [...new Set([
     ...submission.tasks.flatMap((task) => task.taskId ? [task.taskId] : []),
     ...(submission.work ?? []).flatMap((work) => work.kind === "task" ? [work.id] : []),
   ])];
-  if (!taskIds.length) return dailyCard(submission, t, { publicationId });
+  if (!taskIds.length) return new Set<string>();
   const completed = await env.DB.prepare(`SELECT id FROM items
     WHERE owner_id = ? AND kind = 'task' AND archived_at IS NULL
       AND status IN ('done', 'development_done') AND id IN (SELECT value FROM json_each(?))`)
     .bind(ownerId, JSON.stringify(taskIds)).all<{ id: string }>();
-  return dailyCard(submission, t, { publicationId, completedTaskIds: new Set(completed.results.map((item) => item.id)) });
+  return new Set(completed.results.map((item) => item.id));
+}
+
+async function dailyPublicationCard(ownerId: string, publicationId: string, submission: DailySubmissionValue, t: Translator) {
+  return dailyCard(submission, t, { publicationId, completedTaskIds: await dailyCompletedTaskIds(ownerId, submission) });
+}
+
+async function dailyPublicationDeliveryPayload(ownerId: string, publicationId: string, submission: DailySubmissionValue,
+  t: Translator) {
+  const completedTaskIds = await dailyCompletedTaskIds(ownerId, submission);
+  const message = dailyCard(submission, t, { publicationId, completedTaskIds });
+  if (!submission.memberId) return message;
+  const link = await env.DB.prepare(`SELECT link.slack_user_id AS slackUserId FROM slack_member_links link
+    JOIN slack_connections connection ON connection.owner_id = link.owner_id AND connection.team_id = link.team_id
+    WHERE link.owner_id = ? AND link.member_id = ? LIMIT 1`)
+    .bind(ownerId, submission.memberId).first<{ slackUserId: string }>();
+  if (!link?.slackUserId) return message;
+  const privateControl = dailyPrivateCompletionCard(submission, t, { publicationId, completedTaskIds, showCompletionButtons: true });
+  return privateControl ? { ...message, privateControl: { user: link.slackUserId, ...privateControl } } : message;
 }
 
 export async function completePublishedDailyTask(input: {
@@ -1045,12 +1063,13 @@ export async function completePublishedDailyTask(input: {
     FROM slack_daily_publications publication
     JOIN daily_submissions submission ON submission.id = publication.submission_id AND submission.owner_id = publication.owner_id
     WHERE publication.id = ? AND publication.owner_id = ? AND publication.member_id = ?
-      AND submission.member_id = ? AND publication.channel_id = ? AND publication.slack_message_ts = ?
+      AND submission.member_id = ? AND publication.channel_id = ? AND (? = 1 OR publication.slack_message_ts = ?)
       AND publication.status = 'sent'
       AND NOT EXISTS (SELECT 1 FROM daily_submissions newer WHERE newer.owner_id = submission.owner_id
         AND newer.member_id = submission.member_id AND newer.scrum_date = submission.scrum_date AND newer.version > submission.version)
     LIMIT 1`)
-    .bind(target.publicationId, input.authorization.ownerId, input.memberId, input.memberId, input.channelId, input.messageTs)
+    .bind(target.publicationId, input.authorization.ownerId, input.memberId, input.memberId, input.channelId,
+      target.privateControl ? 1 : 0, input.messageTs)
     .first<{ id: string; submission_id: string; member_id: string; channel_id: string; slack_message_ts: string; scrum_date: string }>();
   if (!publication) throw new Error("다른 사용자 또는 워크스페이스의 명령은 실행할 수 없습니다.");
   const selected = await env.DB.prepare(`SELECT 1 AS selected FROM daily_submissions submission
@@ -1133,7 +1152,8 @@ function parseDailyPublicationAction(raw: string) {
   if (!publicationId || !taskId || publicationId.length > 150 || taskId.length > 150 || invalidCharacter) {
     throw new Error("요청을 완료하지 못했습니다. 다시 시도해 주세요.");
   }
-  return { publicationId, taskId };
+  const privateControl = "privateControl" in value && value.privateControl === true;
+  return { publicationId, taskId, privateControl };
 }
 
 async function refreshDailyPublicationMessages(ownerId: string, submissionId: string, clickedPublicationId: string, connection: SlackConnection) {
@@ -1211,9 +1231,9 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       const completed = Boolean(task.taskId && options.completedTaskIds?.has(task.taskId));
       const title = escapeSlack(task.taskTitle);
       interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `\u2003• ${completed ? `~${title}~` : title}`.slice(0, 2900) },
-        ...(!completed && task.taskId ? { accessory: { type: "button", action_id: "daily_publication_complete",
+        ...(!completed && task.taskId && options.showCompletionButtons ? { accessory: { type: "button", action_id: "daily_publication_complete",
           text: { type: "plain_text", text: t("완료") }, style: "primary",
-          value: JSON.stringify({ publicationId: options.publicationId, taskId: task.taskId }) } } : {}) });
+          value: JSON.stringify({ publicationId: options.publicationId, taskId: task.taskId, privateControl: true }) } } : {}) });
     }
     if (!visible.length) interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `• ${t("오늘 예정 없음")}` } });
     if (plannedWork.length > 20) interactiveTodayBlocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `_${t("외 {count}개", { count: plannedWork.length - 20 })}_` }] });
@@ -1226,6 +1246,28 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
     ...(options.publicationId ? interactiveTodayBlocks : [{ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } }]),
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };
+}
+
+function dailyPrivateCompletionCard(submission: DailySubmissionValue, t: Translator, options: DailyCardOptions) {
+  const card = dailyCard(submission, t, options);
+  const blocks = card.blocks as Array<{
+    type?: string;
+    text?: { type?: string; text?: string };
+    accessory?: { action_id?: string };
+  }>;
+  const start = blocks.findIndex((block) => block.type === "section"
+    && block.text?.type === "mrkdwn" && block.text.text === `*${t("오늘 할 일")}*`);
+  if (start < 0) return null;
+  const controls = blocks.slice(start, -1).filter((block) => block.type !== "section"
+    || block.text?.text !== `• ${t("오늘 예정 없음")}`);
+  if (!controls.some((block) => block.accessory?.action_id === "daily_publication_complete")) return null;
+  return {
+    text: t("내 데일리 완료 처리"),
+    blocks: [
+      { type: "context", elements: [{ type: "mrkdwn", text: `_${t("이 완료 처리는 나에게만 보입니다.")}_` }] },
+      ...controls,
+    ],
+  };
 }
 
 function serializeSettings(settings: typeof slackDailySettings.$inferSelect) {

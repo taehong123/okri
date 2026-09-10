@@ -332,6 +332,8 @@ const messages = {
   "펼치기": "Expandir",
   "완료": "Completado",
   "완료 처리": "Marcar como completado",
+  "내 데일리 완료 처리": "Completar mis tareas del Daily",
+  "이 완료 처리는 나에게만 보입니다.": "Solo tú puedes ver estos controles para completar tareas.",
   "할 일": "Pendiente",
   "진행 중": "En curso",
   "막힘": "Bloqueado",
