@@ -17,8 +17,21 @@
   padding: 0;
 }
 .app-shell .workspace-topbar .workspace-brand > svg { display: block; flex: 0 0 auto; }
-.app-shell .sidebar { padding: var(--space-3) var(--space-2); background: var(--bg-sidebar); }
+.app-shell .sidebar {
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  padding: var(--space-3) var(--space-2);
+  background: var(--bg-sidebar);
+}
 .app-shell .sidebar nav { gap: var(--space-1); margin-top: var(--space-4); }
+.app-shell .desktop-navigation {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  align-content: start;
+}
 .app-shell :is(.workspace-switcher, .nav-item, .profile-row) { gap: var(--space-2); padding-inline: var(--space-3); }
 .app-shell :is(.workspace-switcher:hover, .workspace-switcher[aria-expanded="true"], .profile-row:hover, .nav-item.active) { box-shadow: none; background: var(--bg-hover); }
 .app-shell .nav-item.active { font-weight: 600; }
@@ -26,7 +39,7 @@
 .app-shell .workspace-settings-trigger { border-color: transparent; background: transparent; box-shadow: none; }
 .app-shell .workspace-settings-trigger:hover { background: var(--bg-hover); }
 .app-shell .assistant-sidebar-tab { border-color: transparent; background: transparent; font-weight: 600; }
-.app-shell .sidebar-bottom { padding-top: var(--space-3); gap: var(--space-1); }
+.app-shell .sidebar-bottom { flex: 0 0 auto; padding-top: var(--space-3); gap: var(--space-1); }
 
 /* Page sections are documents; cards remain for repeated items and dialogs. */
 .app-shell :is(.project-workspace, .home-okr-chat, .trash-list) { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
@@ -215,7 +228,7 @@
   .app-shell .page-body:has(.okr-document) { padding: var(--space-6) var(--space-4) calc(5.75rem + env(safe-area-inset-bottom)); }
   .app-shell .workspace-topbar { padding-inline: var(--space-4); }
   .app-shell .workspace-topbar .workspace-brand { min-width: 2.75rem; min-height: 2.75rem; }
-  .app-shell .sidebar { height: auto; padding: var(--space-1) var(--space-1) env(safe-area-inset-bottom); }
+  .app-shell .sidebar { padding: var(--space-1) var(--space-1) env(safe-area-inset-bottom); }
   .app-shell .sidebar .mobile-navigation { height: auto; min-height: 3.25rem; margin: 0; gap: 0; }
   .app-shell .mobile-navigation .nav-item { height: auto; gap: var(--space-1); padding: var(--space-1); }
   .workspace-settings-layout { grid-template-columns: minmax(0, 1fr); }
@@ -225,6 +238,7 @@
   .app-shell :is(.daily-editor, .daily-rollup) { padding: var(--space-6) 0; }
 }
 @media (max-width: 700px) {
+  .app-shell .sidebar { height: calc(3.625rem + env(safe-area-inset-bottom)); }
   .app-shell .workspace-topbar .workspace-brand { display: none; }
   .app-shell .workspace-topbar .workspace-mobile-home {
     width: 2.75rem !important;

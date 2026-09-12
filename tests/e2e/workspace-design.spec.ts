@@ -54,6 +54,32 @@ test("home action stays singular and centered across desktop and mobile topbars"
   }
 });
 
+test("account settings stay reachable on short laptop viewports", async ({ page }) => {
+  for (const viewport of [
+    { width: 900, height: 540 },
+    { width: 1366, height: 500 },
+  ]) {
+    await page.setViewportSize(viewport);
+    await page.goto("/?view=my_work");
+
+    const accountButton = page.locator(".sidebar .profile-row");
+    await expect(accountButton).toBeVisible();
+    const geometry = await accountButton.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return {
+        top: box.top,
+        bottom: box.bottom,
+        viewportHeight: innerHeight,
+      };
+    });
+    expect(geometry.top, `${viewport.width}x${viewport.height} account top`).toBeGreaterThanOrEqual(0);
+    expect(geometry.bottom, `${viewport.width}x${viewport.height} account bottom`).toBeLessThanOrEqual(geometry.viewportHeight + 1);
+
+    await accountButton.click();
+    await expect(page.locator(".property-panel")).toBeVisible();
+  }
+});
+
 test("working views share document layout and stable typography from 320px to 4K", async ({ page }, info) => {
   test.setTimeout(180_000);
   const errors: string[] = [];
