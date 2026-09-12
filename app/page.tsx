@@ -526,13 +526,34 @@ declare global {
   }
 }
 
-async function fetchBootstrapPayload(path: string): Promise<BootstrapFetchResult> {
-  const response = await fetch(path, { cache: "no-store", credentials: "same-origin", headers: displayLanguageHeaders() });
-  return {
-    ok: response.ok,
-    status: response.status,
-    data: await response.json().catch(() => null) as BootstrapData | null,
-  };
+const BOOTSTRAP_ATTEMPT_TIMEOUT_MS = 12_000;
+const BOOTSTRAP_RETRY_DELAY_MS = 250;
+
+async function fetchBootstrapAttempt(path: string): Promise<BootstrapFetchResult> {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), BOOTSTRAP_ATTEMPT_TIMEOUT_MS);
+  try {
+    const response = await fetch(path, { cache: "no-store", credentials: "same-origin", headers: displayLanguageHeaders(), signal: controller.signal });
+    return {
+      ok: response.ok,
+      status: response.status,
+      data: await response.json().catch(() => null) as BootstrapData | null,
+    };
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function fetchBootstrapPayload(path: string, preloaded?: Promise<BootstrapFetchResult>): Promise<BootstrapFetchResult> {
+  let firstResult: BootstrapFetchResult | null = null;
+  try {
+    firstResult = await (preloaded ?? fetchBootstrapAttempt(path));
+  } catch {
+    // A timed-out preload is retried once with a fresh, abortable request.
+  }
+  if (firstResult && (firstResult.ok || firstResult.status < 500)) return firstResult;
+  await new Promise((resolve) => window.setTimeout(resolve, BOOTSTRAP_RETRY_DELAY_MS));
+  return fetchBootstrapAttempt(path);
 }
 
 const BOOTSTRAP_CACHE_KEY = "okri.bootstrap.v1";
@@ -985,9 +1006,10 @@ function WorkspaceApp() {
     const date = encodeURIComponent(localDate());
     const path = `/api/bootstrap?date=${date}`;
     const preload = window.__OKRI_BOOTSTRAP_REQUEST__;
-    const request = workspaceDataAttempt === 0 && preload?.path === path
-      ? preload.request
-      : fetchBootstrapPayload(path);
+    const request = fetchBootstrapPayload(
+      path,
+      workspaceDataAttempt === 0 && preload?.path === path ? preload.request : undefined,
+    );
 
     const applyBootstrapData = async (data: BootstrapData, fresh = false) => {
       if (!active) return;
@@ -1042,7 +1064,6 @@ function WorkspaceApp() {
         }
         if (cachedData) return;
         setWorkspaceDataState("error");
-        setAuthState({ status: "unauthenticated", user: null, reason: "load_failed" });
       });
     return () => { active = false; };
   }, [workspaceDataAttempt]);
@@ -2241,7 +2262,10 @@ function WorkspaceApp() {
     }
   }
 
-  if (authState.status === "loading") return <AppLoadingScreen />;
+  if (authState.status === "loading") return <AppLoadingScreen
+    failed={workspaceDataState === "error"}
+    onRetry={() => { setWorkspaceDataState("loading"); setWorkspaceDataAttempt((attempt) => attempt + 1); }}
+  />;
   if (authState.status === "unauthenticated") return <LandingScreen reason={authState.reason} onSignIn={startGoogleSignIn} />;
   const languageRecovery = languageFailure && <LanguageLoadError language={languageFailure.preferences.resolvedLanguage} onRetry={async () => {
     await applyAccountLanguage(languageFailure.userId, languageFailure.preferences);
@@ -2724,9 +2748,9 @@ function WorkspaceApp() {
   );
 }
 
-function AppLoadingScreen() {
+function AppLoadingScreen({ failed = false, onRetry }: { failed?: boolean; onRetry?: () => void }) {
   return (
-    <main className="app-loading-shell" aria-busy="true" aria-label={t("OKRI 불러오는 중")}>
+    <main className="app-loading-shell" aria-busy={!failed} aria-label={failed ? t("워크스페이스 데이터를 불러오지 못했습니다") : t("OKRI 불러오는 중")}>
       <aside className="app-loading-sidebar" aria-hidden="true">
         <div className="app-loading-brand"><BrandLogo symbolOnly size="compact" decorative /><span><b>OKRI</b><small>Workspace</small></span></div>
         <div className="app-loading-nav">
@@ -2737,21 +2761,29 @@ function AppLoadingScreen() {
       <section className="app-loading-workspace">
         <header className="app-loading-topbar"><span /><div><i /><i /></div></header>
         <div className="app-loading-body">
-          <div className="app-loading-copy">
-            <h1>{t("목표와 실행을 준비하고 있습니다")}</h1>
-            <p>{t("워크스페이스와 오늘의 할 일을 불러오는 중입니다.")}</p>
-          </div>
-          <div className="app-loading-command" aria-hidden="true"><i /><span /><b /></div>
-          <div className="app-loading-surface" aria-hidden="true">
-            <header><span /><div><i /><i /><i /></div></header>
-            <div className="app-loading-table-head"><span /><span /><span /><span /></div>
-            <div className="app-loading-table-row"><b /><span /><span /><span /></div>
-            <div className="app-loading-table-row"><b /><span /><span /><span /></div>
-            <div className="app-loading-table-row"><b /><span /><span /><span /></div>
-          </div>
+          {failed ? <AsyncState
+            icon={AlertTriangle}
+            title={t("워크스페이스 데이터를 불러오지 못했습니다")}
+            detail={t("연결을 확인한 뒤 다시 시도해 주세요. 입력한 내용은 변경되지 않았습니다.")}
+            actionLabel={t("다시 시도")}
+            onAction={onRetry}
+          /> : <>
+            <div className="app-loading-copy">
+              <h1>{t("목표와 실행을 준비하고 있습니다")}</h1>
+              <p>{t("워크스페이스와 오늘의 할 일을 불러오는 중입니다.")}</p>
+            </div>
+            <div className="app-loading-command" aria-hidden="true"><i /><span /><b /></div>
+            <div className="app-loading-surface" aria-hidden="true">
+              <header><span /><div><i /><i /><i /></div></header>
+              <div className="app-loading-table-head"><span /><span /><span /><span /></div>
+              <div className="app-loading-table-row"><b /><span /><span /><span /></div>
+              <div className="app-loading-table-row"><b /><span /><span /><span /></div>
+              <div className="app-loading-table-row"><b /><span /><span /><span /></div>
+            </div>
+          </>}
         </div>
       </section>
-      <span className="sr-only" aria-live="polite">{t("OKRI 워크스페이스를 불러오고 있습니다.")}</span>
+      <span className="sr-only" aria-live="polite">{failed ? t("워크스페이스 데이터를 불러오지 못했습니다") : t("OKRI 워크스페이스를 불러오고 있습니다.")}</span>
     </main>
   );
 }

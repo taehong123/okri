@@ -3,6 +3,7 @@ import { decryptPrivateValue, encryptPrivateValue } from "@/lib/secret-crypto";
 import { aiUsagePercent } from "@/lib/ai-usage";
 import { cancelPayPalSubscription, ensurePayPalSchema, expirePayPalEntitlement, getPayPalSubscription,
   payPalCheckoutOptions, reconcilePayPalSubscriptions, refundPayPalFirstPayment, withWorkspaceLock } from "@/lib/billing-paypal";
+import { withTimeout } from "@/lib/promise-timeout";
 
 const MIB = 1024 ** 2;
 const GIB = 1024 ** 3;
@@ -90,6 +91,41 @@ export class BillingLimitError extends Error {
 }
 
 let schemaReady: Promise<void> | null = null;
+const BILLING_SCHEMA_TIMEOUT_MS = 6_000;
+
+async function billingSchemaIsCurrent(d1: D1Database) {
+  try {
+    const marker = await d1.prepare(`SELECT app_migration.id,
+      consent.reaffirm_after,
+      consent_event.occurred_at,
+      subscription.next_plan,
+      payment_method.payer_hash,
+      billing_session.used_at,
+      billing_transaction.retained_until,
+      monthly_usage.created_count,
+      editor_selection.selected,
+      trial_claim.payer_hash,
+      lease.expires_at,
+      notification.status
+    FROM app_migrations AS app_migration
+    LEFT JOIN email_marketing_consents AS consent ON 1 = 0
+    LEFT JOIN email_marketing_consent_events AS consent_event ON 1 = 0
+    LEFT JOIN workspace_subscriptions AS subscription ON 1 = 0
+    LEFT JOIN billing_payment_methods AS payment_method ON 1 = 0
+    LEFT JOIN billing_sessions AS billing_session ON 1 = 0
+    LEFT JOIN billing_transactions AS billing_transaction ON 1 = 0
+    LEFT JOIN project_monthly_usage AS monthly_usage ON 1 = 0
+    LEFT JOIN workspace_editor_selections AS editor_selection ON 1 = 0
+    LEFT JOIN billing_trial_claims AS trial_claim ON 1 = 0
+    LEFT JOIN billing_leases AS lease ON 1 = 0
+    LEFT JOIN billing_notifications AS notification ON 1 = 0
+    WHERE app_migration.id = 'billing_email_v1'
+    LIMIT 1`).first<{ id: string }>();
+    return marker?.id === "billing_email_v1";
+  } catch {
+    return false;
+  }
+}
 
 export function billingEnforcementEnabled() {
   return (env as BillingRuntimeEnv).BILLING_ENFORCEMENT_ENABLED?.toLocaleLowerCase() === "true";
@@ -111,7 +147,8 @@ export function paypleConfigured() {
 export async function ensureBillingSchema() {
   if (!schemaReady) {
     const d1 = (env as BillingRuntimeEnv).DB;
-    schemaReady = d1.batch([
+    schemaReady = withTimeout((async () => {
+      if (!(await billingSchemaIsCurrent(d1))) await d1.batch([
       d1.prepare(`CREATE TABLE IF NOT EXISTS email_marketing_consents (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         marketing_data_consent INTEGER NOT NULL DEFAULT 0,
@@ -201,8 +238,10 @@ export async function ensureBillingSchema() {
       d1.prepare("UPDATE account_registrations SET encrypted_phone = '', phone_hash = '', phone_last_four = '', verification_provider = '', phone_verified_at = NULL"),
       d1.prepare("DELETE FROM phone_verification_requests"),
       d1.prepare("INSERT OR IGNORE INTO app_migrations (id, applied_at) VALUES ('billing_email_v1', CURRENT_TIMESTAMP)"),
-      d1.prepare("PRAGMA optimize"),
-    ]).then(() => ensurePayPalSchema());
+        d1.prepare("PRAGMA optimize"),
+      ]);
+      await ensurePayPalSchema();
+    })(), BILLING_SCHEMA_TIMEOUT_MS, "billing schema initialization");
     void schemaReady.catch(() => { schemaReady = null; });
   }
   await schemaReady;

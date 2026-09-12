@@ -16,13 +16,15 @@ const bootstrapScript = themeBootstrapScript + appInstallBootstrapScript + `(() 
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   const path = "/api/bootstrap?date=" + encodeURIComponent(date);
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), 12000);
   window.__OKRI_BOOTSTRAP_REQUEST__ = {
     path,
-    request: fetch(path, { cache: "no-store", credentials: "same-origin" }).then(async (response) => ({
+    request: fetch(path, { cache: "no-store", credentials: "same-origin", signal: controller.signal }).then(async (response) => ({
       ok: response.ok,
       status: response.status,
       data: await response.json().catch(() => null),
-    })),
+    })).finally(() => window.clearTimeout(timeout)),
   };
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", () => {

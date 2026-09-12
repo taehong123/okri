@@ -377,6 +377,10 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /\/api\/bootstrap/);
   assert.match(page, /__OKRI_BOOTSTRAP_REQUEST__/);
   assert.match(page, /fetchBootstrapPayload/);
+  assert.match(page, /BOOTSTRAP_ATTEMPT_TIMEOUT_MS = 12_000/);
+  assert.match(page, /timed-out preload is retried once/);
+  assert.match(page, /failed=\{workspaceDataState === "error"\}/);
+  assert.match(page, /setWorkspaceDataAttempt\(\(attempt\) => attempt \+ 1\)/);
   assert.doesNotMatch(page, /scope=shell|scope=data/);
   assert.match(page, /workspaceDataState/);
   assert.match(page, /워크스페이스 데이터를 불러오지 못했습니다/);
@@ -405,6 +409,9 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /getTeam/);
   assert.match(bootstrapRoute, /listItems/);
   assert.match(bootstrapRoute, /Server-Timing/);
+  assert.match(bootstrapRoute, /BOOTSTRAP_REQUEST_TIMEOUT_MS = 10_000/);
+  assert.match(bootstrapRoute, /withTimeout\(loadBootstrap/);
+  assert.match(bootstrapRoute, /status: timedOut \? 503 : 500/);
   assert.match(bootstrapRoute, /auth;dur=/);
   assert.match(bootstrapRoute, /workspace;dur=/);
   assert.match(bootstrapRoute, /data;dur=/);
@@ -414,6 +421,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(bootstrapRoute, /scope ===|scope !==/);
   assert.match(itemRoute, /payload\.cycleId === undefined \? undefined : asNullableString/);
   assert.match(paceData, /workspaceReady/);
+  assert.match(paceData, /withTimeout\(\(async \(\) =>/);
   assert.doesNotMatch(paceData, /activatedWorkspaceIds/);
   assert.match(paceData, /createOkrPlan/);
   assert.match(paceData, /await d1\.batch\(statements\)/);
@@ -475,6 +483,9 @@ test("prerenders the startup shell and caches hashed assets", async () => {
 
   assert.doesNotMatch(layout, /next\/headers|await headers\(\)/);
   assert.match(layout, /__OKRI_BOOTSTRAP_REQUEST__/);
+  assert.match(layout, /new AbortController\(\)/);
+  assert.match(layout, /controller\.abort\(\), 12000/);
+  assert.match(layout, /signal: controller\.signal/);
   assert.match(layout, /serviceWorker\.register\("\/sw\.js"/);
   assert.match(viteConfig, /prerender:\s*\{\s*routes:\s*"\*"\s*\}/);
   assert.match(viteConfig, /Resolve workspace entry hosts before serving the shared prerendered shell/);

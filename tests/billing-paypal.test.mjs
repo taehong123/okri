@@ -9,6 +9,7 @@ const require = createRequire(import.meta.url);
 const source = (name) => readFile(new URL(`../${name}`, import.meta.url), "utf8");
 const apiSource = await source("lib/paypal-api.ts");
 const billingSource = await source("lib/billing-paypal.ts");
+const accountBillingSource = await source("lib/billing.ts");
 const migrations = await Promise.all((await readdir(new URL("../drizzle/", import.meta.url))).filter((name) => name.endsWith(".sql")).sort().map((name) => source(`drizzle/${name}`)));
 function compile(source, dependencies) {
   const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
@@ -16,6 +17,14 @@ function compile(source, dependencies) {
   new Function("require", "module", "exports", code)((name) => dependencies[name] ?? require(name), compiledModule, compiledModule.exports);
   return compiledModule.exports;
 }
+
+test("billing initialization checks current schemas before runtime DDL and has bounded waits", () => {
+  assert.ok(accountBillingSource.indexOf("billingSchemaIsCurrent(d1)") < accountBillingSource.indexOf("CREATE TABLE IF NOT EXISTS email_marketing_consents"));
+  assert.match(accountBillingSource, /BILLING_SCHEMA_TIMEOUT_MS = 6_000/);
+  assert.ok(billingSource.indexOf("payPalSchemaIsCurrent()") < billingSource.indexOf("CREATE TABLE IF NOT EXISTS billing_paypal_subscriptions"));
+  assert.match(billingSource, /PAYPAL_SCHEMA_TIMEOUT_MS = 6_000/);
+});
+
 function fixture(t) {
   const db = new DatabaseSync(":memory:");
   for (const sql of migrations) db.exec(sql);
@@ -41,7 +50,11 @@ function fixture(t) {
   const env = { DB: d1, PAYPAL_ENVIRONMENT: "sandbox", PAYPAL_CLIENT_ID: "fake-client", PAYPAL_CLIENT_SECRET: "fake-secret",
     PAYPAL_WEBHOOK_ID: "WH-EXAMPLE", PAYPAL_TEAM_PLAN_ID: "P-TEAM", PAYPAL_BUSINESS_PLAN_ID: "P-BUSINESS", OKRI_PUBLIC_URL: "https://okri.example" };
   const api = compile(apiSource, { "cloudflare:workers": { env } });
-  const service = compile(billingSource, { "cloudflare:workers": { env }, "./paypal-api": api });
+  const service = compile(billingSource, {
+    "cloudflare:workers": { env },
+    "./paypal-api": api,
+    "./promise-timeout": { withTimeout: (operation) => operation },
+  });
   const plan = { id: "P-TEAM", status: "ACTIVE", quantity_supported: true,
     payment_preferences: { setup_fee: { value: "0" }, auto_bill_outstanding: false },
     billing_cycles: [{ tenure_type: "REGULAR", sequence: 1, total_cycles: 0, frequency: { interval_unit: "MONTH", interval_count: 1 }, pricing_scheme: { fixed_price: { currency_code: "USD", value: "9.00" } } }] };

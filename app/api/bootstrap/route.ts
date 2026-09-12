@@ -1,6 +1,7 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { languageForBootstrap } from "@/lib/language-preferences";
 import { readOnboarding } from "@/lib/account-onboarding";
+import { OperationTimeoutError, withTimeout } from "@/lib/promise-timeout";
 import {
   authorizeRequest,
   canManageTeam,
@@ -22,6 +23,17 @@ import {
 } from "@/lib/pace-data";
 
 export async function GET(request: Request) {
+  const startedAt = Date.now();
+  try {
+    return await withTimeout(loadBootstrap(request), BOOTSTRAP_REQUEST_TIMEOUT_MS, "workspace bootstrap");
+  } catch (error) {
+    return bootstrapErrorResponse(error, startedAt);
+  }
+}
+
+const BOOTSTRAP_REQUEST_TIMEOUT_MS = 10_000;
+
+async function loadBootstrap(request: Request) {
   const requestStartedAt = Date.now();
   const authorization = await authorizeRequest(request, { allowViewerWrite: true });
   if (authorization instanceof Response) return authorization;
@@ -115,7 +127,25 @@ export async function GET(request: Request) {
     );
     return Response.json(payload, { headers });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to load workspace";
-    return Response.json({ error: message }, { status: 500, headers: { "Cache-Control": "no-store" } });
+    return bootstrapErrorResponse(error, requestStartedAt);
   }
+}
+
+function bootstrapErrorResponse(error: unknown, startedAt: number) {
+  const timedOut = error instanceof OperationTimeoutError;
+  const durationMs = Date.now() - startedAt;
+  console.error("bootstrap_failed", JSON.stringify({
+    code: timedOut ? error.code : "request_failed",
+    operation: timedOut ? error.operation : undefined,
+    durationMs,
+  }));
+  const headers = new Headers({
+    "Cache-Control": "no-store",
+    "Retry-After": "1",
+    "Server-Timing": `total;dur=${durationMs}`,
+  });
+  return Response.json(
+    { error: timedOut ? "Workspace loading timed out. Please retry." : "Unable to load workspace." },
+    { status: timedOut ? 503 : 500, headers },
+  );
 }

@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { newAccountLanguage, readLanguagePreferences, workspaceMessageLanguage } from "./language-preferences";
 import { serverTranslator } from "./server-language";
+import { withTimeout } from "./promise-timeout";
 import {
   defaultRoutineClassificationMigrationId,
   ensureDefaultRoutineClassification,
@@ -217,6 +218,7 @@ type RuntimeEnv = typeof env & {
 };
 let schemaReady: Promise<void> | null = null;
 const workspaceReady = new Map<string, Promise<void>>();
+const RUNTIME_INITIALIZATION_TIMEOUT_MS = 6_000;
 let invitationDomainCache: { verified: boolean; checkedAt: number } | null = null;
 
 const parentKind: Record<ItemKind, ItemKind | null> = {
@@ -237,8 +239,8 @@ export function normalizeTaskStatus(status?: ItemStatus) {
 async function ensureSchema() {
   if (!schemaReady) {
     const d1 = (env as RuntimeEnv).DB;
-    schemaReady = (async () => {
-      // Slack checklist storage must exist even when all older schema sentinels pass.
+    schemaReady = withTimeout((async () => {
+      if (await schemaIsCurrent(d1)) return;
       await d1.batch([
         d1.prepare(`CREATE TABLE IF NOT EXISTS slack_daily_checklists (
           id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -248,9 +250,6 @@ async function ensureSchema() {
         )`),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_slack_daily_checklists_expiry ON slack_daily_checklists(expires_at)"),
       ]);
-      if (await schemaIsCurrent(d1)) {
-        return;
-      }
       await d1.batch([
         d1.prepare(`CREATE TABLE IF NOT EXISTS app_migrations (
           id TEXT PRIMARY KEY,
@@ -946,7 +945,7 @@ async function ensureSchema() {
       await migrateIdentityAndInvitations(d1);
       await migrateLegacyAccountRegistrations(d1);
       await ensureAssistantDraftSchema(d1);
-    })()
+    })(), RUNTIME_INITIALIZATION_TIMEOUT_MS, "runtime schema initialization")
       .catch((error: unknown) => {
         schemaReady = null;
         throw error;
@@ -1154,7 +1153,7 @@ async function migrateIdentityAndInvitations(d1: RuntimeEnv["DB"]) {
 export async function ensureWorkspace(ownerId: string) {
   let ready = workspaceReady.get(ownerId);
   if (!ready) {
-    ready = (async () => {
+    ready = withTimeout((async () => {
       await ensureSchema();
       if (await workspaceInitializationIsCurrent(ownerId)) return;
       await migrateLegacyHierarchy(ownerId);
@@ -1166,7 +1165,7 @@ export async function ensureWorkspace(ownerId: string) {
       const general = await ensureGeneralRoutine(ownerId);
       await migrateInboxTasksToGeneral(ownerId, general.id);
       await migratePersonalWorkspaceAssignments(ownerId);
-    })();
+    })(), RUNTIME_INITIALIZATION_TIMEOUT_MS, "workspace initialization");
     workspaceReady.set(ownerId, ready);
     void ready.catch(() => workspaceReady.delete(ownerId));
   }

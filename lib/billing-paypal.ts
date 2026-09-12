@@ -1,4 +1,5 @@
 import { env } from "cloudflare:workers";
+import { withTimeout } from "./promise-timeout";
 import {
   getPayPalPrice, PayPalError, paypalConfigured, paypalPublicOrigin, paypalRequest,
   safePayPalApprovalUrl, verifyPayPalWebhook,
@@ -13,9 +14,30 @@ type Row = {
 };
 
 let schemaReady: Promise<unknown> | null = null;
+const PAYPAL_SCHEMA_TIMEOUT_MS = 6_000;
+
+async function payPalSchemaIsCurrent() {
+  try {
+    await env.DB.prepare(`SELECT
+      subscription.seat_count,
+      subscription.pending_seat_count,
+      transaction.updated_at,
+      event.processed_at
+    FROM billing_paypal_subscriptions AS subscription
+    LEFT JOIN billing_paypal_transactions AS transaction ON 1 = 0
+    LEFT JOIN billing_paypal_events AS event ON 1 = 0
+    LIMIT 0`).first();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function ensurePayPalSchema() {
   if (!schemaReady) {
-    schemaReady = env.DB.batch([
+    schemaReady = withTimeout((async () => {
+      if (await payPalSchemaIsCurrent()) return;
+      await env.DB.batch([
       env.DB.prepare(`CREATE TABLE IF NOT EXISTS billing_paypal_subscriptions (
         id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, user_id TEXT NOT NULL,
         plan TEXT NOT NULL CHECK (plan IN ('team','business')), provider_plan_id TEXT NOT NULL,
@@ -28,9 +50,10 @@ export async function ensurePayPalSchema() {
         workspace_id TEXT NOT NULL, status TEXT NOT NULL, currency TEXT NOT NULL,
         price_value TEXT NOT NULL, paid_at TEXT NOT NULL, updated_at TEXT NOT NULL)`),
       env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_paypal_transactions_workspace ON billing_paypal_transactions(workspace_id,paid_at)"),
-      env.DB.prepare(`CREATE TABLE IF NOT EXISTS billing_paypal_events (
+        env.DB.prepare(`CREATE TABLE IF NOT EXISTS billing_paypal_events (
         id TEXT PRIMARY KEY,event_type TEXT NOT NULL,subscription_id TEXT NOT NULL,processed_at TEXT NOT NULL)`),
-    ]);
+      ]);
+    })(), PAYPAL_SCHEMA_TIMEOUT_MS, "PayPal schema initialization");
     void schemaReady.catch(() => { schemaReady = null; });
   }
   await schemaReady;
