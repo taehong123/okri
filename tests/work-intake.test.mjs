@@ -137,6 +137,28 @@ test("Task context ranks an older Project named in the source ahead of recent ca
   } finally { db.close(); }
 });
 
+test("Task General placement is allowed only by explicit choice or an empty candidate set", async () => {
+  const { db, d1 } = fixture();
+  try {
+    const context = await intake.readWorkContext(d1, "a", "user", {
+      kind: "task", sourceText: "100%완료를 거래 규칙 실행 앱으로 다듬기", includeMembers: false, limit: 20,
+    });
+    const pending = intake.reviewTaskGeneralPlacement(context);
+    assert.equal(pending.status, "selection_required");
+    assert.equal(pending.reason, "source_matched_candidate");
+    assert.deepEqual(pending.candidates.map((entry) => entry.id), ["percent"]);
+    assert.deepEqual(pending.candidates[0].path, ["고객 경험", "활성화 40%", "첫 경험 단순화", "100% 완료"]);
+
+    const explicitGeneral = intake.reviewTaskGeneralPlacement(context, true);
+    assert.equal(explicitGeneral.status, "general_ready");
+    assert.equal(explicitGeneral.reason, "user_selected_general");
+
+    const noCandidates = intake.reviewTaskGeneralPlacement({ parents: [], routines: [], fallback: context.fallback });
+    assert.equal(noCandidates.status, "general_ready");
+    assert.equal(noCandidates.reason, "no_active_candidates");
+  } finally { db.close(); }
+});
+
 test("Unsure stays undecided; Routine does not need an Initiative or invented task", async () => {
   const { db, d1 } = fixture();
   try {
@@ -412,6 +434,32 @@ test("MCP inherits parent's cycle and carries supplied fields; a Task does not l
   } finally { f.db.close(); }
 });
 
+test("MCP parentless Task writes return placement choices and never silently default to General", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const pending = await f.call("create_item", { kind: "task", title: "100% 완료를 거래 규칙 실행 앱으로 다듬기" });
+    assert.equal(pending.item, undefined);
+    assert.equal(pending.placement.status, "selection_required");
+    assert.deepEqual(pending.placement.candidates.map((entry) => entry.id), ["percent"]);
+    assert.equal(f.calls.filter((call) => call.method === "create").length, 0);
+
+    const capture = await f.call("capture_item", { title: "새로운 단건 업무" });
+    assert.equal(capture.item, undefined);
+    assert.equal(capture.placement.status, "selection_required");
+
+    const batch = await f.call("create_tasks", { titles: ["A", "B"] });
+    assert.equal(batch.count, 0);
+    assert.equal(batch.placement.status, "selection_required");
+    assert.equal(f.calls.filter((call) => call.method === "batch").length, 0);
+
+    const saved = await f.call("create_item", { kind: "task", title: "새로운 단건 업무", general_confirmed: true });
+    assert.equal(saved.item.routineId, "general-a");
+    assert.equal(saved.placement.reason, "user_selected_general");
+    assert.equal(f.calls.filter((call) => call.method === "create").length, 1);
+  } finally { f.db.close(); }
+});
+
 test("Invalid placement, field types, assignments and dates fail before any write", async () => {
   const f = mcpFixture();
   try {
@@ -423,7 +471,9 @@ test("Invalid placement, field types, assignments and dates fail before any writ
       { kind: "task", title: "검토", assignee_member_id: "other" },
       { kind: "task", title: "검토", due_date: "2026-02-30" },
       { kind: "task", title: "검토", parent_id: "p", cycle_id: "wrong" },
+      { kind: "task", title: "검토", parent_id: "p", general_confirmed: true },
       { kind: "project", title: "개편", parent_id: "ini", properties: { invalid: 1 } },
+      { kind: "project", title: "개편", parent_id: "ini", general_confirmed: true },
     ]) await assert.rejects(() => f.call("create_item", args));
     assert.equal(f.calls.length, 0);
   } finally { f.db.close(); }

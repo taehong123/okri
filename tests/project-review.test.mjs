@@ -586,12 +586,53 @@ test("Generic drafts API cannot forge or overwrite system review state", async (
 test("REST integration token cannot bypass Project review by claiming source=web", async () => {
   let created = 0;
   const route = compile(await readFile(new URL("../app/api/items/route.ts", import.meta.url), "utf8"), {
+    "cloudflare:workers": { env: { DB: {} } },
     "@/lib/pace-data": { authorizeRequest: async () => ({ ...identity, apiToken: true }), ensureWorkspace: async () => {}, createItem: async () => { created++; }, ITEM_STATUSES: ["todo"] },
     "@/lib/billing": { BillingLimitError: class extends Error {} },
     "@/lib/project-review-service": { stageProjectReview: async () => ({ state: "awaiting_user_confirmation" }) },
+    "@/lib/work-intake": { readWorkContext: async () => { throw new Error("Project review must not inspect Task placement"); }, reviewTaskGeneralPlacement: () => { throw new Error("Project review must not inspect Task placement"); } },
   });
   const response = await route.POST(new Request("https://okri.ai/api/items", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ title: "임의 생성 시도", kind: "project", parentId: "i", source: "web" }) }));
   assert.equal(response.status, 202); assert.equal((await response.json()).created, false); assert.equal(created, 0);
+});
+
+test("REST integration token cannot silently default a Task to General", async () => {
+  let created = 0;
+  let createdInput;
+  const context = {
+    parents: [{ id: "project", kind: "project", title: "Existing Project", path: ["O", "KR", "I", "Existing Project"], sourceMatched: false }],
+    routines: [], fallback: { id: "general", title: "General" },
+  };
+  const route = compile(await readFile(new URL("../app/api/items/route.ts", import.meta.url), "utf8"), {
+    "cloudflare:workers": { env: { DB: {} } },
+    "@/lib/pace-data": {
+      authorizeRequest: async () => ({ ...identity, apiToken: true }), ensureWorkspace: async () => {},
+      createItem: async (_owner, input) => { created++; createdInput = input; return { id: "task", kind: "task", title: input.title }; },
+      getItemAssignmentMap: async () => ({}), replaceItemAssignmentRole: async () => {}, serializeItem: (item) => item,
+      ITEM_KINDS: ["project", "task"], ITEM_STATUSES: ["todo"], ITEM_PRIORITIES: ["medium"], ITEM_CADENCES: ["weekly"],
+    },
+    "@/lib/billing": { BillingLimitError: class extends Error {} },
+    "@/lib/project-review-service": { stageProjectReview: async () => ({}) },
+    "@/lib/work-intake": {
+      readWorkContext: async () => context,
+      reviewTaskGeneralPlacement: (_context, confirmed) => confirmed
+        ? { status: "general_ready", reason: "user_selected_general", candidates: [], general: context.fallback }
+        : { status: "selection_required", reason: "active_candidates_available", candidates: context.parents, general: context.fallback },
+    },
+  });
+  const request = (generalConfirmed) => new Request("https://okri.ai/api/items", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title: "Create Task", kind: "task", ...(generalConfirmed ? { generalConfirmed: true } : {}) }),
+  });
+  const blocked = await route.POST(request(false));
+  assert.equal(blocked.status, 409);
+  assert.equal((await blocked.json()).code, "task_placement_confirmation_required");
+  assert.equal(created, 0);
+
+  const saved = await route.POST(request(true));
+  assert.equal(saved.status, 201);
+  assert.equal(created, 1);
+  assert.equal(createdInput.routineId, "general");
 });
 
 test("Bulk OKR plan cannot bypass Project review or create ancestors before rejecting", async () => {

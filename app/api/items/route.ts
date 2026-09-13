@@ -1,3 +1,4 @@
+import { env } from "cloudflare:workers";
 import {
   ITEM_CADENCES,
   ITEM_KINDS,
@@ -17,9 +18,11 @@ import {
   type ItemKind,
   type ItemPriority,
   type ItemStatus,
+  type RequestAuthorization,
 } from "@/lib/pace-data";
 import { BillingLimitError } from "@/lib/billing";
 import { stageProjectReview } from "@/lib/project-review-service";
+import { readWorkContext, reviewTaskGeneralPlacement } from "@/lib/work-intake";
 
 export async function GET(request: Request) {
   const authorization = await authorizeRequest(request);
@@ -67,10 +70,20 @@ export async function POST(request: Request) {
         : [];
       if (!titles.length) return Response.json({ error: "titles are required" }, { status: 400 });
       if (payload.kind !== undefined && payload.kind !== "task") return Response.json({ error: "bulk creation only supports Task" }, { status: 400 });
+      const projectId = asNullableString(payload.parentId);
+      let routineId = asNullableString(payload.routineId);
+      if (authorization.apiToken && payload.generalConfirmed === true && (projectId || routineId)) {
+        return Response.json({ error: "Choose an exact Project/Routine or General, not both" }, { status: 400 });
+      }
+      if (authorization.apiToken && !projectId && !routineId) {
+        const reviewed = await inspectTokenTaskPlacement(authorization, titles.join("\n"), undefined, payload.generalConfirmed === true);
+        if (reviewed.placement.status === "selection_required") return taskPlacementRequired(reviewed.placement);
+        routineId = reviewed.context.fallback?.id ?? null;
+      }
       const created = await createLinkedTasks(authorization.ownerId, {
         titles,
-        projectId: asNullableString(payload.parentId),
-        routineId: asNullableString(payload.routineId),
+        projectId,
+        routineId,
         assigneeMemberId: asMemberIds(payload.assigneeMemberId, 1)[0] ?? null,
         createdByUserId: authorization.userId,
       });
@@ -81,6 +94,9 @@ export async function POST(request: Request) {
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
     if (payload.status !== undefined && !asValue(payload.status, ITEM_STATUSES)) {
       return Response.json({ error: "unsupported status" }, { status: 400 });
+    }
+    if (authorization.apiToken && payload.generalConfirmed === true && payload.kind !== undefined && payload.kind !== "task") {
+      return Response.json({ error: "Only Tasks can select General" }, { status: 400 });
     }
 
     if (authorization.apiToken && payload.kind === "project") {
@@ -93,13 +109,25 @@ export async function POST(request: Request) {
       return Response.json({ code: "project_confirmation_required", created: false, review }, { status: 202, headers: { "Cache-Control": "no-store" } });
     }
 
+    const kind = asValue(payload.kind, ITEM_KINDS) as ItemKind | undefined;
+    const parentId = payload.parentId === undefined ? undefined : asNullableString(payload.parentId);
+    let routineId = asNullableString(payload.routineId);
+    if (authorization.apiToken && payload.generalConfirmed === true && (parentId || routineId)) {
+      return Response.json({ error: "Choose an exact Project/Routine or General, not both" }, { status: 400 });
+    }
+    if (authorization.apiToken && (kind ?? "task") === "task" && !parentId && !routineId) {
+      const reviewed = await inspectTokenTaskPlacement(authorization, title, asString(payload.description), payload.generalConfirmed === true);
+      if (reviewed.placement.status === "selection_required") return taskPlacementRequired(reviewed.placement);
+      routineId = reviewed.context.fallback?.id ?? null;
+    }
+
     const item = await createItem(authorization.ownerId, {
       title,
       description: asString(payload.description),
-      kind: asValue(payload.kind, ITEM_KINDS) as ItemKind | undefined,
+      kind,
       cycleId: payload.cycleId === undefined ? undefined : asNullableString(payload.cycleId),
-      parentId: payload.parentId === undefined ? undefined : asNullableString(payload.parentId),
-      routineId: asNullableString(payload.routineId),
+      parentId,
+      routineId,
       status: asValue(payload.status, ITEM_STATUSES) as ItemStatus | undefined,
       priority: asValue(payload.priority, ITEM_PRIORITIES) as ItemPriority | undefined,
       cadence: asValue(payload.cadence, ITEM_CADENCES) as ItemCadence | undefined,
@@ -150,6 +178,22 @@ export async function PATCH(request: Request) {
   } catch (error) {
     return routeError(error);
   }
+}
+
+async function inspectTokenTaskPlacement(authorization: RequestAuthorization, title: string, description: string | undefined, generalConfirmed: boolean) {
+  const context = await readWorkContext(env.DB, authorization.ownerId, authorization.userId, {
+    kind: "task", sourceText: `${title}\n${description ?? ""}`, includeMembers: false, limit: 20,
+  });
+  return { context, placement: reviewTaskGeneralPlacement(context, generalConfirmed) };
+}
+
+function taskPlacementRequired(placement: ReturnType<typeof reviewTaskGeneralPlacement>) {
+  return Response.json({
+    code: "task_placement_confirmation_required",
+    created: false,
+    placement,
+    nextStep: "Choose one returned Project/Routine, or explicitly choose General and retry with generalConfirmed=true.",
+  }, { status: 409, headers: { "Cache-Control": "no-store" } });
 }
 
 async function saveAssignments(ownerId: string, itemId: string, kind: ItemKind, payload: Record<string, unknown>) {

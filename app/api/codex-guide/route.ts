@@ -2,13 +2,13 @@ import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/w
 
 const guide = {
   service: "OKRI Codex conversation API",
-  version: "1.4",
+  version: "1.5",
   quickStart: {
     classification: WORK_CLASSIFICATION,
     fields: WORK_FIELDS,
     workflow: WORKFLOW_INSTRUCTIONS,
     firstRead: "GET /api/work-context?kind=task|project|routine|objective|key_result|initiative|unsure&query=<short-parent-topic>&memberQuery=<person>",
-    mcp: "Project: use manage_project for proposal, explicit approval, creation, edits, recoverable deletion and restoration in the same conversation. Older tool lists can use create_item twice: the first call returns an internal same_tool_confirmation value and the second call reuses it only after approval. Task/Routine: prepare_work if needed, then create_item/create_tasks/create_routine.",
+    mcp: "Project: use manage_project for proposal, explicit approval, creation, edits, recoverable deletion and restoration in the same conversation. Older tool lists can use create_item twice: the first call returns an internal same_tool_confirmation value and the second call reuses it only after approval. Task: use prepare_work once unless an exact Project/Routine ID is already known; parentless Task writes return placement choices without saving. General requires general_confirmed=true after an explicit user choice, unless no active Project/Routine exists. Routine: use create_routine.",
     note: "Keep review IDs and confirmation values internal. Never tell the user to open a new chat, reactivate or mention OKRI, paste an ID, or visit a browser approval page. No suitable Initiative means offer another search or defer; never choose an unrelated parent.",
   },
   authentication: {
@@ -28,7 +28,7 @@ const guide = {
     { purpose: "Read shared capture and structure rules", method: "GET", path: "/api/workspace-rules" },
     { purpose: "Update shared rules", method: "PUT", path: "/api/workspace-rules", body: "Any of captureInstruction, structureInstruction, routineInstruction, defaultPriority, defaultCadence, reviewBeforeCreate" },
     { purpose: "List or search active items", method: "GET", path: "/api/items?kind=&status=&cadence=&parentId=&q=&includeArchived=false" },
-    { purpose: "Create a non-Project item; token-authenticated Project requests only stage a review (202, created=false)", method: "POST", path: "/api/items", body: "title required; optional description, kind, cycleId, parentId, routineId, status, priority, cadence, progress, dueDate, driMemberId, workerMemberIds, assigneeMemberId, properties and Project-only templateId. For Projects, show returned review URL and wait for the user's direct selection/approval. Do not call the browser approval API with a token." },
+    { purpose: "Create a non-Project item; token-authenticated Project requests only stage a review (202), and parentless Task requests return placement choices without saving (409)", method: "POST", path: "/api/items", body: "title required; optional description, kind, cycleId, parentId, routineId, status, priority, cadence, progress, dueDate, driMemberId, workerMemberIds, assigneeMemberId, properties and Project-only templateId. For a Task, send an exact parentId/routineId selected from work-context; send generalConfirmed=true only after the user explicitly selects General. For Projects, wait for direct selection/approval. Do not call the browser approval API with a token." },
     { purpose: "Update or link an item", method: "PATCH", path: "/api/items", body: "id required; include only fields to change, including parentId or routineId" },
     { purpose: "List OKR files/cycles", method: "GET", path: "/api/okr-cycles" },
     { purpose: "Create an OKR cycle", method: "POST", path: "/api/okr-cycles", body: "name, department, startDate, endDate, status" },
@@ -68,9 +68,9 @@ const guide = {
     { purpose: "Delete a group after explicit confirmation", method: "DELETE", path: "/api/groups?id=<group-id>", requiresConfirmation: true },
   ],
   behavior: [
-    "Use work-context once when interpreting new work needs workspace context; it already contains workspace rules. Reuse it within the same conversation and workspace.",
+    "Use work-context once when interpreting new work needs workspace context; it already contains workspace rules. Reuse it within the same conversation and workspace. Every AI/token Task write applies the same server-side placement guard even when the client skips this read.",
     "Classify by completion boundary: one action is Task, a finite deliverable containing independent Tasks is Project, recurring execution is Routine. Ask one short question when ambiguous; respect the user's choice.",
-    "Use General only for a clear Task without a known container. A Project without its Initiative remains an unsaved conversation draft; never invent ancestors or silently downgrade it.",
+    "Use General only after the user explicitly chooses it, or when the server confirms that no active Project/Routine candidate exists. Missing IDs do not authorize General. A Project without its Initiative remains an unsaved conversation draft; never invent ancestors or silently downgrade it.",
     "Project creation always requires recommendations with reasons and ancestor paths, alternatives including defer, and final user approval. Complete it in the same conversation with manage_project. If only the legacy create_item tool is available, keep its same_tool_confirmation value internal and reuse it after approval. A parent ID alone or general creation intent is never confirmation of an AI-chosen connection.",
     "Preserve all user-supplied fields; show defaulted values in Project review. Other clear writes may save once without optional-field questionnaires. A pending review or HTTP 202 is not successful Project creation.",
     "Treat Project templates as body-only copies: never infer or copy properties, assignments, or Tasks from a template.",

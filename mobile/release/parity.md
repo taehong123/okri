@@ -27,6 +27,11 @@
   SDK, so store commerce declarations remain false.
 - Store review readiness adds a public five-language account deletion flow,
   recent-auth deletion protection and actionable Apple/Google review alerts.
+- AI Task placement policy is now enforced consistently by MCP, Slack and
+  integration-token writes: select an active Project/Routine first, or use
+  General only after an explicit choice or when no active candidate exists.
+  Native `/api/mobile/v1` already requires an explicit Project/Routine for its
+  creation flows and remains contract-compatible; no native UI change is claimed.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

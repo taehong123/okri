@@ -4,7 +4,7 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { listRoutineProperties } from "@/lib/routine-properties";
 import { arrayBufferToBase64, getProjectImage, getProjectImageCounts, listProjectImages } from "@/lib/project-images";
-import { assertConcreteWorkInput, isReadOnlyMcpRequest, readWorkContext, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
+import { assertConcreteWorkInput, isReadOnlyMcpRequest, readWorkContext, reviewTaskGeneralPlacement, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
 import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
   LEGACY_MCP_CREATE_ITEM_CONFIRM_PREFIX, MCP_CREATE_ITEM_CONFIRM_PREFIX, mcpProjectConfirmationSchema,
@@ -287,6 +287,15 @@ const workContextOutput = z.object({
   nextStep: z.string(),
 });
 
+const taskPlacementOutput = z.object({
+  status: z.enum(["general_ready", "selection_required"]),
+  reason: z.enum(["user_selected_general", "no_active_candidates", "source_matched_candidate", "active_candidates_available"]),
+  candidates: z.array(z.object({
+    id: z.string(), kind: z.enum(["project", "routine"]), title: z.string(), path: z.array(z.string()), sourceMatched: z.boolean(),
+  })),
+  general: z.object({ id: z.string(), title: z.string() }).nullable(),
+});
+
 const memberIdInput = z.string().trim().min(1);
 const dueDateInput = z.iso.date().describe("User-stated due date in YYYY-MM-DD; omit when unknown");
 
@@ -363,6 +372,13 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         ].join("\n"),
     },
   );
+
+  const inspectTaskGeneralPlacement = async (title: string, description: string | undefined, generalConfirmed: boolean) => {
+    const context = await readWorkContext(env.DB, ownerId, authorization.userId, {
+      kind: "task", sourceText: `${title}\n${description ?? ""}`, includeMembers: false, limit: 20,
+    });
+    return { context, placement: reviewTaskGeneralPlacement(context, generalConfirmed) };
+  };
 
   const runProjectConversation = async (input: ProjectConversationInput) => {
     if (input.action === "confirm") {
@@ -532,8 +548,8 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   server.registerTool(
     "capture_item",
     {
-      title: "Capture unclassified work to OKRI",
-      description: "Save one explicitly requested, concrete Task to General when no Project/Routine is known. When the user refers to this/above/the current thread, the host model must extract the actual work from conversation messages visible to it and pass that concrete content here. The MCP server cannot fetch a host conversation transcript from a message ID. If the source messages are not visible, do not call any write tool and do not create a placeholder Task. Do not use for mere discussion, a Project/Routine idea, or unresolved Task-vs-Project classification; use prepare_work for those. If a container is known use create_item with its ID.",
+      title: "Review placement or capture a Task in General",
+      description: "Review active Project/Routine choices before saving one concrete Task to General. Without general_confirmed, this tool returns compact placement choices and saves nothing whenever any active Project/Routine exists; if none exists it may save to General immediately. Set general_confirmed=true only after the user explicitly chooses General in the current conversation. If a container is selected, use create_item with its exact ID. When the user refers to this/above/the current thread, the host model must extract the actual work from visible messages; this MCP server cannot fetch a host conversation transcript. Never create a placeholder Task for missing context.",
       inputSchema: {
         title: z.string().trim().min(1).max(500).describe("Short actionable title in the user's language"),
         description: z.string().optional().describe("Concrete details extracted from conversation messages visible to the host model; never a note saying the source could not be read"),
@@ -541,12 +557,20 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         priority: z.enum(ITEM_PRIORITIES).optional(),
         source_ref: z.string().optional().describe("Optional identifier for traceability only; it does not let the MCP server fetch the host conversation transcript"),
         assignee_member_id: memberIdInput.optional().describe("Active workspace member ID for the single Task assignee"),
+        general_confirmed: z.literal(true).optional().describe("Set only after the user explicitly selects General instead of the returned Project/Routine choices"),
       },
-      outputSchema: { item: itemOutput },
+      outputSchema: { item: itemOutput.optional(), placement: taskPlacementOutput.optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, due_date, priority, source_ref, assignee_member_id }) => {
+    async ({ title, description, due_date, priority, source_ref, assignee_member_id, general_confirmed }) => {
       assertConcreteWorkInput({ title, description });
+      const { context, placement } = await inspectTaskGeneralPlacement(title, description, general_confirmed === true);
+      if (placement.status === "selection_required") {
+        return {
+          structuredContent: { placement },
+          content: [{ type: "text" as const, text: "Task NOT created. Show these Project/Routine choices once, prioritizing sourceMatched=true and the full path. After the user selects one, use create_item with its ID; use this tool again with general_confirmed=true only if the user chooses General." }],
+        };
+      }
       await validateMcpMembers(ownerId, [assignee_member_id]);
       const item = await createItem(ownerId, {
         title,
@@ -554,6 +578,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         dueDate: due_date,
         priority: priority as ItemPriority | undefined,
         kind: "task",
+        routineId: context.fallback?.id,
         source: "mcp",
         sourceRef: source_ref,
         createdByUserId: authorization.userId,
@@ -561,8 +586,8 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       if (assignee_member_id) await replaceItemAssignmentRole(ownerId, item.id, "task_assignee", [assignee_member_id]);
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
-        structuredContent: { item: serialized },
-        content: [{ type: "text", text: `Captured "${item.title}" as an unclassified OKRI Task.` }],
+        structuredContent: { item: serialized, placement },
+        content: [{ type: "text", text: `Captured "${item.title}" in General after the required placement check.` }],
       };
     },
   );
@@ -571,7 +596,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save a correctly classified, concrete Task or OKR item. If the user refers to this/above/the current thread, use the conversation messages visible to the host model; this MCP server cannot fetch the host transcript itself. Never create a placeholder for missing context. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id; this completes creation even when confirm_project is absent from an older client tool list. Keep the internal value private. Never ask the user to copy a review ID, open a new chat, mention @OKRI, or visit a browser approval page.",
+      description: "Save a correctly classified, concrete Task or OKR item. A Task with a selected Project/Routine uses its exact ID. A Task without one performs the same server-side placement check: it returns choices without saving when active containers exist, and uses General only after general_confirmed=true or when no active container exists. If the user refers to this/above/the current thread, use the conversation messages visible to the host model; this MCP server cannot fetch the host transcript itself. Never create a placeholder for missing context. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id. Keep internal values private and never send the user elsewhere.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
@@ -589,12 +614,14 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         dri_member_id: z.string().optional().describe("Active workspace member ID for a Project DRI"),
         worker_member_ids: z.array(z.string()).optional().describe("Active workspace member IDs for Project workers"),
         assignee_member_id: z.string().optional().describe("Active workspace member ID for a Task assignee"),
+        general_confirmed: z.literal(true).optional().describe("Task-only: set only after the user explicitly selects General instead of returned Project/Routine choices"),
       },
-      outputSchema: { item: itemOutput.optional(), review: z.record(z.string(), z.unknown()).optional() },
+      outputSchema: { item: itemOutput.optional(), review: z.record(z.string(), z.unknown()).optional(), placement: taskPlacementOutput.optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
       assertConcreteWorkInput({ title: input.title, description: input.description });
+      if (input.kind !== "task" && input.general_confirmed) throw new Error("Only Tasks can select General");
       if (input.kind === "project") {
         assertMcpAssignmentFields(input);
         if (input.routine_id) throw new Error("Projects cannot belong to a Routine");
@@ -647,12 +674,25 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         validateMcpMembers(ownerId, [input.dri_member_id, ...(input.worker_member_ids ?? []), input.assignee_member_id]),
         input.properties ? validateItemPropertiesByName(ownerId, input.properties) : Promise.resolve(),
       ]);
-      const cycleId = await resolveMcpCycle(ownerId, input.parent_id, input.routine_id, input.cycle_id);
+      let resolvedRoutineId = input.routine_id;
+      let taskPlacement: z.infer<typeof taskPlacementOutput> | undefined;
+      if (input.kind === "task" && !input.parent_id && !input.routine_id) {
+        const inspected = await inspectTaskGeneralPlacement(input.title, input.description, input.general_confirmed === true);
+        taskPlacement = inspected.placement;
+        if (taskPlacement.status === "selection_required") {
+          return {
+            structuredContent: { placement: taskPlacement },
+            content: [{ type: "text" as const, text: "Task NOT created. Present the returned Project/Routine choices once, using sourceMatched and full paths. Call create_item again with the selected parent_id/routine_id, or with general_confirmed=true only if the user explicitly chooses General." }],
+          };
+        }
+        resolvedRoutineId = inspected.context.fallback?.id;
+      }
+      const cycleId = await resolveMcpCycle(ownerId, input.parent_id, resolvedRoutineId, input.cycle_id);
       const item = await createItem(ownerId, {
         title: input.title,
         kind: input.kind as ItemKind,
         parentId: input.parent_id,
-        routineId: input.routine_id,
+        routineId: resolvedRoutineId,
         cycleId,
         description: input.description,
         status: input.status as ItemStatus | undefined,
@@ -672,7 +712,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       if (item.kind === "task" && input.assignee_member_id) await replaceItemAssignmentRole(ownerId, item.id, "task_assignee", [input.assignee_member_id]);
       const serialized = (await serializeItemsForMcp(ownerId, [item]))[0];
       return {
-        structuredContent: { item: serialized },
+        structuredContent: { item: serialized, ...(taskPlacement ? { placement: taskPlacement } : {}) },
         content: [{ type: "text", text: `Created ${item.kind} "${item.title}".` }],
       };
     },
@@ -749,7 +789,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "create_tasks",
     {
       title: "Create multiple explicitly requested Tasks together",
-      description: "Save 1–50 explicitly supplied, concrete Task titles sharing one Project/Routine, assignee, due date, priority and cadence in one batch. When the user refers to earlier conversation content, use only messages visible to the host model; never create placeholders for unavailable context. Do not invent Tasks from a Project idea. For different per-Task fields or descriptions use create_item. Returns saved records; no follow-up list is needed.",
+      description: "Save 1–50 explicitly supplied, concrete Task titles sharing one confirmed Project/Routine, assignee, due date, priority and cadence. Without a container, the server returns placement choices and saves nothing whenever active Project/Routine candidates exist. Set general_confirmed=true only after the user explicitly chooses General; when no active container exists General is allowed automatically. When the user refers to earlier conversation content, use only messages visible to the host model and never create placeholders. Do not invent Tasks from a Project idea.",
       inputSchema: {
         titles: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
         parent_id: memberIdInput.optional().describe("Existing Project ID; mutually exclusive with routine_id"),
@@ -758,19 +798,38 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         due_date: dueDateInput.optional(),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
+        general_confirmed: z.literal(true).optional().describe("Set only after the user explicitly selects General for this Task batch"),
       },
-      outputSchema: { items: z.array(itemOutput), count: z.number() },
+      outputSchema: { items: z.array(itemOutput), count: z.number(), placement: taskPlacementOutput.optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     async (input) => {
       for (const title of input.titles) assertConcreteWorkInput({ title });
+      if (input.parent_id && input.routine_id) throw new Error("Choose Project or Routine, not both");
+      if (input.general_confirmed && (input.parent_id || input.routine_id)) throw new Error("Choose an exact Project/Routine or General, not both");
+      let resolvedRoutineId = input.routine_id;
+      let taskPlacement: z.infer<typeof taskPlacementOutput> | undefined;
+      if (!input.parent_id && !input.routine_id) {
+        const inspected = await inspectTaskGeneralPlacement(input.titles.join("\n"), undefined, input.general_confirmed === true);
+        taskPlacement = inspected.placement;
+        if (taskPlacement.status === "selection_required") {
+          return {
+            structuredContent: { items: [], count: 0, placement: taskPlacement },
+            content: [{ type: "text" as const, text: "No Tasks were created. Present the returned Project/Routine choices once, then call create_tasks with the selected parent_id/routine_id; use general_confirmed=true only if the user explicitly chooses General." }],
+          };
+        }
+        resolvedRoutineId = inspected.context.fallback?.id;
+      }
       const rows = await createLinkedTasks(ownerId, {
-        titles: input.titles, projectId: input.parent_id, routineId: input.routine_id,
+        titles: input.titles, projectId: input.parent_id, routineId: resolvedRoutineId,
         assigneeMemberId: input.assignee_member_id, dueDate: input.due_date,
         priority: input.priority, cadence: input.cadence, source: "mcp", createdByUserId: authorization.userId,
       });
       const serialized = await serializeItemsForMcp(ownerId, rows);
-      return { structuredContent: { items: serialized, count: serialized.length }, content: [{ type: "text", text: `Saved ${serialized.length} Tasks.` }] };
+      return {
+        structuredContent: { items: serialized, count: serialized.length, ...(taskPlacement ? { placement: taskPlacement } : {}) },
+        content: [{ type: "text", text: `Saved ${serialized.length} Tasks.` }],
+      };
     },
   );
 
@@ -1844,10 +1903,12 @@ function assertMcpAssignmentFields(input: McpAssignmentFields) {
   if (input.kind !== "task" && input.assignee_member_id !== undefined) throw new Error("Only Tasks use assignee_member_id");
 }
 
-function assertMcpItemFields(input: McpAssignmentFields & { parent_id?: string; routine_id?: string; template_id?: string }) {
+function assertMcpItemFields(input: McpAssignmentFields & { parent_id?: string; routine_id?: string; template_id?: string; general_confirmed?: true }) {
   assertMcpAssignmentFields(input);
   if (input.parent_id && input.routine_id) throw new Error("Choose Project or Routine, not both");
   if (input.kind !== "task" && input.routine_id) throw new Error("Only Tasks can belong to a Routine");
+  if (input.kind !== "task" && input.general_confirmed) throw new Error("Only Tasks can select General");
+  if (input.general_confirmed && (input.parent_id || input.routine_id)) throw new Error("Choose an exact Project/Routine or General, not both");
   if (input.kind !== "project" && input.template_id) throw new Error("Only Projects can use a body template");
   if (["key_result", "initiative", "project"].includes(input.kind) && !input.parent_id) throw new Error("Choose an existing parent from prepare_work before saving this type");
 }

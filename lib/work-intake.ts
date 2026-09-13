@@ -39,7 +39,7 @@ export const WORK_FIELDS = {
     required: ["title"],
     recommended: ["parent_id 또는 routine_id", "assignee_member_id", "due_date"],
     optional: ["description(완료 기준)", "priority", "cadence"],
-    placement: "Project 또는 Routine 중 하나. 연결을 모르면 General에 보관 가능. Task는 미완료/완료만 관리하며 Project 전용 상태·진행률 속성을 붙이지 않는다.",
+    placement: "기존 Project 또는 Routine을 먼저 확인한다. 사용자가 General을 명시적으로 선택했거나 활성 후보가 전혀 없을 때만 General에 보관한다. Task는 미완료/완료만 관리하며 Project 전용 상태·진행률 속성을 붙이지 않는다.",
     tool: "create_item; 미분류 단건은 capture_item; 동일 컨테이너의 여러 Task는 create_tasks",
   },
   project: {
@@ -94,12 +94,13 @@ export const WORKFLOW_INSTRUCTIONS = [
   CONVERSATION_POLICY,
   "Task = one independently completable action/result (small internal steps are a checklist). Project = a finite deliverable with scope/completion criteria and multiple independently managed Tasks. Routine = repeated work triggered by time/event/state, independent of OKR. Classify by completion boundary, not duration, keywords, or number of verbs. Respect a user's explicit type; explain a structural conflict instead of silently changing it.",
   "Objective = qualitative desired change; Key Result = measurable evidence; Initiative = strategic approach; Project = bounded delivery. The hierarchy is Objective > Key Result > Initiative > Project > Task, or independent Routine > Task. Tasks use one assignee and only incomplete/complete lifecycle states; Project DRI/workers, workflow statuses, progress, managed properties and block documents are Project-only.",
-  "When the user asks to organize/save work and relationship IDs or required context are missing, use prepare_work once with the likely kind (unsure if ambiguous). It returns rules, parent paths/evidence, member IDs, and fields together. Query is a short parent/topic phrase. Reuse conversation context without redundant reads. For Tasks/Routines, known IDs permit the requested save; Projects ALWAYS require manage_project and final user approval, even if every ID is known.",
+  "When the user asks to organize/save work and relationship IDs or required context are missing, use prepare_work once with the likely kind (unsure if ambiguous). It returns rules, parent paths/evidence, member IDs, and fields together. Query is a short parent/topic phrase. Reuse conversation context without redundant reads. For Tasks, an exact active Project/Routine ID permits the save; without one the write tool performs the same bounded placement check and returns choices without saving. Projects ALWAYS require manage_project and final user approval, even if every ID is known.",
   "Give the likely type and a one-sentence reason immediately. Ask only what blocks a correct next action: at most one compact question round containing up to three missing details. If Task vs Project is ambiguous, ask whether this is one completion or a deliverable containing independently managed tasks; offer your recommendation and let the user choose. Do not recite the whole hierarchy or ask for already supplied facts.",
   "Project scheduling uses due_date only. Do not ask for cadence, sprint, estimated hours, duration, or a separate timeframe. Call the Project DRI 책임자 in Korean; keep dri_member_id as the API field. Routine recurrence is unchanged.",
   "Distinguish required fields from helpful optional fields. Carry stated dates, owners, scope, and priority into the same write. Apply workspace defaults for omitted priority/cadence; leave unknown owners/dates unset. Resolve people and parents to returned IDs; never choose the first candidate merely because it is first. For truncated parents/members, narrow query/member_query; for truncated properties use list_properties only if the needed field is absent. Do not claim absence from a partial list. Do not auto-invite people or create property definitions/templates. Fetch list_project_templates only when applying a user-requested template.",
-  "PROJECT APPROVAL IS MANDATORY and overrides reviewBeforeCreate and conflicting workspace defaults: a generic creation request does not authorize picking an Initiative. Read Initiative descriptions and their KR/Objective context. Recommend at most 3 only with concrete contribution reasons, not recency or vague keywords. Present title/scope, owners, deadline, every defaulted/provided property and recommended paths using manage_project. The user chooses and confirms in this conversation; accept edits here and call manage_project again with action=confirm. If the client exposes only legacy create_item, keep its returned same_tool_confirmation value internal and reuse it after approval. Do not require a browser visit, a separate chat, an @OKRI mention, or an ID pasted by the user. Never fabricate consent, select the first/only parent automatically, add unseen fields at save time, or bypass review. If the user already explicitly approved this exact proposal and connection, do not ask the same confirmation again. A clear Task may still use General.",
-  "Use create_tasks once for explicitly supplied Tasks sharing a container and common fields. Use create_item for non-Project items and manage_project for the full Project lifecycle. Never generate extra Tasks. Routine children use routine_id. Children inherit the selected parent's cycle_id. A pending/failed review is NOT a created Project. If compatibility tools are available, get_project_review can refresh candidates and confirm_project can repeat an identical lost confirmation; otherwise keep using manage_project or the legacy create_item same-tool flow. Never make another proposal after an uncertain save. cancel_project_review cancels a pending draft in this conversation.",
+  "TASK PLACEMENT IS MANDATORY across MCP, Slack, and integration-token writes. Prefer a directly mentioned sourceMatched Project/Routine and show its full available path. When several candidates could fit, return the compact choices and ask once. Use General only when the user explicitly chooses General (general_confirmed=true), or when the server's unfiltered bounded check finds no active Project/Routine at all. Missing IDs never imply General, and candidate order alone is never relevance evidence.",
+  "PROJECT APPROVAL IS MANDATORY and overrides reviewBeforeCreate and conflicting workspace defaults: a generic creation request does not authorize picking an Initiative. Read Initiative descriptions and their KR/Objective context. Recommend at most 3 only with concrete contribution reasons, not recency or vague keywords. Present title/scope, owners, deadline, every defaulted/provided property and recommended paths using manage_project. The user chooses and confirms in this conversation; accept edits here and call manage_project again with action=confirm. If the client exposes only legacy create_item, keep its returned same_tool_confirmation value internal and reuse it after approval. Do not require a browser visit, a separate chat, an @OKRI mention, or an ID pasted by the user. Never fabricate consent, select the first/only parent automatically, add unseen fields at save time, or bypass review. If the user already explicitly approved this exact proposal and connection, do not ask the same confirmation again.",
+  "Use create_tasks once for explicitly supplied Tasks sharing a confirmed container and common fields. Use create_item for non-Project items and manage_project for the full Project lifecycle. Never generate extra Tasks. Routine children use routine_id. Children inherit the selected parent's cycle_id. A pending/failed placement or Project review is NOT created work. If compatibility tools are available, get_project_review can refresh candidates and confirm_project can repeat an identical lost confirmation; otherwise keep using manage_project or the legacy create_item same-tool flow. Never make another proposal after an uncertain save. cancel_project_review cancels a pending draft in this conversation.",
   "After a successful write, use the returned record as confirmation: do not list everything again. Reply briefly with saved type/title, actual container, owner/date when present, and important unset fields. Never claim a draft was saved or a notification delivered. On an uncertain write failure, look for the saved record before retrying. Read-only planning must not create data. Deletions, invitations and external actions retain their own permission/confirmation rules.",
   "Projects may include images copied from a Slack creation thread. Project records expose imageCount; use list_project_images, then read_project_image to inspect the actual visual before answering screenshot-, design-, error-, or diagram-dependent requests. Do not infer image contents from the filename alone.",
 ].join("\n");
@@ -112,6 +113,40 @@ export type WorkContextInput = {
   limit?: number;
   includeMembers?: boolean;
 };
+
+export type TaskPlacementReview = {
+  status: "general_ready" | "selection_required";
+  reason: "user_selected_general" | "no_active_candidates" | "source_matched_candidate" | "active_candidates_available";
+  candidates: Array<{ id: string; kind: "project" | "routine"; title: string; path: string[]; sourceMatched: boolean }>;
+  general: { id: string; title: string } | null;
+};
+
+/** Shared deterministic guard for every AI/token path that would otherwise default a Task to General. */
+export function reviewTaskGeneralPlacement(context: {
+  parents: Array<{ id: string; kind: string; title: string; path?: string[]; sourceMatched?: boolean }>;
+  routines: Array<{ id: string; title: string; sourceMatched?: boolean }>;
+  fallback: { id: string; title: string } | null;
+}, generalConfirmed = false): TaskPlacementReview {
+  const candidates: TaskPlacementReview["candidates"] = [
+    ...context.parents.filter((entry) => entry.kind === "project").map((entry) => ({
+      id: entry.id, kind: "project" as const, title: entry.title,
+      path: entry.path?.length ? entry.path : [entry.title], sourceMatched: Boolean(entry.sourceMatched),
+    })),
+    ...context.routines.map((entry) => ({
+      id: entry.id, kind: "routine" as const, title: entry.title,
+      path: [entry.title], sourceMatched: Boolean(entry.sourceMatched),
+    })),
+  ];
+  const sourceMatches = candidates.filter((entry) => entry.sourceMatched);
+  if (generalConfirmed) return { status: "general_ready", reason: "user_selected_general", candidates: sourceMatches, general: context.fallback };
+  if (!candidates.length) return { status: "general_ready", reason: "no_active_candidates", candidates: [], general: context.fallback };
+  return {
+    status: "selection_required",
+    reason: sourceMatches.length ? "source_matched_candidate" : "active_candidates_available",
+    candidates: sourceMatches.length ? sourceMatches : candidates,
+    general: context.fallback,
+  };
+}
 
 // MCP uses POST even for reads. Unknown tools and JSON-RPC batches stay write-gated.
 export const READ_ONLY_MCP_TOOLS = new Set([
