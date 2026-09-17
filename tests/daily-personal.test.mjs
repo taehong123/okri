@@ -351,7 +351,7 @@ test("Task creation rejects viewers, removed participants, foreign and closed pr
   assert.equal(db.prepare("SELECT COUNT(*) n FROM items").get().n, 6);
 });
 
-test("task-focused Slack checklist treats Project and Routine as peer containers with only Task choices", () => {
+test("compact Slack checklist keeps every assigned Project, Task and Routine selectable", () => {
   const project = { id: "p", key: "project:p", kind: "project", title: "Project" };
   const empty = { id: "e", key: "project:e", kind: "project", title: "Empty Project" };
   const task = { id: "t", key: "task:t", kind: "task", title: "My Task", parentId: "p", parentKind: "project", parentTitle: "Project" };
@@ -363,7 +363,8 @@ test("task-focused Slack checklist treats Project and Routine as peer containers
     { key: "routine:r", title: "Store management", hasTasks: true }, { key: "routine:er", title: "Empty Routine", hasTasks: false },
   ] };
   const modal = form.dailyChecklistForm(input, "{}");
-  assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text), ["└ My Task", "└ Routine Task"]);
+  assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text),
+    ["Project", "└ My Task", "Empty Project", "Store management", "└ Routine Task", "Empty Routine"]);
   assert.equal(modal.blocks[0].block_id, "work_status");
   assert.deepEqual(modal.blocks[0].element.options.map((option) => option.value), ["office", "remote", "skip"]);
   assert.doesNotMatch(JSON.stringify(modal), /today_note|yesterday_note|blockers_note|skip_reason|skip_note|no_planned|\"value\":\"delete\"/);
@@ -373,22 +374,23 @@ test("task-focused Slack checklist treats Project and Routine as peer containers
   assert.equal(modal.blocks[emptyHeading + 2].elements[0].action_id, "daily_checklist_add_task");
   assert.equal(modal.blocks[emptyHeading + 2].elements[0].value, "project:e");
   const routineHeading = modal.blocks.findIndex((block) => block.text?.text === "Routine · Store management");
-  assert.equal(modal.blocks[routineHeading + 1].block_id, "daily_choice_task:rt");
+  assert.equal(modal.blocks[routineHeading + 1].block_id, "daily_choice_routine:r");
+  assert.equal(modal.blocks[routineHeading + 2].block_id, "daily_choice_task:rt");
   const emptyRoutineHeading = modal.blocks.findIndex((block) => block.text?.text === "Routine · Empty Routine");
   assert.equal(modal.blocks[emptyRoutineHeading + 2].elements[0].value, "routine:er");
-  assert.doesNotMatch(JSON.stringify(modal), /daily_choice_routine:/);
+  assert.match(JSON.stringify(modal), /daily_choice_routine:/);
   assert.match(JSON.stringify(modal), /아직 Task가 없습니다/);
 });
 
-test("task-focused Slack state discards stale parent choices", async (t) => {
+test("compact Slack state preserves assigned Project and Routine choices", async (t) => {
   const { raw, checklist } = fixture(t);
   const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
     choices: { "project:project": "today", "routine:routine": "done", "task:task": "today" } };
   const merged = checklist.mergeDailyChecklist(input, {}, (key) => key).next;
-  assert.deepEqual(merged.choices, { "task:task": "today" });
+  assert.deepEqual(merged.choices, { "project:project": "today", "routine:routine": "done", "task:task": "today" });
 });
 
-test("task-focused Slack checklist stores an allowed work status and skip rejects selected Tasks", async (t) => {
+test("compact Slack checklist stores an allowed work status and skip rejects selected work", async (t) => {
   const { raw, db, checklist } = fixture(t);
   const task = (await work.listDailyWork(raw, "w", "me", date)).find((entry) => entry.key === "task:task");
   const input = { ...checklistInput([task]), taskFocused: true, workStatus: "remote", workStatusOptions: ["remote", "skip"] };
@@ -405,7 +407,21 @@ test("task-focused Slack checklist stores an allowed work status and skip reject
   const invalid = await checklist.handleDailyChecklist(authorization, skipModal.private_metadata, {
     work_status: { value: { selected_option: { value: "skip" } } },
   }, false, (key) => key);
-  assert.match(invalid.errors.work_status, /Task/);
+  assert.match(invalid.errors.work_status, /업무/);
+});
+
+test("compact Slack checklist submits an assigned Project even when it has no Task", async (t) => {
+  const { raw, checklist } = fixture(t);
+  const entries = await work.listDailyWork(raw, "w", "me", date);
+  const project = entries.find((entry) => entry.key === "project:project");
+  assert.ok(project);
+  assert.ok(!entries.some((entry) => entry.kind === "task" && entry.parentId === project.id));
+  const modal = await checklist.createDailyChecklist("w", "me", { ...checklistInput(entries), taskFocused: true }, (key) => key);
+  const submitted = await checklist.handleDailyChecklist(authorization, modal.private_metadata, {
+    work_status: { value: { selected_option: { value: "office" } } },
+    "daily_choice_project:project": choice("today"),
+  }, false, (key) => key);
+  assert.deepEqual(submitted.submission.work.map((entry) => entry.key), ["project:project"]);
 });
 
 test("empty-project buttons and their inline editor fit Slack limits in every language", async () => {
@@ -427,6 +443,25 @@ test("empty-project buttons and their inline editor fit Slack limits in every la
     assert.equal(opened.blocks.filter((b) => b.element?.focus_on_load).length, 1);
     assert.ok(initial.blocks.length <= 100 && opened.blocks.length <= 100);
   }
+});
+
+test("assigned Projects without Tasks remain available across every Slack page", () => {
+  const projects = Array.from({ length: 25 }, (_, i) => ({ id: `p-${i}`, key: `project:p-${i}`, kind: "project", title: `Project ${i}` }));
+  const input = { ...checklistInput(projects), taskFocused: true,
+    taskTargets: projects.map((project) => ({ key: project.key, title: project.title, hasTasks: false })) };
+  const first = form.dailyChecklistForm(input, "{}");
+  const second = form.dailyChecklistForm({ ...input, page: 1 }, "{}");
+  const choices = [...first.blocks, ...second.blocks]
+    .filter((block) => block.block_id?.startsWith("daily_choice_project:"))
+    .map((block) => block.block_id);
+  const createTargets = [...first.blocks, ...second.blocks]
+    .filter((block) => block.block_id?.startsWith("daily_add_project:"))
+    .map((block) => block.elements[0].value);
+  assert.equal(first.submit.text, "다음");
+  assert.equal(second.submit.text, "제출");
+  assert.equal(new Set(choices).size, 25);
+  assert.equal(new Set(createTargets).size, 25);
+  assert.ok(first.blocks.length <= 100 && second.blocks.length <= 100);
 });
 
 test("empty-project editor opens and cancels even with unfinished choices elsewhere", async (t) => {

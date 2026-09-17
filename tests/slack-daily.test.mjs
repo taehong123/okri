@@ -159,7 +159,10 @@ test("scheduled, manual and test reminders have unique block IDs and keep the de
     const blocks = api.dailyReminderBlocks(marker);
     const ids = blocks.flatMap((block) => block.block_id ? [block.block_id] : []);
     assert.equal(new Set(ids).size, ids.length);
-    assert.equal(blocks.find((block) => block.type === "actions").block_id, marker);
+    const action = blocks.find((block) => block.type === "actions");
+    assert.equal(action.block_id, marker);
+    assert.equal(action.elements[0].text.text, "내 업무 선택");
+    assert.match(JSON.stringify(blocks), /Project · Task · Routine/);
   }
 });
 

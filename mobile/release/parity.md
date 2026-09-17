@@ -32,6 +32,10 @@
   General only after an explicit choice or when no active candidate exists.
   Native `/api/mobile/v1` already requires an explicit Project/Routine for its
   creation flows and remains contract-compatible; no native UI change is claimed.
+- Slack Daily now presents every assigned open Project, Task and Routine, keeps
+  empty Projects available for inline Task creation, and accepts Project/Routine
+  selections instead of silently reducing the list to Tasks. This is a Slack-only
+  interaction correction with no `/api/mobile/v1` contract or native UI change.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

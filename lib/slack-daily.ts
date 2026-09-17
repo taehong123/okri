@@ -831,8 +831,8 @@ export async function republishLatestDailySubmission(ownerId: string, memberId: 
 export function dailyReminderBlocks(blockId: string, t: Translator = (key) => key) {
   return [
     { type: "context", elements: [{ type: "mrkdwn", text: `*${t("데일리 봇")}*` }] },
-    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: `*${t("오늘 할 Task를 선택해 주세요.")}*\n${t("근무 상태를 고르고 Project별 Task를 선택합니다.")}` } },
-    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: t("Task 선택") }, style: "primary", value: "daily" }] },
+    { type: "section", block_id: `${blockId}:body`, text: { type: "mrkdwn", text: `*${t("오늘 할 업무를 선택해 주세요.")}*\n${t("내게 배정된 Project · Task · Routine에서 오늘 진행할 것을 고르고 제출합니다.")}` } },
+    { type: "actions", block_id: blockId, elements: [{ type: "button", action_id: "daily_open", text: { type: "plain_text", text: t("내 업무 선택") }, style: "primary", value: "daily" }] },
   ];
 }
 
@@ -858,9 +858,9 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
          workStatusOptions: preference.workStatuses,
         taskTargets: [...dashboard.createTargets.projects.map((project) => ({ key: `project:${project.id}`, title: project.title, hasTasks: project.hasTasks })),
           ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title, hasTasks: routine.hasTasks }))],
-        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.filter((key) => key.startsWith("task:")).map((key) => [key, "today" as const])),
-        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind === "task" && entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
-        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.kind === "task" && entry.completedYesterday), page: 0,
+        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.map((key) => [key, "today" as const])),
+        selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
+        yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday), page: 0,
       }, t);
       await slackApi(token, "views.update", { view_id: viewId, hash: opened.view?.hash, view });
     } catch {
@@ -886,13 +886,13 @@ export async function externalTaskOptions(authorization: RequestAuthorization, q
   const normalized = query.trim().toLocaleLowerCase();
   if (workMode === "today" || workMode === "yesterday") {
     const dashboard = await getDailyDashboard(authorization, day);
-    const work = (workMode === "yesterday" ? dashboard.candidates.yesterdayWork : dashboard.candidates.work).filter((entry) => entry.kind === "task");
+    const work = workMode === "yesterday" ? dashboard.candidates.yesterdayWork : dashboard.candidates.work;
     return work.filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized))
       .slice(0, 100).map((entry) => dailyWorkOption(entry, t, workMode));
   }
   if (workMode === true) {
     const member = await currentDailyMember(authorization);
-    const work = (await listDailyWork(env.DB, authorization.ownerId, member.id, day)).filter((entry) => entry.kind === "task");
+    const work = await listDailyWork(env.DB, authorization.ownerId, member.id, day);
     return work.slice(60).filter((entry) => !normalized || `${entry.title} ${entry.parentTitle}`.toLocaleLowerCase().includes(normalized)).slice(0, 100).map((entry) => dailyWorkOption(entry, t));
   }
   const dashboard = await getDailyDashboard(authorization, day);

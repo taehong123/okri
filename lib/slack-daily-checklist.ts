@@ -14,9 +14,6 @@ export async function createDailyChecklist(ownerId: string, memberId: string, in
   const choices = { ...input.choices };
   const statusOptions = parseDailyWorkStatuses(input.workStatusOptions);
   const requestedStatus = input.skipReason ? "skip" as const : normalizeDailyWorkStatus(input.workStatus);
-  if (input.taskFocused) {
-    for (const key of Object.keys(choices)) if (!key.startsWith("task:")) delete choices[key];
-  }
   const value = { ...input, choices, work: orderDailyChecklist(input.work), page: 0,
     ...(input.taskFocused ? { noPlannedTasks: false, workStatus: statusOptions.includes(requestedStatus) ? requestedStatus : statusOptions[0] } : {}) };
   const now = new Date().toISOString();
@@ -28,13 +25,9 @@ export async function createDailyChecklist(ownerId: string, memberId: string, in
 
 export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t: Translator) {
   const next: DailyChecklist = { ...input, choices: { ...input.choices } };
-  if (input.taskFocused) {
-    for (const key of Object.keys(next.choices)) if (!key.startsWith("task:")) delete next.choices[key];
-  }
   const errors: Record<string, string> = {};
   const start = input.page * DAILY_CHECKLIST_PAGE_SIZE;
   input.work.slice(start, start + DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
-    if (input.taskFocused && entry.kind !== "task") { delete next.choices[entry.key]; return; }
     const block = dailyChoiceBlockId(input, entry, start + offset);
     const field = state[block]?.choice;
     if (!field) return;
@@ -151,7 +144,7 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (Object.keys(errors).length) return problem(errors);
   const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
   const selected = (choice: string) => Object.entries(next.choices)
-    .filter(([key, value]) => value === choice && (!next.taskFocused || key.startsWith("task:"))).map(([key]) => key);
+    .filter(([, value]) => value === choice).map(([key]) => key);
   const today = selected("today"), done = selected("done"), deleted = selected("delete");
   const validationBlock = next.taskFocused ? "work_status" : "no_planned";
   if (today.length + done.length + deleted.length > 50) return problem({ [validationBlock]: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
@@ -166,9 +159,9 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   const skipReason = normalizeDailySkipReason(next.skipReason);
   const workStatus = skipReason ? "skip" : normalizeDailyWorkStatus(next.workStatus);
   const skipping = workStatus === "skip";
-  if (skipping && (today.length || done.length || deleted.length)) return problem({ [next.taskFocused ? "work_status" : "skip_reason"]: t("스킵하려면 선택한 Task를 먼저 해제해 주세요.") });
+  if (skipping && (today.length || done.length || deleted.length)) return problem({ [next.taskFocused ? "work_status" : "skip_reason"]: t("스킵하려면 선택한 업무를 먼저 해제해 주세요.") });
   if (next.noPlannedTasks && today.length) return problem({ no_planned: t("오늘 예정 없음과 오늘 할 일을 함께 선택할 수 없습니다.") });
-  if (!skipping && next.taskFocused && !today.length && !done.length) return problem({ work_status: t("오늘 진행하거나 완료한 Task를 하나 이상 선택해 주세요.") });
+  if (!skipping && next.taskFocused && !today.length && !done.length) return problem({ work_status: t("오늘 진행하거나 완료한 업무를 하나 이상 선택해 주세요.") });
   if (!skipping && !next.taskFocused && !next.noPlannedTasks && !today.length && !done.length && !deleted.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
   if (skipReason === "other" && !next.skipNote.trim()) return problem({ skip_note: t("기타 스킵 사유를 입력해 주세요.") });
   // Replays return the durable submission before revalidating already-completed work.
@@ -176,7 +169,7 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
     .bind(authorization.ownerId, member.id, parsed.id).first();
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
-      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => key.startsWith("task:") && !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
+      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
       noPlannedTasks: !next.taskFocused && (next.noPlannedTasks || (!today.length && done.length + deleted.length > 0)), workStatus,
       skipReason, skipNote: next.skipNote, source: "slack" }, false);
   }
