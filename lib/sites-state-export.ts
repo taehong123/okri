@@ -1,12 +1,15 @@
 const encoder = new TextEncoder();
 const PAGE_SIZE = 250;
 const ALLOWED_ORIGIN = "https://chatgpt.com";
+const TABLES_SQL = "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '!_cf!_%' ESCAPE '!' ORDER BY name";
 
 type ExportEnv = {
   DB: D1Database;
   WORKSPACE_AVATARS: R2Bucket;
   OKRI_MIGRATION_EXPORT_TOKEN?: string;
 };
+
+type ExportPlan = { tables: string[]; objects: R2Object[] };
 
 function corsHeaders(origin: string | null): HeadersInit {
   return origin === ALLOWED_ORIGIN ? {
@@ -73,32 +76,44 @@ async function enqueueObjectData(controller: ReadableStreamDefaultController<Uin
   controller.enqueue(encoder.encode('"}\n'));
 }
 
-async function writeExport(controller: ReadableStreamDefaultController<Uint8Array>, env: ExportEnv) {
+async function buildExportPlan(env: ExportEnv): Promise<ExportPlan> {
+  const schema = await env.DB.prepare(TABLES_SQL).all<{ name: string }>();
+  const tables = schema.results.map(({ name }) => name);
+  for (const name of tables) await env.DB.prepare(`SELECT * FROM ${quoteIdentifier(name)} LIMIT 0`).all();
+
+  const objects: R2Object[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await env.WORKSPACE_AVATARS.list({ cursor, limit: 1000, include: ["httpMetadata", "customMetadata"] });
+    objects.push(...page.objects);
+    if (page.truncated && !page.cursor) throw new Error("export_preflight_failed");
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+  return { tables, objects };
+}
+
+async function writeExport(controller: ReadableStreamDefaultController<Uint8Array>, env: ExportEnv, plan: ExportPlan) {
   const values = Object.fromEntries(Object.entries(env as object).filter(([key, value]) => key !== "OKRI_MIGRATION_EXPORT_TOKEN" && typeof value === "string"));
   controller.enqueue(encoder.encode(`${JSON.stringify({ type: "runtime", values })}\n`));
 
-  const schema = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all<{ name: string }>();
-  for (const { name } of schema.results) {
+  for (const name of plan.tables) {
     let offset = 0;
+    let wroteTable = false;
     while (true) {
       const page = await env.DB.prepare(`SELECT * FROM ${quoteIdentifier(name)} LIMIT ? OFFSET ?`).bind(PAGE_SIZE, offset).all<Record<string, unknown>>();
       const rows = page.results.map((row) => Object.fromEntries(Object.entries(row).map(([key, value]) => [key, exportValue(value)])));
-      if (rows.length) controller.enqueue(encoder.encode(`${JSON.stringify({ type: "table", name, rows })}\n`));
+      if (rows.length || !wroteTable) controller.enqueue(encoder.encode(`${JSON.stringify({ type: "table", name, rows })}\n`));
+      wroteTable = true;
       if (rows.length < PAGE_SIZE) break;
       offset += rows.length;
     }
   }
 
-  let cursor: string | undefined;
-  do {
-    const page = await env.WORKSPACE_AVATARS.list({ cursor, limit: 1000, include: ["httpMetadata", "customMetadata"] });
-    for (const metadata of page.objects) {
-      const object = await env.WORKSPACE_AVATARS.get(metadata.key);
-      if (!object) throw new Error("export_failed");
-      await enqueueObjectData(controller, object, metadata);
-    }
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
+  for (const metadata of plan.objects) {
+    const object = await env.WORKSPACE_AVATARS.get(metadata.key);
+    if (!object) throw new Error("export_failed");
+    await enqueueObjectData(controller, object, metadata);
+  }
 
   controller.enqueue(encoder.encode(`${JSON.stringify({ type: "complete" })}\n`));
   controller.close();
@@ -110,15 +125,28 @@ export function exportOptions(request: Request) {
   return new Response(null, { status: 204, headers: { ...corsHeaders(origin), "Cache-Control": "no-store" } });
 }
 
-export function exportState(request: Request, env: ExportEnv) {
+export async function exportState(request: Request, env: ExportEnv) {
   const origin = request.headers.get("origin");
   if (!tokensMatch(request.headers.get("x-okri-migration-token"), env.OKRI_MIGRATION_EXPORT_TOKEN)) {
     return new Response(null, { status: 404, headers: { ...corsHeaders(origin), "Cache-Control": "no-store" } });
   }
 
+  let plan: ExportPlan;
+  try {
+    plan = await buildExportPlan(env);
+  } catch {
+    return Response.json({ type: "error", code: "export_failed" }, {
+      status: 500,
+      headers: { ...corsHeaders(origin), "Cache-Control": "no-store" },
+    });
+  }
+
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
-      void writeExport(controller, env).catch(() => controller.error(new Error("State export failed")));
+      void writeExport(controller, env, plan).catch(() => {
+        controller.enqueue(encoder.encode(`${JSON.stringify({ type: "error", code: "export_failed" })}\n`));
+        controller.close();
+      });
     },
   });
   return new Response(stream, {

@@ -5,6 +5,6 @@ export function OPTIONS(request: Request) {
   return exportOptions(request);
 }
 
-export function POST(request: Request) {
+export async function POST(request: Request) {
   return exportState(request, env);
 }
