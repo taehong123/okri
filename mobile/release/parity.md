@@ -36,6 +36,9 @@
   empty Projects available for inline Task creation, and accepts Project/Routine
   selections instead of silently reducing the list to Tasks. This is a Slack-only
   interaction correction with no `/api/mobile/v1` contract or native UI change.
+- Self-hosted deployment support keeps the frozen `/api/mobile/v1` routes,
+  native-session semantics and SQLite-compatible schema intact. This is an
+  infrastructure migration only; no native UI or mobile release is claimed.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

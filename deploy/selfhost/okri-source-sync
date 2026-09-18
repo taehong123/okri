@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# This runs on allvibe-server as root through the paired systemd service.
+# /srv/okri/source is a dedicated deployment clone, never a developer's tree.
+readonly repo_dir=/srv/okri/source
+readonly remote_url=https://github.com/taehong123/okri.git
+readonly namespace=okri
+readonly image_repo=registry.allvibe.ai/okri/app
+readonly state_dir=/var/lib/okri
+
+exec 9>/run/okri-source-sync.lock
+flock -n 9 || exit 0
+
+mkdir -p "$state_dir"
+if [[ ! -d "$repo_dir/.git" ]]; then
+  install -d -m 0755 /srv/okri
+  git clone --depth 1 --branch main "$remote_url" "$repo_dir"
+else
+  git -C "$repo_dir" remote set-url origin "$remote_url"
+  git -C "$repo_dir" fetch --depth 1 origin main
+  git -C "$repo_dir" reset --hard origin/main
+fi
+
+commit="$(git -C "$repo_dir" rev-parse HEAD)"
+if [[ -f "$state_dir/release-sha" ]] && [[ "$(<"$state_dir/release-sha")" == "$commit" ]]; then
+  exit 0
+fi
+
+# The cluster must never receive an application manifest before a build has
+# succeeded. Creating the empty namespace first is needed only for its secrets.
+/usr/local/bin/k3s kubectl apply -f "$repo_dir/deploy/k8s/namespace.yaml"
+if ! /usr/local/bin/k3s kubectl -n "$namespace" get secret registry-cred >/dev/null 2>&1; then
+  if ! /usr/local/bin/k3s kubectl -n allhere get secret registry-cred >/dev/null 2>&1; then
+    echo "OKRI deployment registry credential is unavailable" >&2
+    exit 1
+  fi
+  /usr/local/bin/k3s kubectl -n "$namespace" create secret generic registry-cred \
+    --type=kubernetes.io/dockerconfigjson \
+    --from-file=.dockerconfigjson=<( /usr/local/bin/k3s kubectl -n allhere get secret registry-cred -o jsonpath='{.data.\.dockerconfigjson}' | base64 -d )
+fi
+if ! /usr/local/bin/k3s kubectl -n "$namespace" get secret okri-runtime >/dev/null 2>&1; then
+  scheduler_token="$(openssl rand -hex 48)"
+  /usr/local/bin/k3s kubectl -n "$namespace" create secret generic okri-runtime \
+    --from-literal=OKRI_SCHEDULER_TOKEN="$scheduler_token"
+fi
+
+image="$image_repo:$commit"
+nerdctl build --pull -t "$image" -t "$image_repo:main" "$repo_dir"
+nerdctl push "$image"
+nerdctl push "$image_repo:main"
+
+/usr/local/bin/k3s kubectl apply -k "$repo_dir/deploy/k8s"
+/usr/local/bin/k3s kubectl -n "$namespace" set image deployment/okri app="$image" migrate="$image"
+/usr/local/bin/k3s kubectl -n "$namespace" rollout status deployment/okri --timeout=5m
+printf '%s\n' "$commit" > "$state_dir/release-sha"
+echo "OKRI deployed $commit"

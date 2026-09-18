@@ -1,10 +1,9 @@
 /** Cloudflare Worker entry point for the vinext-starter template. */
 import { handleImageOptimization, DEFAULT_DEVICE_SIZES, DEFAULT_IMAGE_SIZES } from "vinext/server/image-optimization";
 import handler from "vinext/server/app-router-entry";
-import { syncDueKrDataConnectionsWithDb } from "@/lib/kr-data-sync";
-import { runDueWorkspaceBackups } from "@/lib/workspace-backups";
 import { workspaceSubdomainRedirect } from "@/lib/workspace-address";
 import { withPublicErrorDetails } from "@/lib/api-error";
+import { runScheduledJobs } from "@/lib/scheduled-jobs";
 
 interface Env {
   ASSETS: Fetcher;
@@ -102,23 +101,11 @@ const worker = {
     if (url.pathname.startsWith("/api/") && !response.ok) return withPublicErrorDetails(response);
     return response;
   },
-  scheduled(_controller: ScheduledController, _env: Env, ctx: ExecutionContext) {
-    // Delivery queues resume every minute; existing maintenance keeps its 15-minute cadence.
-    ctx.waitUntil(import("@/lib/slack-bot-delivery").then(({ runDueSlackBotDeliveries }) => runDueSlackBotDeliveries(_env.DB)));
-    ctx.waitUntil(import("@/lib/slack-task-changes").then(({ runDueTaskChanges }) => runDueTaskChanges(_env.DB)));
-    ctx.waitUntil(import("@/lib/slack-daily-manual").then(({ runDueDailyManualRuns }) => runDueDailyManualRuns(_env.DB)));
-    ctx.waitUntil(import("@/lib/slack-daily-digest").then(({ runDueDailyDigests }) => runDueDailyDigests(_env.DB)));
-    if (new Date(_controller.scheduledTime).getUTCMinutes() % 15 !== 0) return;
-    ctx.waitUntil(import("@/lib/billing").then(({ runBillingBatch }) => runBillingBatch()));
-    const managementBotRun = import("@/lib/workspace-management-bot")
-      .then(({ runDueWorkspaceManagementBots }) => runDueWorkspaceManagementBots(_env.DB));
-    ctx.waitUntil(Promise.all([
-      syncDueKrDataConnectionsWithDb(_env.DB),
-      managementBotRun,
-    ]));
-    // Keep backups alive even if an unrelated integration job rejects.
-    ctx.waitUntil(runDueWorkspaceBackups(_env));
-    ctx.waitUntil(import("@/lib/slack-daily").then(({ runDueSlackDailyReminders }) => runDueSlackDailyReminders()));
+  scheduled(controller: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(runScheduledJobs(env, new Date(controller.scheduledTime)).then((results) => {
+      const failed = results.filter((result) => result.status === "rejected");
+      if (failed.length) console.error("scheduled_jobs_failed", JSON.stringify(failed));
+    }));
   },
 };
 

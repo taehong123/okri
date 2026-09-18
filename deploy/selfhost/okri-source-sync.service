@@ -1,0 +1,10 @@
+[Unit]
+Description=Build and deploy OKRI from GitHub main
+Wants=network-online.target
+After=network-online.target k3s.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/okri-source-sync
+TimeoutStartSec=20min
+Nice=10

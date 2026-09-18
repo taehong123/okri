@@ -1,0 +1,11 @@
+[Unit]
+Description=Poll GitHub main for OKRI releases
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+Persistent=true
+RandomizedDelaySec=15s
+
+[Install]
+WantedBy=timers.target

@@ -36,6 +36,10 @@ yarn-error.log*
 .vercel
 
 /dist/
+/runtime/
+/runtime2/
+/runtime3/
+/runtime4/
 # Deterministic install assets generated from the shared theme and offline source.
 /public/manifest.webmanifest
 /public/offline.html

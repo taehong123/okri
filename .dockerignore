@@ -1,0 +1,12 @@
+.git
+.github
+.next
+.wrangler
+dist
+node_modules
+runtime
+runtime2
+test-results
+coverage
+.env*
+*.sqlite

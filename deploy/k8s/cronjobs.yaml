@@ -1,0 +1,133 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: okri-scheduled-jobs
+  labels:
+    app.kubernetes.io/name: okri
+    app.kubernetes.io/component: scheduler
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 5
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 120
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: okri
+            app.kubernetes.io/component: scheduler
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: registry-cred
+          containers:
+            - name: scheduler
+              image: registry.allvibe.ai/okri/app:main
+              imagePullPolicy: Always
+              command: ["node", "--input-type=module", "-e"]
+              args:
+                - |
+                  const response = await fetch("http://okri.okri.svc:3000/api/internal/scheduled", {
+                    method: "POST",
+                    headers: { authorization: `Bearer ${process.env.OKRI_SCHEDULER_TOKEN}` }
+                  });
+                  const body = await response.text();
+                  if (!response.ok) throw new Error(`${response.status} ${body}`);
+                  console.log(body);
+              env:
+                - name: OKRI_SCHEDULER_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: okri-runtime
+                      key: OKRI_SCHEDULER_TOKEN
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              resources:
+                requests:
+                  cpu: 20m
+                  memory: 64Mi
+                limits:
+                  cpu: 250m
+                  memory: 256Mi
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: okri-state-backup
+  labels:
+    app.kubernetes.io/name: okri
+    app.kubernetes.io/component: backup
+spec:
+  schedule: "30 18 * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 7
+  failedJobsHistoryLimit: 7
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: okri
+            app.kubernetes.io/component: backup
+        spec:
+          restartPolicy: Never
+          automountServiceAccountToken: false
+          imagePullSecrets:
+            - name: registry-cred
+          securityContext:
+            fsGroup: 1000
+            fsGroupChangePolicy: OnRootMismatch
+            seccompProfile:
+              type: RuntimeDefault
+          containers:
+            - name: backup
+              image: registry.allvibe.ai/okri/app:main
+              imagePullPolicy: Always
+              command: ["node", "--experimental-sqlite", "scripts/selfhost-backup.mjs"]
+              env:
+                - name: OKRI_DATA_PATH
+                  value: /var/lib/okri
+                - name: OKRI_DB_PATH
+                  value: /var/lib/okri/okri.sqlite
+                - name: OKRI_STORAGE_PATH
+                  value: /var/lib/okri/storage
+                - name: OKRI_BACKUP_PATH
+                  value: /var/lib/okri/backups
+              securityContext:
+                runAsNonRoot: true
+                runAsUser: 1000
+                runAsGroup: 1000
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities:
+                  drop: ["ALL"]
+              volumeMounts:
+                - name: data
+                  mountPath: /var/lib/okri
+                - name: tmp
+                  mountPath: /tmp
+              resources:
+                requests:
+                  cpu: 50m
+                  memory: 128Mi
+                limits:
+                  cpu: 500m
+                  memory: 512Mi
+          volumes:
+            - name: data
+              hostPath:
+                path: /var/lib/okri
+                type: DirectoryOrCreate
+            - name: tmp
+              emptyDir: {}

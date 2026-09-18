@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: okri
+  labels:
+    app.kubernetes.io/name: okri
+    app.kubernetes.io/part-of: okri

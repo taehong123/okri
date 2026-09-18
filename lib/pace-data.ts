@@ -955,6 +955,15 @@ async function ensureSchema() {
   await schemaReady;
 }
 
+/**
+ * Initializes additive runtime compatibility tables without creating a
+ * workspace or customer records. Self-hosted readiness calls this before the
+ * scheduler is allowed to process queues.
+ */
+export async function ensureRuntimeSchema() {
+  await ensureSchema();
+}
+
 async function ensureAssistantDraftSchema(d1: D1Database) {
   await d1.batch([
     d1.prepare(`CREATE TABLE IF NOT EXISTS assistant_drafts (

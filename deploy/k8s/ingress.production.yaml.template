@@ -1,0 +1,43 @@
+# Apply only during the verified cutover after the D1/R2 import succeeds.
+# Keeping it outside kustomization prevents an empty self-hosted database from
+# ever taking okri.ai traffic.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: okri
+  namespace: okri
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    external-dns.alpha.kubernetes.io/cloudflare-proxied: "true"
+    external-dns.alpha.kubernetes.io/hostname: okri.ai,www.okri.ai
+    external-dns.alpha.kubernetes.io/target: 61.72.248.246
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts:
+        - okri.ai
+        - www.okri.ai
+      secretName: okri-ai-tls
+  rules:
+    - host: okri.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: okri
+                port:
+                  name: http
+    - host: www.okri.ai
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: okri
+                port:
+                  name: http

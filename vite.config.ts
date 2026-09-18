@@ -1,6 +1,7 @@
 import { sites } from "@openai/sites-vite-plugin";
 import vinext from "vinext";
 import { defineConfig } from "vite";
+import { fileURLToPath } from "node:url";
 import hostingConfig from "./.openai/hosting.json" with { type: "json" };
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
@@ -10,6 +11,9 @@ const { d1, r2 } = hostingConfig;
 
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
+// Sites is retained only as an explicit emergency rollback build. Local work,
+// CI and production default to the account-independent Node runtime.
+const isSitesRuntime = process.env.OKRI_RUNTIME === "sites";
 
 const localBindingConfig = {
   main: "./worker/index.ts",
@@ -50,16 +54,21 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    resolve: isSitesRuntime
+      ? undefined
+      : { alias: { "cloudflare:workers": fileURLToPath(new URL("./lib/selfhost-workers.ts", import.meta.url)) } },
     server: isCodexSeatbeltSandbox
       ? { watch: { useFsEvents: false, usePolling: true } }
       : undefined,
-    plugins: [
-      vinext({ prerender: { routes: "*" } }),
-      sites(),
-      cloudflare({
-        viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
-      }),
-    ],
+    plugins: isSitesRuntime
+      ? [
+          vinext({ prerender: { routes: "*" } }),
+          sites(),
+          cloudflare({
+            viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
+            config: localBindingConfig,
+          }),
+        ]
+      : [vinext({ prerender: { routes: "*" } })],
   };
 });
