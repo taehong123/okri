@@ -15,6 +15,7 @@ test("the protected Sites stream becomes a data-only D1/R2 import", async () => 
     const output = join(scratch, "import");
     await writeFile(source, [
       JSON.stringify({ type: "runtime", values: { GOOGLE_CLIENT_ID: "client", SLACK_TOKEN_ENCRYPTION_KEY: "key", OKRI_MIGRATION_EXPORT_TOKEN: "never-copy" } }),
+      JSON.stringify({ type: "table", name: "__appgarden_migrations", rows: [{ id: 1 }] }),
       JSON.stringify({ type: "table", name: "users", rows: [{ id: "user-1", email: "owner@example.com", enabled: true }, { id: "user-2", email: null, payload: { base64: "AQI=" } }] }),
       JSON.stringify({ type: "object", key: "document-images/v1/owner/project/picture", contentType: "image/png", customMetadata: { ownerId: "owner" }, data: "AQID" }),
       JSON.stringify({ type: "complete" }),
@@ -24,6 +25,7 @@ test("the protected Sites stream becomes a data-only D1/R2 import", async () => 
     const sql = await readFile(join(output, "d1-data.sql"), "utf8");
     assert.match(sql, /^BEGIN;\nPRAGMA defer_foreign_keys = ON;/);
     assert.match(sql, /INSERT OR REPLACE INTO "users"/);
+    assert.doesNotMatch(sql, /__appgarden_migrations/);
     assert.match(sql, /X'0102'/);
     assert.match(sql, /COMMIT;\n$/);
     const runtime = await readFile(join(output, "runtime.env"), "utf8");

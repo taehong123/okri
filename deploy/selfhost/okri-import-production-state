@@ -136,7 +136,19 @@ spec:
           emptyDir: {}
 EOF
 
-${kubectl[@]} -n "$namespace" wait --for=condition=complete "job/$job" --timeout=30m
+deadline=$((SECONDS + 1800))
+while true; do
+  succeeded="$(${kubectl[@]} -n "$namespace" get "job/$job" -o jsonpath='{.status.succeeded}')"
+  failed="$(${kubectl[@]} -n "$namespace" get "job/$job" -o jsonpath='{.status.failed}')"
+  [[ "$succeeded" == "1" ]] && break
+  if [[ "${failed:-0}" -ge 1 ]]; then
+    ${kubectl[@]} -n "$namespace" logs "job/$job" >&2 || true
+    echo "Production state import job failed; service state will be restored." >&2
+    exit 1
+  fi
+  (( SECONDS < deadline )) || { echo "Timed out waiting for production state import." >&2; exit 1; }
+  sleep 2
+done
 ${kubectl[@]} -n "$namespace" logs "job/$job"
 
 # This streams the env file directly to Kubernetes; it neither writes secrets

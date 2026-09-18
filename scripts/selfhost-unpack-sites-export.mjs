@@ -34,6 +34,10 @@ try {
       continue;
     }
     if (record?.type === "table") {
+      // Sites keeps its own deployment bookkeeping in `__appgarden_*`.
+      // It is not part of the application schema and must never be imported
+      // into the self-hosted SQLite database.
+      if (typeof record.name === "string" && record.name.startsWith("__appgarden_")) continue;
       const table = identifier(record.name);
       if (!Array.isArray(record.rows)) throw new Error(`Invalid table rows for ${table}`);
       for (const row of record.rows) {
