@@ -18,7 +18,7 @@ ENV NODE_ENV=production \
     OKRI_BACKUP_PATH=/var/lib/okri/backups
 COPY --from=build /app/dist/standalone ./
 COPY --from=build /app/drizzle ./drizzle
-COPY --from=build /app/scripts/selfhost-migrate.mjs /app/scripts/selfhost-import-d1.mjs /app/scripts/selfhost-import-r2.mjs /app/scripts/selfhost-backup.mjs ./scripts/
+COPY --from=build /app/scripts/selfhost-migrate.mjs /app/scripts/selfhost-import-d1.mjs /app/scripts/selfhost-import-r2.mjs /app/scripts/selfhost-backup.mjs /app/scripts/selfhost-unpack-sites-export.mjs ./scripts/
 # The official Node image already owns UID/GID 1000 (`node`). Reusing it keeps
 # the filesystem contract aligned with the Kubernetes security context.
 RUN mkdir -p /var/lib/okri /tmp && chown -R node:node /var/lib/okri /tmp
