@@ -46,6 +46,9 @@
   creation source, while threaded invocations keep excluding the live command.
   This is a Slack-only conversation fix; `/api/mobile/v1` and native UI are
   unchanged.
+- Slack MCP answers now convert escaped/CommonMark emphasis to Slack mrkdwn so
+  headings render as bold text instead of literal asterisks. This is Slack-only;
+  `/api/mobile/v1` and native UI are unchanged.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

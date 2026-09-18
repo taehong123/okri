@@ -11,6 +11,7 @@ import {
   type RequestAuthorization,
 } from "@/lib/pace-data";
 import { createSlackMemberLinkUrl, dailyMemberBySlack, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import { formatSlackMrkdwn } from "@/lib/slack-mrkdwn";
 import {
   hasInlineSlackCreationDetails,
   hasSlackCreationSource,
@@ -452,7 +453,7 @@ Project creation must use manage_project. First prepare and publicly summarize t
 Short approval replies such as ㄱㄱ, 진행해, 확정, 승인, or 프로젝트 생성해줘 approve the latest exact proposal in this Slack thread. Continue from that proposal and never prepare or repeat another proposal after such approval.
 For other ordinary work actions, execute when the request is clear. Respect confirmation requirements and destructive guards from the MCP tool. Never bypass a tool error.
 When the user explicitly asks to delete a specific existing Task, resolve it from hidden MCP state or list_items and call trash_task with confirmed=true. Do not use archive_project for a Task and never claim that Task deletion is unavailable. If the target is not exact, ask one concise confirmation naming the Task instead of guessing.
-Your final answer is visible to everyone in the Slack thread. Write concise Korean Slack mrkdwn unless the thread clearly uses another language. State what changed or what still needs approval. Never expose internal IDs, review IDs, fingerprints, raw tool payloads, email addresses, tokens, hidden state, or implementation details. Do not use markdown tables.`;
+Your final answer is visible to everyone in the Slack thread. Write concise Korean Slack mrkdwn unless the thread clearly uses another language. For bold text use single Slack markers like *제목*, never CommonMark **제목** or escaped asterisks. State what changed or what still needs approval. Never expose internal IDs, review IDs, fingerprints, raw tool payloads, email addresses, tokens, hidden state, or implementation details. Do not use markdown tables.`;
 }
 
 function hasExplicitCreationIntent(value: string) {
@@ -607,7 +608,7 @@ function mergeSession(previous: StoredSession | null, executed: StoredToolTurn[]
 
 async function postPublic(token: string, event: AgentEvent, text: string) {
   return slackApi<{ ok?: boolean; ts?: string }>(token, "chat.postMessage", {
-    channel: event.channel, thread_ts: event.threadTs || event.ts, text,
+    channel: event.channel, thread_ts: event.threadTs || event.ts, text, mrkdwn: true,
   });
 }
 
@@ -680,7 +681,7 @@ function publicAnswer(value: string) {
     .replace(/\b[0-9a-f]{64}\b/giu, "[내부 검증값]")
     .replace(/\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/giu, "[이메일 비공개]")
     .trim().slice(0, 12_000);
-  return clean || "요청한 작업을 처리했습니다.";
+  return formatSlackMrkdwn(clean) || "요청한 작업을 처리했습니다.";
 }
 
 function parseArguments(value: string) {
