@@ -47,7 +47,19 @@ restore_service() {
   ${kubectl[@]} -n "$namespace" patch cronjob okri-scheduled-jobs --type=merge \
     -p "{\"spec\":{\"suspend\":${original_scheduler_suspend:-false}}}" >/dev/null 2>&1 || true
 }
-trap restore_service ERR INT TERM
+backup_ready=false
+restore_state() {
+  [[ "$backup_ready" == true ]] || return 0
+  rm -f "$state_dir/okri.sqlite" "$state_dir/okri.sqlite-shm" "$state_dir/okri.sqlite-wal"
+  [[ ! -f "$backup_dir/okri.sqlite" ]] || cp -a "$backup_dir/okri.sqlite" "$state_dir/okri.sqlite"
+  rm -rf "$state_dir/storage"
+  [[ ! -d "$backup_dir/storage" ]] || cp -a "$backup_dir/storage" "$state_dir/storage"
+}
+abort_import() {
+  restore_state
+  restore_service
+}
+trap abort_import ERR INT TERM
 
 ${kubectl[@]} -n "$namespace" patch cronjob okri-scheduled-jobs --type=merge -p '{"spec":{"suspend":true}}'
 ${kubectl[@]} -n "$namespace" scale deployment/okri --replicas=0
@@ -57,6 +69,13 @@ ${kubectl[@]} -n "$namespace" wait --for=delete pod -l app.kubernetes.io/name=ok
 mkdir -p "$backup_dir"
 [[ ! -f "$state_dir/okri.sqlite" ]] || cp -a "$state_dir/okri.sqlite" "$backup_dir/okri.sqlite"
 [[ ! -d "$state_dir/storage" ]] || cp -a "$state_dir/storage" "$backup_dir/storage"
+backup_ready=true
+
+# The source is a full replacement, not a merge. Clear the isolated target
+# only after its rollback copy is complete, so stale rows or object metadata
+# cannot make a retry fail or survive the handoff.
+rm -f "$state_dir/okri.sqlite" "$state_dir/okri.sqlite-shm" "$state_dir/okri.sqlite-wal"
+rm -rf "$state_dir/storage"
 
 ${kubectl[@]} -n "$namespace" delete job "$job" --ignore-not-found --wait=true
 cat <<EOF | ${kubectl[@]} -n "$namespace" apply -f -
@@ -144,6 +163,8 @@ while true; do
   if [[ "${failed:-0}" -ge 1 ]]; then
     ${kubectl[@]} -n "$namespace" logs "job/$job" >&2 || true
     echo "Production state import job failed; service state will be restored." >&2
+    abort_import
+    trap - ERR INT TERM
     exit 1
   fi
   (( SECONDS < deadline )) || { echo "Timed out waiting for production state import." >&2; exit 1; }
