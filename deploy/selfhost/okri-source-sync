@@ -10,17 +10,24 @@ readonly image_repo=registry.allvibe.ai/okri/app
 readonly state_dir=/var/lib/okri
 readonly nerdctl=(nerdctl --address /run/k3s/containerd/containerd.sock --namespace k8s.io)
 
-exec 9>/run/okri-source-sync.lock
-flock -n 9 || exit 0
+if [[ "${OKRI_SYNC_REEXEC:-}" != "1" ]]; then
+  exec 9>/run/okri-source-sync.lock
+  flock -n 9 || exit 0
 
-mkdir -p "$state_dir"
-if [[ ! -d "$repo_dir/.git" ]]; then
-  install -d -m 0755 /srv/okri
-  git clone --depth 1 --branch main "$remote_url" "$repo_dir"
-else
-  git -C "$repo_dir" remote set-url origin "$remote_url"
-  git -C "$repo_dir" fetch --depth 1 origin main
-  git -C "$repo_dir" reset --hard origin/main
+  mkdir -p "$state_dir"
+  if [[ ! -d "$repo_dir/.git" ]]; then
+    install -d -m 0755 /srv/okri
+    git clone --depth 1 --branch main "$remote_url" "$repo_dir"
+  else
+    git -C "$repo_dir" remote set-url origin "$remote_url"
+    git -C "$repo_dir" fetch --depth 1 origin main
+    git -C "$repo_dir" reset --hard origin/main
+  fi
+
+  # Source changes to this deployment script take effect with the same Git
+  # release. The tiny installed launcher is only a first-run bootstrap.
+  export OKRI_SYNC_REEXEC=1
+  exec "$repo_dir/deploy/selfhost/okri-source-sync"
 fi
 
 commit="$(git -C "$repo_dir" rev-parse HEAD)"
