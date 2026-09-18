@@ -19,8 +19,9 @@ ENV NODE_ENV=production \
 COPY --from=build /app/dist/standalone ./
 COPY --from=build /app/drizzle ./drizzle
 COPY --from=build /app/scripts/selfhost-migrate.mjs /app/scripts/selfhost-import-d1.mjs /app/scripts/selfhost-import-r2.mjs /app/scripts/selfhost-backup.mjs ./scripts/
-RUN groupadd --gid 1000 okri && useradd --uid 1000 --gid 1000 --create-home --shell /usr/sbin/nologin okri \
-  && mkdir -p /var/lib/okri /tmp && chown -R okri:okri /var/lib/okri /tmp
-USER 1000:1000
+# The official Node image already owns UID/GID 1000 (`node`). Reusing it keeps
+# the filesystem contract aligned with the Kubernetes security context.
+RUN mkdir -p /var/lib/okri /tmp && chown -R node:node /var/lib/okri /tmp
+USER node
 EXPOSE 3000
 CMD ["node", "--experimental-sqlite", "server.js"]
