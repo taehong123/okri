@@ -12,6 +12,7 @@ import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/in
 import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { readGoogleSession } from "@/lib/google-session";
+import { completeOnboardingForInvitedWorkspace } from "@/lib/account-onboarding";
 import {
   activityLog,
   aiUsageEvents,
@@ -3318,6 +3319,7 @@ export async function acceptWorkspaceInvitation(authorization: RequestAuthorizat
     )).limit(1);
     if (!workspace || !member) throw new Error("Accepted workspace membership could not be found");
     await setActiveWorkspace(authorization.userId, invitation.workspaceId);
+    await completeOnboardingForInvitedWorkspace(env.DB, authorization.userId, workspace.id, workspace.name);
     return {
       accepted: true,
       workspaceId: workspace.id,
@@ -3366,6 +3368,7 @@ export async function acceptWorkspaceInvitation(authorization: RequestAuthorizat
   await setActiveWorkspace(authorization.userId, invitation.workspaceId);
   const [workspace] = await getDb().select().from(workspaces).where(eq(workspaces.id, invitation.workspaceId)).limit(1);
   if (!workspace) throw new Error("Workspace not found");
+  await completeOnboardingForInvitedWorkspace(env.DB, authorization.userId, workspace.id, workspace.name);
   return {
     accepted: true,
     workspaceId: workspace.id,

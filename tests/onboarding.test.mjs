@@ -94,6 +94,35 @@ test("pause and resume preserve all answers without completing setup", () => {
   assert.throws(() => account.nextSetupState(before, { action: "draft", revision: 0, draft: { ...before.draft, kind: "team" }, step: "goal" }), /setup_workspace_fixed/);
 });
 
+test("accepting an invitation completes first-run setup in the invited workspace", async () => {
+  const { sql, db } = database();
+  try {
+    const active = goalState();
+    sql.prepare("INSERT INTO users VALUES ('active', ?), ('done', ?), ('legacy', NULL)").run(
+      JSON.stringify(active),
+      JSON.stringify({ ...active, revision: 4, status: "completed" }),
+    );
+
+    const completed = await account.completeOnboardingForInvitedWorkspace(db, "active", "team-1", "Product team");
+    assert.equal(completed.status, "completed");
+    assert.equal(completed.step, "tour");
+    assert.equal(completed.revision, 1);
+    assert.equal(completed.workspaceId, "team-1");
+    assert.equal(completed.workspaceName, "Product team");
+    assert.equal(completed.draft.kind, "team");
+    assert.equal(completed.draft.workspaceChoiceId, "team-1");
+    assert.equal(completed.draft.workspaceName, "");
+    assert.equal(completed.draft.objective, active.draft.objective);
+
+    const retry = await account.completeOnboardingForInvitedWorkspace(db, "active", "team-1", "Product team");
+    assert.equal(retry.revision, 1);
+    const alreadyDone = await account.completeOnboardingForInvitedWorkspace(db, "done", "team-1", "Product team");
+    assert.equal(alreadyDone.revision, 4);
+    assert.equal(alreadyDone.workspaceId, "personal");
+    assert.equal(await account.completeOnboardingForInvitedWorkspace(db, "legacy", "team-1", "Product team"), null);
+  } finally { sql.close(); }
+});
+
 test("revision guard aborts the whole batch and never overwrites another device", async () => {
   const { sql, db } = database();
   try {

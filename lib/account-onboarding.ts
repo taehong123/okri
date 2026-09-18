@@ -9,6 +9,33 @@ export async function readOnboarding(db: D1Database, userId: string) {
   return { exists: Boolean(row), raw: row?.onboarding_state ?? null, state: parseOnboarding(row?.onboarding_state) };
 }
 
+export async function completeOnboardingForInvitedWorkspace(
+  db: D1Database,
+  userId: string,
+  workspaceId: string,
+  workspaceName: string,
+) {
+  await db.prepare(`UPDATE users SET onboarding_state = json_set(
+      onboarding_state,
+      '$.revision', COALESCE(json_extract(onboarding_state, '$.revision'), 0) + 1,
+      '$.status', 'completed',
+      '$.step', 'tour',
+      '$.workspaceId', ?,
+      '$.workspaceName', ?,
+      '$.draft.kind', 'team',
+      '$.draft.workspaceChoiceId', ?,
+      '$.draft.workspaceName', ''
+    )
+    WHERE id = ?
+      AND onboarding_state IS NOT NULL
+      AND json_valid(onboarding_state)
+      AND json_extract(onboarding_state, '$.version') = 1
+      AND json_extract(onboarding_state, '$.status') IN ('active', 'paused')`)
+    .bind(workspaceId, workspaceName, workspaceId, userId)
+    .run();
+  return (await readOnboarding(db, userId)).state;
+}
+
 // First statement in each write batch: a stale revision aborts the WHOLE batch.
 // JSON validation intentionally raises an SQLite error, never a partial no-op.
 export function setupGuard(db: D1Database, userId: string, raw: string | null, next: OnboardingState) {

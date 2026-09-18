@@ -22,6 +22,9 @@
   those editors require a later binary and dedicated upload/privacy validation.
 - Web first-run goal coaching remains web-only. Native first sign-in creates the
   same empty personal workspace and exposes the core creation screens directly.
+- Web invitation acceptance now completes first-run onboarding in the invited
+  workspace instead of opening team creation. `/api/mobile/v1` and native first
+  sign-in remain unchanged; this is a web-only invitation-flow correction.
 - Windows local-agent setup, integration administration and PayPal/card billing
   remain web-only. Native v1 contains no purchase link, plan promotion or payment
   SDK, so store commerce declarations remain false.

@@ -1056,6 +1056,7 @@ test("uses verified Google identities and explicit pending workspace invitations
   assert.match(previewRoute, /previewWorkspaceInvitation/);
   assert.match(acceptRoute, /acceptWorkspaceInvitation/);
   assert.match(acceptRoute, /okri_workspace_id/);
+  assert.equal((paceData.match(/completeOnboardingForInvitedWorkspace\(env\.DB,/g) || []).length, 2);
   assert.match(page, /function InvitationDialog/);
   assert.match(page, /대기 중인 초대/);
   assert.match(page, /재전송/);
