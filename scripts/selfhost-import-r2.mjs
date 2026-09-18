@@ -2,7 +2,9 @@ import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve, sep } from "node:path";
 
-const importRoot = resolve(process.env.OKRI_R2_EXPORT_PATH?.trim() || "");
+const importInput = process.env.OKRI_R2_EXPORT_PATH?.trim();
+if (!importInput) throw new Error("Set OKRI_R2_EXPORT_PATH to an R2 export folder containing manifest.json");
+const importRoot = resolve(importInput);
 const storageRoot = resolve(process.env.OKRI_STORAGE_PATH?.trim() || "/var/lib/okri/storage");
 const manifestPath = join(importRoot, "manifest.json");
 if (!existsSync(manifestPath)) throw new Error("Set OKRI_R2_EXPORT_PATH to an R2 export folder containing manifest.json");
@@ -13,15 +15,25 @@ if (manifest?.version !== 1 || !Array.isArray(manifest.objects)) {
 if (existsSync(storageRoot) && existsSync(join(storageRoot, ".okri-metadata"))) {
   throw new Error("Target storage already has metadata; refusing to merge an R2 export");
 }
+
+// Validate the complete export before writing even its first object. A failed
+// transfer is therefore retryable without contaminating an empty target.
+const objects = [];
+const keys = new Set();
+for (const raw of manifest.objects) {
+  if (!raw || typeof raw.key !== "string") throw new Error("R2 manifest contains an invalid object key");
+  const key = validKey(raw.key);
+  if (keys.has(key)) throw new Error(`R2 manifest repeats object: ${key}`);
+  keys.add(key);
+  const source = within(importRoot, join(importRoot, "objects", ...key.split("/")));
+  if (!existsSync(source)) throw new Error(`R2 export is missing object: ${key}`);
+  objects.push({ raw, key, source });
+}
 mkdirSync(storageRoot, { recursive: true });
 const metadataRoot = join(storageRoot, ".okri-metadata");
 mkdirSync(metadataRoot, { recursive: true });
 
-for (const raw of manifest.objects) {
-  if (!raw || typeof raw.key !== "string") throw new Error("R2 manifest contains an invalid object key");
-  const key = validKey(raw.key);
-  const source = within(importRoot, join(importRoot, "objects", ...key.split("/")));
-  if (!existsSync(source)) throw new Error(`R2 export is missing object: ${key}`);
+for (const { raw, key, source } of objects) {
   const target = within(storageRoot, join(storageRoot, ...key.split("/")));
   mkdirSync(dirname(target), { recursive: true });
   cpSync(source, target, { preserveTimestamps: true });

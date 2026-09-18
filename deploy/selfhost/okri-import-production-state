@@ -1,0 +1,152 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# One-time, manually invoked production handoff. It is deliberately not part
+# of the deployment timer: an operator must explicitly stage an export from
+# the old provider and invoke this script on allvibe-server as root.
+#
+# Required layout (root-owned and never committed):
+#   /srv/okri/import/d1-data.sql
+#   /srv/okri/import/r2/manifest.json
+#   /srv/okri/import/r2/objects/<exact R2 object key>
+#   /srv/okri/import/runtime.env
+
+readonly namespace=okri
+readonly state_dir=/var/lib/okri
+readonly import_dir="${1:-/srv/okri/import}"
+readonly image_repo=registry.allvibe.ai/okri/app
+readonly kubectl=(/usr/local/bin/k3s kubectl)
+
+if (( EUID != 0 )); then
+  echo "Run this production import as root on allvibe-server." >&2
+  exit 1
+fi
+for required in "$import_dir/d1-data.sql" "$import_dir/r2/manifest.json" "$import_dir/runtime.env" "$state_dir/release-sha"; do
+  [[ -f "$required" ]] || { echo "Missing required handoff artifact: $required" >&2; exit 1; }
+done
+grep -q '^OKRI_SCHEDULER_TOKEN=' "$import_dir/runtime.env" || {
+  echo "runtime.env must include a new OKRI_SCHEDULER_TOKEN." >&2
+  exit 1
+}
+
+# The import job runs as the same non-root UID as OKRI. The source stays out
+# of the Git checkout and remains readable only to root and that process UID.
+chown -R root:1000 "$import_dir"
+find "$import_dir" -type d -exec chmod 0750 {} +
+find "$import_dir" -type f -exec chmod 0640 {} +
+
+readonly original_replicas="$(${kubectl[@]} -n "$namespace" get deployment okri -o jsonpath='{.spec.replicas}')"
+readonly original_scheduler_suspend="$(${kubectl[@]} -n "$namespace" get cronjob okri-scheduled-jobs -o jsonpath='{.spec.suspend}')"
+readonly image="$image_repo:$(<"$state_dir/release-sha")"
+readonly backup_dir="$state_dir/pre-import-$(date -u +%Y%m%dT%H%M%SZ)"
+readonly job=okri-production-state-import
+
+restore_service() {
+  ${kubectl[@]} -n "$namespace" delete job "$job" --ignore-not-found --wait=false >/dev/null 2>&1 || true
+  ${kubectl[@]} -n "$namespace" scale deployment/okri --replicas="$original_replicas" >/dev/null 2>&1 || true
+  ${kubectl[@]} -n "$namespace" patch cronjob okri-scheduled-jobs --type=merge \
+    -p "{\"spec\":{\"suspend\":${original_scheduler_suspend:-false}}}" >/dev/null 2>&1 || true
+}
+trap restore_service ERR INT TERM
+
+${kubectl[@]} -n "$namespace" patch cronjob okri-scheduled-jobs --type=merge -p '{"spec":{"suspend":true}}'
+${kubectl[@]} -n "$namespace" scale deployment/okri --replicas=0
+${kubectl[@]} -n "$namespace" wait --for=delete pod -l app.kubernetes.io/name=okri,app.kubernetes.io/component=app --timeout=3m
+
+# Preserve an offline rollback copy while the application is stopped.
+mkdir -p "$backup_dir"
+[[ ! -f "$state_dir/okri.sqlite" ]] || cp -a "$state_dir/okri.sqlite" "$backup_dir/okri.sqlite"
+[[ ! -d "$state_dir/storage" ]] || cp -a "$state_dir/storage" "$backup_dir/storage"
+
+${kubectl[@]} -n "$namespace" delete job "$job" --ignore-not-found --wait=true
+cat <<EOF | ${kubectl[@]} -n "$namespace" apply -f -
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: $job
+  labels:
+    app.kubernetes.io/name: okri
+    app.kubernetes.io/component: production-import
+spec:
+  backoffLimit: 0
+  activeDeadlineSeconds: 1800
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: okri
+        app.kubernetes.io/component: production-import
+    spec:
+      restartPolicy: Never
+      automountServiceAccountToken: false
+      imagePullSecrets:
+        - name: registry-cred
+      securityContext:
+        fsGroup: 1000
+        fsGroupChangePolicy: OnRootMismatch
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: import
+          image: $image
+          imagePullPolicy: IfNotPresent
+          command: ["sh", "-c"]
+          args:
+            - >-
+              set -eu;
+              node --experimental-sqlite scripts/selfhost-migrate.mjs;
+              node --experimental-sqlite scripts/selfhost-import-d1.mjs;
+              node scripts/selfhost-import-r2.mjs
+          env:
+            - name: OKRI_DATA_PATH
+              value: /var/lib/okri
+            - name: OKRI_DB_PATH
+              value: /var/lib/okri/okri.sqlite
+            - name: OKRI_STORAGE_PATH
+              value: /var/lib/okri/storage
+            - name: OKRI_D1_EXPORT_PATH
+              value: /import/d1-data.sql
+            - name: OKRI_R2_EXPORT_PATH
+              value: /import/r2
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/okri
+            - name: import
+              mountPath: /import
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: data
+          hostPath:
+            path: /var/lib/okri
+            type: DirectoryOrCreate
+        - name: import
+          hostPath:
+            path: $import_dir
+            type: Directory
+        - name: tmp
+          emptyDir: {}
+EOF
+
+${kubectl[@]} -n "$namespace" wait --for=condition=complete "job/$job" --timeout=30m
+${kubectl[@]} -n "$namespace" logs "job/$job"
+
+# This streams the env file directly to Kubernetes; it neither writes secrets
+# to the repository nor prints their values. The supplied production values
+# atomically replace the isolated bootstrap secret.
+${kubectl[@]} -n "$namespace" create secret generic okri-runtime \
+  --from-env-file="$import_dir/runtime.env" --dry-run=client -o yaml | ${kubectl[@]} apply -f -
+${kubectl[@]} -n "$namespace" scale deployment/okri --replicas="$original_replicas"
+${kubectl[@]} -n "$namespace" rollout status deployment/okri --timeout=5m
+${kubectl[@]} -n "$namespace" patch cronjob okri-scheduled-jobs --type=merge \
+  -p "{\"spec\":{\"suspend\":${original_scheduler_suspend:-false}}}"
+trap - ERR INT TERM
+echo "Production state import completed. Offline rollback copy: $backup_dir"

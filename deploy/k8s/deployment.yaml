@@ -16,6 +16,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: okri
+        app.kubernetes.io/component: app
     spec:
       automountServiceAccountToken: false
       imagePullSecrets:

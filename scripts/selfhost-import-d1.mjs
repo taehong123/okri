@@ -4,8 +4,10 @@ import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const databasePath = resolve(process.env.OKRI_DB_PATH?.trim() || "/var/lib/okri/okri.sqlite");
-const sourcePath = resolve(process.env.OKRI_D1_EXPORT_PATH?.trim() || "");
-if (!sourcePath || !existsSync(sourcePath)) throw new Error("Set OKRI_D1_EXPORT_PATH to the data-only D1 SQL export");
+const sourceInput = process.env.OKRI_D1_EXPORT_PATH?.trim();
+if (!sourceInput) throw new Error("Set OKRI_D1_EXPORT_PATH to the data-only D1 SQL export");
+const sourcePath = resolve(sourceInput);
+if (!existsSync(sourcePath)) throw new Error("Set OKRI_D1_EXPORT_PATH to the data-only D1 SQL export");
 const sql = readFileSync(sourcePath, "utf8");
 if (!sql.trim()) throw new Error("D1 export is empty");
 if (/\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|INDEX|TRIGGER|VIEW)\b/i.test(sql)) {
@@ -30,7 +32,22 @@ try {
   // Cloudflare's data-only export is transaction-wrapped. Keeping that
   // transaction intact gives us an all-or-nothing import and avoids altering
   // its original statement order.
-  db.exec(sql);
+  // D1 exports are normally transaction-wrapped. If a valid data-only export
+  // is not, protect it with our own transaction so a malformed transfer can
+  // never leave a partially imported production database behind.
+  const hasTransaction = /\bBEGIN(?:\s+TRANSACTION)?\s*;/i.test(sql);
+  if (hasTransaction) {
+    db.exec(sql);
+  } else {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      db.exec(sql);
+      db.exec("COMMIT");
+    } catch (error) {
+      db.exec("ROLLBACK");
+      throw error;
+    }
+  }
   const violations = db.prepare("PRAGMA foreign_key_check").all();
   if (violations.length) throw new Error(`D1 import has ${violations.length} foreign-key violations`);
   db.prepare("INSERT INTO okri_selfhost_imports (source_checksum) VALUES (?)").run(checksum);

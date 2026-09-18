@@ -86,22 +86,25 @@ until the final verification says to retire it.
 
 1. Stop writes briefly on the old deployment (maintenance/read-only mode and
    pause external Slack delivery). Export D1 and R2 at that same point.
-2. Copy the two private artifacts onto the server under a protected temporary
-   directory owned by root; do not put them in `/srv/okri/source`.
-3. On the empty self-hosted data volume, run static migrations, import D1, then
-   import R2. The import scripts reject a non-empty target and prevent a merge
-   into an unknown database.
+2. Copy the artifacts onto the server under `/srv/okri/import`, owned by root;
+   do not put them in `/srv/okri/source`. The required layout is
+   `d1-data.sql`, `r2/manifest.json`, `r2/objects/<exact R2 key>`, and
+   `runtime.env` (the preserved production variables plus a new
+   `OKRI_SCHEDULER_TOKEN`).
+3. Run the single-use importer below. It suspends scheduled writes, stops the
+   application, creates an offline rollback copy, mounts the protected files
+   read-only into a non-root Job, runs migrations then D1 then R2, atomically
+   replaces the runtime secret, restores the application, and only then resumes
+   the scheduler. It never writes handoff data or secrets into Git.
 
    ```bash
-   kubectl -n okri exec deploy/okri -- node --experimental-sqlite scripts/selfhost-migrate.mjs
-   kubectl -n okri exec deploy/okri -- env OKRI_D1_EXPORT_PATH=/secure/d1-data.sql \
-     node --experimental-sqlite scripts/selfhost-import-d1.mjs
-   kubectl -n okri exec deploy/okri -- env OKRI_R2_EXPORT_PATH=/secure/r2-export \
-     node scripts/selfhost-import-r2.mjs
+   sudo /srv/okri/source/deploy/selfhost/okri-import-production-state
    ```
 
-   Mount the protected import directory into a one-off Job rather than copying
-   files into the application container in the actual run.
+   The importer rejects an existing user database, an invalid/missing R2
+   object, duplicate R2 keys, and a missing scheduler token. A failed transfer
+   leaves the old public route untouched and restores the isolated app; its
+   pre-import copy stays under `/var/lib/okri/pre-import-...` for recovery.
 4. Compare all supplied row counts, run `PRAGMA foreign_key_check`, verify a
    Workspace avatar, a project image/document image, Google sign-in, Slack
    signature handling, daily submission, and the frozen mobile v1 smoke suite.
