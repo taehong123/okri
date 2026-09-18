@@ -204,7 +204,10 @@ async function runMcpAgent(input: {
       }),
     ]);
     const limits = requestLimits(runtime, usage);
-    const sourceMessages = slackThreadSourceMessages(thread.messages, input.event.ts, input.botUserId);
+    // A root @OKRI message is both the invocation and its only available
+    // source. Keep it in context so channel-main invocations start a usable
+    // conversation; threaded invocations still exclude the current command.
+    const sourceMessages = slackThreadSourceMessages(thread.messages, input.event.ts, input.botUserId, !input.event.threadTs);
     const tools = selectTools(listed.tools, input.query, sourceMessages.map((entry) => entry.text).join("\n"));
     const conversation = sourceMessages.map((message) => ({
       author: authors.get(message.user) || (message.user === input.event.user ? input.authorization.displayName || "요청자" : "Slack 멤버"),

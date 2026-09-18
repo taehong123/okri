@@ -35,6 +35,14 @@ test("Slack source messages exclude the current mention and OKRI bot replies", (
   assert.deepEqual(context.slackThreadSourceMessages(messages, "1.2", "B1"), [messages[0]]);
 });
 
+test("a channel-main @OKRI message is retained as its own work source", () => {
+  const messages = [
+    { user: "U1", ts: "2.0", text: "<@B1> 주문 알림 연동 프로젝트 만들어줘" },
+    { user: "B1", ts: "2.1", text: "OKRI reply" },
+  ];
+  assert.deepEqual(context.slackThreadSourceMessages(messages, "2.0", "B1", true), [messages[0]]);
+});
+
 test("missing Slack thread messages state that nothing was saved", () => {
   assert.match(context.missingSlackThreadSourceMessage(true), /아무 업무도 저장하지 않았습니다/);
   assert.match(context.missingSlackThreadSourceMessage(false), /원본 스레드의 답글 입력창/);

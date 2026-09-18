@@ -30,8 +30,9 @@ export function slackThreadSourceMessages<T extends { user: string; text: string
   messages: T[],
   eventTs: string,
   botUserId: string,
+  includeInvocation = false,
 ) {
-  return messages.filter((message) => message.ts !== eventTs && message.user !== botUserId);
+  return messages.filter((message) => message.user !== botUserId && (includeInvocation || message.ts !== eventTs));
 }
 
 export function missingSlackThreadSourceMessage(hasThreadTs: boolean) {
