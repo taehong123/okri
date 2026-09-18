@@ -63,7 +63,7 @@ trap abort_import ERR INT TERM
 
 ${kubectl[@]} -n "$namespace" patch cronjob okri-scheduled-jobs --type=merge -p '{"spec":{"suspend":true}}'
 ${kubectl[@]} -n "$namespace" scale deployment/okri --replicas=0
-${kubectl[@]} -n "$namespace" wait --for=delete pod -l app.kubernetes.io/name=okri,app.kubernetes.io/component=app --timeout=3m
+${kubectl[@]} -n "$namespace" rollout status deployment/okri --timeout=3m
 
 # Preserve an offline rollback copy while the application is stopped.
 mkdir -p "$backup_dir"
