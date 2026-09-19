@@ -12,12 +12,16 @@ for (const theme of ["beige", "dark"]) {
       settings: { enabled: true, weekdays: [1, 2, 3, 4, 5], reminderTime: "09:00", summaryEnabled: true, summaryTime: "12:00", workStatuses: ["office", "remote", "skip"], timezone: "Asia/Seoul", installStatus: "connected", onboardingCompletedAt: "2026-09-01", lastError: "" },
       delivery: { status: "ready", targetCount: 1, scheduledCount: 1, pendingCount: 0, failedCount: 0 },
       channels: [{ id: "C-team", name: "daily", isPrivate: false }], failedPublications: [],
-      members: [{ memberId: "member-1", displayName: "긴 이름을 가진 팀 구성원", linked: true, preference: { enabled: true }, reminder: { status: "scheduled", postAt: Math.floor(Date.now() / 1000) + 86400, error: "" } }],
+      members: [
+        { memberId: "member-1", displayName: "긴 이름을 가진 팀 구성원", linked: true, preference: { enabled: true }, reminder: { status: "scheduled", postAt: Math.floor(Date.now() / 1000) + 86400, error: "" } },
+        { memberId: "member-2", displayName: "Slack 미연결 새 팀원", linked: false, preference: { enabled: true }, reminder: null },
+      ],
     };
     await page.route("**/api/slack/daily/settings", (route) => { expect(route.request().method()).toBe("GET"); return route.fulfill({ json: admin }); });
     await page.route("**/api/slack/onboarding", async (route) => {
       const body = route.request().postDataJSON(); writes.push(body);
       Object.assign(admin.settings, { summaryEnabled: body.summaryEnabled, summaryTime: body.summaryTime, workStatuses: body.workStatuses });
+      admin.members.forEach((member) => { member.preference.enabled = body.memberIds.includes(member.memberId); });
       return route.fulfill({ json: { admin, schedules: [], tests: { dm: { status: "skipped" }, channels: [] } } });
     });
     await page.goto("/?settings=workspace&tab=integrations&bot=daily");
@@ -31,12 +35,17 @@ for (const theme of ["beige", "dark"]) {
     await expect(workStatusSettings.getByRole("checkbox", { name: "스킵", exact: true })).toBeChecked();
     const toggle = panel.getByRole("checkbox", { name: "팀원·KR별 Task 요약 공유" });
     const time = panel.getByLabel("요약 공유 마감 시간", { exact: true });
+    const scope = panel.locator("fieldset").filter({ hasText: "데일리 범위" });
+    const unlinkedMember = scope.getByRole("checkbox", { name: "Slack 미연결 새 팀원 데일리 범위 포함" });
+    await expect(unlinkedMember).toBeChecked(); await expect(unlinkedMember).toBeEnabled();
+    await unlinkedMember.uncheck();
     await expect(toggle).toBeChecked(); await expect(time).toHaveValue("12:00");
     await toggle.focus(); await page.keyboard.press("Space");
     await expect(time).toHaveCount(0); expect(writes).toHaveLength(0);
     await panel.getByRole("button", { name: "변경사항 저장", exact: true }).click();
     await expect(page.locator(".daily-digest-summary")).toContainText("꺼짐");
     expect(writes[0]).toMatchObject({ summaryEnabled: false, summaryTime: "12:00", workStatuses: ["office", "remote", "skip"] });
+    expect(writes[0].memberIds).toEqual(["member-1"]);
     await page.locator(".slack-connected-title").getByRole("button", { name: "설정", exact: true }).click();
     await toggle.check(); await time.fill("13:30");
     await panel.getByRole("button", { name: "변경사항 저장", exact: true }).click();

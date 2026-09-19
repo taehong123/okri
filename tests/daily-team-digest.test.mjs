@@ -116,6 +116,25 @@ test("all submitted sends early once per channel and resubmission updates that m
   await h.api.runDueDailyDigests(h.raw, new Date(NOON.getTime() + 60_000), "a"); assert.equal(h.calls.length, 2);
 });
 
+test("new active members join the team daily scope before Slack linking and can be excluded", async (t) => {
+  const h = harness(t);
+  h.db.prepare("INSERT INTO workspace_members VALUES(?,?,?,?, 'active')").run("a3", "a", "새 멤버", "a3@test.invalid");
+  h.submit("a1"); h.submit("a2");
+  const digest = await h.api.loadDailyDigest(h.raw, "a", "2026-09-07");
+  assert.deepEqual(digest.members.map((member) => member.name), ["새 멤버", "한글 이름 1", "한글 이름 2"]);
+  await h.api.runDueDailyDigests(h.raw, NOW, "a");
+  assert.equal(h.calls.length, 0, "an included new member keeps the early summary open");
+  await h.api.runDueDailyDigests(h.raw, NOON, "a");
+  assert.equal(h.calls.length, 1);
+  assert.match(h.calls[0].text, /공유 2\/3명/);
+  assert.match(h.calls[0].text, /새 멤버.*미공유/);
+  h.db.prepare("INSERT INTO slack_daily_preferences VALUES('a','a3',0)").run();
+  await h.api.runDueDailyDigests(h.raw, new Date(NOON.getTime() + 60_000), "a");
+  assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].messageTs, "1.1");
+  assert.match(h.calls[1].text, /공유 2\/2명/);
+});
+
 test("deadline shares zero submissions and prominently marks each missing member rather than counting them as zero", async (t) => {
   const h = harness(t);
   await h.api.runDueDailyDigests(h.raw, new Date(NOON.getTime() - 60000), "a"); assert.equal(h.calls.length, 0);
@@ -129,9 +148,9 @@ test("deadline shares zero submissions and prominently marks each missing member
   assert.doesNotMatch(h.calls[1].text, /한글 이름 1: \*미공유\*/);
 });
 
-test("disabled, unconfigured, off-day, deleted workspace, no targets or no channels never send", async (t) => {
+test("disabled, unconfigured, off-day, deleted workspace, no connection, no targets or no channels never send", async (t) => {
   const h = harness(t);
-  for (const sql of ["UPDATE slack_daily_settings SET summary_enabled=0", "UPDATE slack_daily_settings SET enabled=0", "UPDATE slack_daily_settings SET onboarding_completed_at=NULL", "UPDATE slack_daily_settings SET weekdays='[0]'", "UPDATE workspaces SET scheduled_deletion_at='later'", "UPDATE workspace_members SET status='removed'", "DELETE FROM slack_member_links", "DELETE FROM slack_daily_channels", "INSERT INTO slack_daily_preferences VALUES('a','a1',0),('a','a2',0)"]) {
+  for (const sql of ["UPDATE slack_daily_settings SET summary_enabled=0", "UPDATE slack_daily_settings SET enabled=0", "UPDATE slack_daily_settings SET onboarding_completed_at=NULL", "UPDATE slack_daily_settings SET weekdays='[0]'", "UPDATE workspaces SET scheduled_deletion_at='later'", "UPDATE workspace_members SET status='removed'", "DELETE FROM slack_connections", "DELETE FROM slack_daily_channels", "INSERT INTO slack_daily_preferences VALUES('a','a1',0),('a','a2',0)"]) {
     h.db.exec("SAVEPOINT test_case"); h.db.exec(sql);
     await h.api.runDueDailyDigests(h.raw, NOON, "a"); assert.equal(h.calls.length, 0, sql);
     h.db.exec("ROLLBACK TO test_case; RELEASE test_case");

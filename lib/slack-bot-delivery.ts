@@ -280,8 +280,6 @@ async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjec
         AND s.onboarding_completed_at IS NOT NULL AND s.install_status = 'connected'`).bind(ownerId, subjectId).first<Record<string, string>>();
     if (!settings) return null;
     const members = await db.prepare(`SELECT m.id FROM workspace_members m
-      JOIN slack_member_links l ON l.owner_id = m.workspace_id AND l.member_id = m.id
-      JOIN slack_connections c ON c.owner_id = l.owner_id AND c.team_id = l.team_id
       LEFT JOIN slack_daily_preferences p ON p.owner_id = m.workspace_id AND p.member_id = m.id
       WHERE m.workspace_id = ? AND m.status = 'active' AND COALESCE(p.enabled, 1) = 1 ORDER BY m.id`).bind(ownerId).all<{ id: string }>();
     if (!members.results.length) return null;

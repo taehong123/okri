@@ -932,6 +932,8 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(page, /INTEGRATION_STATUS_CACHE_KEY/);
   assert.ok(page.includes("Promise.allSettled([googleRequest, slackRequest])"));
   assert.ok(page.includes('member.linked ? t("Slack 연결됨") : t("Slack 계정 미연결")'));
+  assert.match(page, /새 멤버는 기본 포함되며 Slack 미연결 멤버도 팀 요약에 집계됩니다/);
+  assert.match(page, /checked=\{member\.preference\.enabled\}/);
   assert.match(page, /SLACK_CHANNEL_REFRESH_MS = 15_000/);
   assert.match(page, /useLiveSlackChannels/);
   assert.match(page, /visibilitychange/);

@@ -392,7 +392,7 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   const currentSettings = await ensureDailySettingsRow(authorization.ownerId, connection);
   const workStatuses = input.workStatuses === undefined ? parseDailyWorkStatuses(currentSettings.workStatuses) : validateDailyWorkStatuses(input.workStatuses);
   const memberIds = [...new Set(input.memberIds)];
-  if (!memberIds.length) throw new Error("알림을 받을 멤버를 한 명 이상 선택해 주세요.");
+  if (!memberIds.length) throw new Error("데일리 범위에 포함할 멤버를 한 명 이상 선택해 주세요.");
 
   const [members, links] = await Promise.all([
     getDb().select().from(workspaceMembers).where(and(
@@ -402,9 +402,10 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   ]);
   const activeMemberIds = new Set(members.map((member) => member.id));
   const linkByMemberId = new Map(links.map((link) => [link.memberId, link]));
-  if (memberIds.some((memberId) => !activeMemberIds.has(memberId) || !linkByMemberId.has(memberId))) {
-    throw new Error("Slack에 자동 연결된 활성 멤버만 선택할 수 있습니다.");
+  if (memberIds.some((memberId) => !activeMemberIds.has(memberId))) {
+    throw new Error("활성 워크스페이스 멤버만 데일리 범위에 포함할 수 있습니다.");
   }
+  const selectedLinkedMemberIds = new Set(memberIds.filter((memberId) => linkByMemberId.has(memberId)));
 
   const selectedChannels = await prepareSlackDailyChannels(authorization.ownerId, input.channelIds);
   const summaryTime = input.summaryTime === undefined ? currentSettings.summaryTime : normalizeReminderTime(input.summaryTime);
@@ -479,7 +480,7 @@ export async function configureSlackDailyOnboarding(authorization: RequestAuthor
   await upsertSlackDailySettings(authorization.ownerId, { lastError: setupErrors.join(" · ") });
 
   return {
-    setupComplete: scheduleResults.length === memberIds.length && scheduleResults.every((entry) => entry.status === "scheduled"),
+    setupComplete: scheduleResults.length === selectedLinkedMemberIds.size && scheduleResults.every((entry) => entry.status === "scheduled"),
     admin: await getSlackDailySettings(authorization),
     tests: { dm: dmTest, channels: channelTests },
     schedules: scheduleResults,

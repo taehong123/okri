@@ -52,6 +52,10 @@
 - Slack Daily team summaries now update their existing channel message when a
   member submits or revises after the initial summary. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.
+- New active workspace members now join the Slack team-Daily scope by default,
+  including before their Slack account is linked; admins can explicitly exclude
+  them while DM delivery remains limited to linked members. This is Slack/web
+  administration only; `/api/mobile/v1` and native UI are unchanged.
 - The protected Sites-to-self-hosted transfer receiver and import unpacker are
   one-time infrastructure operations. They do not change `/api/mobile/v1`,
   native authentication, or any native UI.

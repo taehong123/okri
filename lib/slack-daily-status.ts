@@ -5,10 +5,9 @@ type DailyMember = {
 };
 
 export function dailyDeliveryHealth(settings: { enabled: boolean; onboardingCompletedAt: string | null; installStatus: string }, members: DailyMember[], now = Date.now()) {
-  // An unlinked member with no saved preference has never been a delivery
-  // target. Keep explicitly selected or previously scheduled lost links visible.
-  const targets = members.filter((member) => member.preference.enabled &&
-    (member.linked || member.preference.configured !== false || member.reminder !== null));
+  // Team-daily scope also includes unlinked members. Delivery health only tracks
+  // members who can receive a DM, plus lost links with a durable reservation.
+  const targets = members.filter((member) => member.preference.enabled && (member.linked || member.reminder !== null));
   const scheduled = targets.filter((member) => member.linked && member.reminder?.status === "scheduled" && member.reminder.postAt > now / 1000).length;
   const pending = targets.filter((member) => member.linked && member.reminder?.status === "scheduling").length;
   const failed = targets.length - scheduled - pending;

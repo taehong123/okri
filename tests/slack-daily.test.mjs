@@ -216,17 +216,15 @@ test("failed/missing/overdue/partial reservations never appear as ready", () => 
   assert.equal(status.dailyDeliveryHealth(settings, []).status, "failed");
 });
 
-test("health excludes never-selected unlinked members but retains selected or lost recipients", () => {
+test("health excludes scope-only unlinked members but retains lost recipients with reservations", () => {
   const settings = { enabled: true, onboardingCompletedAt: "configured", installStatus: "connected" };
   const ready = { linked: true, preference: { enabled: true, configured: true }, reminder: { status: "scheduled", postAt: 2000, error: "" } };
   const unlinked = { linked: false, preference: { enabled: true, configured: false }, reminder: null };
   assert.deepEqual(status.dailyDeliveryHealth(settings, [ready, unlinked], 1_000_000), {
     status: "ready", targetCount: 1, scheduledCount: 1, pendingCount: 0, failedCount: 0,
   });
-  for (const lost of [
-    { ...unlinked, preference: { enabled: true, configured: true } },
-    { ...unlinked, reminder: ready.reminder },
-  ]) assert.equal(status.dailyDeliveryHealth(settings, [ready, lost], 1_000_000).failedCount, 1);
+  assert.equal(status.dailyDeliveryHealth(settings, [ready, { ...unlinked, preference: { enabled: true, configured: true } }], 1_000_000).failedCount, 0);
+  assert.equal(status.dailyDeliveryHealth(settings, [ready, { ...unlinked, reminder: ready.reminder }], 1_000_000).failedCount, 1);
 });
 
 test("settings API uses actual recipient preferences, without adding an unlinked member to failures", async (t) => {
@@ -333,7 +331,7 @@ test("recovery is off the bootstrap critical path and independently registered i
   assert.match(await read("../worker/index.ts"), /ctx.waitUntil\(import\("@\/lib\/slack-daily"\)/);
   const route = await read("../app/api/slack/daily/settings/route.ts");
   assert.ok(route.indexOf("if (!canManageTeam(authorization))") < route.indexOf('payload.action === "repair"'));
-  assert.match(source, /setupComplete: scheduleResults.length === memberIds.length/);
+  assert.match(source, /setupComplete: scheduleResults.length === selectedLinkedMemberIds.size/);
 });
 
 test("two real workspace fixtures retain separate tokens, recipients, timezones and failure recovery", async (t) => {

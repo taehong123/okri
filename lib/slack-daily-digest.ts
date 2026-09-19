@@ -29,8 +29,7 @@ export function parseDigestSettings(input: Record<string, unknown>) {
 
 export async function loadDailyDigest(db: D1Database, ownerId: string, date: string): Promise<DailyDigest> {
   const members = await db.prepare(`SELECT m.id, COALESCE(NULLIF(TRIM(m.display_name), ''), m.email) AS name
-    FROM workspace_members m JOIN slack_member_links l ON l.owner_id = m.workspace_id AND l.member_id = m.id
-    JOIN slack_connections c ON c.owner_id = l.owner_id AND c.team_id = l.team_id
+    FROM workspace_members m
     LEFT JOIN slack_daily_preferences p ON p.owner_id = m.workspace_id AND p.member_id = m.id
     WHERE m.workspace_id = ? AND m.status = 'active' AND COALESCE(p.enabled, 1) = 1 ORDER BY m.display_name, m.id`)
     .bind(ownerId).all<Member>();
@@ -148,8 +147,6 @@ export async function runDueDailyDigests(db: D1Database, now = new Date(), owner
       if (!channels.results.length) continue;
       if (clock.time < setting.summary_time) {
         const missing = await db.prepare(`SELECT m.id FROM workspace_members m
-          JOIN slack_member_links l ON l.owner_id = m.workspace_id AND l.member_id = m.id
-          JOIN slack_connections c ON c.owner_id = l.owner_id AND c.team_id = l.team_id
           LEFT JOIN slack_daily_preferences p ON p.owner_id = m.workspace_id AND p.member_id = m.id
           WHERE m.workspace_id = ? AND m.status = 'active' AND COALESCE(p.enabled, 1) = 1
             AND NOT EXISTS (SELECT 1 FROM daily_submissions s WHERE s.owner_id = m.workspace_id AND s.member_id = m.id AND s.scrum_date = ?)
