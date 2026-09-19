@@ -617,7 +617,7 @@ async function updatePublic(token: string, event: AgentEvent, ts: string | undef
     await postPublic(token, event, text);
     return;
   }
-  await slackApi(token, "chat.update", { channel: event.channel, ts, text });
+  await slackApi(token, "chat.update", { channel: event.channel, ts, text, mrkdwn: true });
 }
 
 async function postPrivateLink(token: string, event: AgentEvent, text: string) {

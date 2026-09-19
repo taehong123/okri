@@ -14,3 +14,9 @@ test("Slack answers convert escaped and CommonMark emphasis to mrkdwn", () => {
   assert.equal(formatSlackMrkdwn("**완료 기준:** 알림이 전달됩니다."), "*완료 기준:* 알림이 전달됩니다.");
   assert.equal(formatSlackMrkdwn("\\*책임자:\\* 장재욱"), "*책임자:* 장재욱");
 });
+
+test("Slack answers normalize nested escaping and unescaped Markdown bullets", () => {
+  assert.equal(formatSlackMrkdwn("-** Title **:"), "• * Title *:");
+  assert.equal(formatSlackMrkdwn("\\\\*\\\\* Title \\\\*\\\\*"), "* Title *");
+  assert.equal(formatSlackMrkdwn("-\\\\*\\\\* Title \\\\*\\\\*:"), "• * Title *:");
+});

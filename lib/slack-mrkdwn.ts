@@ -6,8 +6,9 @@
 export function formatSlackMrkdwn(value: string) {
   return value
     // Escaped CommonMark is what users otherwise see as `\*\*제목:\*\*`.
-    .replace(/\\\*\\\*([^*\n]+?)\\\*\\\*/g, "*$1*")
+    .replace(/\\+\*\\+\*([^*\n]+?)\\+\*\\+\*/g, "*$1*")
     .replace(/\*\*([^*\n]+?)\*\*/g, "*$1*")
-    .replace(/\\\*([^*\n]+?)\\\*/g, "*$1*")
-    .replace(/^[\t ]*\\-\s+/gm, "• ");
+    .replace(/\\+\*([^*\n]+?)\\+\*/g, "*$1*")
+    .replace(/^[\t ]*(?:\\+)?-\s*/gm, "• ")
+    .replace(/\\+\*/g, "*");
 }

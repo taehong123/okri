@@ -82,6 +82,7 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /Slack MCP thread read failed/);
   assert.match(agent, /formatSlackMrkdwn/);
   assert.match(agent, /mrkdwn: true/);
+  assert.match(agent, /chat\.update[\s\S]{0,200}mrkdwn: true/);
   assert.match(agent, /requiredThreadScope/);
   assert.match(agent, /if \(thread\.readFailed\)/);
   assert.ok(agent.indexOf("if (thread.readFailed)") < agent.indexOf("const server = await createOkriServer"));
