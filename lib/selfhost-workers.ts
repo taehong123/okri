@@ -36,6 +36,14 @@ class LocalStatement {
     return this.readResult<T>();
   }
 
+  async raw<T = unknown[]>(): Promise<T[]> {
+    // Drizzle's D1 dialect maps selected fields by position and therefore
+    // calls D1PreparedStatement.raw(), not all(). Node SQLite returns named
+    // objects, so preserve SQLite's selected-column order as D1 does.
+    const rows = this.database.handle.prepare(this.query).all(...this.values) as Record<string, unknown>[];
+    return rows.map((row) => Object.keys(row).map((key) => row[key]) as unknown as T);
+  }
+
   async run(): Promise<D1Result> {
     return this.writeResult();
   }
@@ -70,6 +78,10 @@ class LocalD1Database {
 
   prepare(query: string) {
     return new LocalStatement(this, query);
+  }
+
+  close() {
+    this.handle.close();
   }
 
   async batch(statements: D1PreparedStatement[]): Promise<D1Result[]> {
@@ -203,6 +215,13 @@ function hash(bytes: Uint8Array) {
 
 let database: LocalD1Database | undefined;
 let bucket: LocalR2Bucket | undefined;
+
+/** Test-only lifecycle hook for isolated local SQLite bindings. */
+export function closeSelfhostBindingsForTest() {
+  database?.close();
+  database = undefined;
+  bucket = undefined;
+}
 
 function databaseBinding() {
   database ??= new LocalD1Database(process.env.OKRI_DB_PATH?.trim() || "/var/lib/okri/okri.sqlite");
