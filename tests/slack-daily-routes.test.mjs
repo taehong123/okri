@@ -19,7 +19,7 @@ const parseDigestSettings = new Function(`${digestCode}; return parseDigestSetti
 
 function harness() {
   const calls = [], pending = [], receipts = new Set();
-  const old = { id: "old", ownerId: "workspace", teamId: "T-old", botUserId: "U-bot", encryptedBotToken: "mock-cipher" };
+  const old = { id: "old", ownerId: "workspace", teamId: "T-old", botUserId: "UBOT123", encryptedBotToken: "mock-cipher" };
   const state = {
     authorization: { ownerId: "workspace", userId: "user", role: "owner" },
     oauth: { ownerId: "workspace", userId: "user", returnTo: "/?bot=daily" },
@@ -272,13 +272,13 @@ test("signed app mentions dispatch the public MCP conversation once", async () =
   h.state.target = h.old;
   const event = { event_id: "mention", team_id: "T-old", event: {
     type: "app_mention", channel_type: "channel", channel: "C-team", user: "U-member", ts: "1.2",
-    text: "<@U123ABC> 이번 스레드로 업무를 정리해줘",
+    text: "결제 오류를 수정하고 <@UOWNER123>에게 할당해줘 <@UBOT123>",
   } };
   await h.routes.events.POST(h.request("POST", event));
   await h.routes.events.POST(h.request("POST", event));
   await Promise.all(h.pending);
   assert.deepEqual(h.calls.filter((call) => call[0] === "mcp-conversation"), [[
-    "mcp-conversation", "workspace", "C-team", "U-member", "이번 스레드로 업무를 정리해줘",
+    "mcp-conversation", "workspace", "C-team", "U-member", "결제 오류를 수정하고 <@UOWNER123>에게 할당해줘",
   ]]);
 });
 

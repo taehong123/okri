@@ -38,6 +38,10 @@ function slackCommandReceiptId(teamId: string, event: SlackCommandEvent) {
   return `work:${teamId}:${event.channel}:${event.ts}:${event.user}`;
 }
 
+function withoutBotMention(text: string, botUserId: string) {
+  return text.replaceAll(`<@${botUserId}>`, " ").replace(/[ \t]{2,}/g, " ").trim();
+}
+
 export async function POST(request: Request) {
   const runtime = env as SlackRuntimeEnv;
   if (!slackConfigured(runtime)) return new Response("Slack is not configured", { status: 503 });
@@ -54,7 +58,7 @@ export async function POST(request: Request) {
   if (!connection) return new Response(null, { status: 200 });
   const commandEvent = isSlackCommandEvent(event) && event.user !== connection.botUserId ? event : null;
   const commandText = commandEvent?.type === "app_mention"
-    ? commandEvent.text.replace(/^<@[A-Z0-9]+>\s*/i, "")
+    ? withoutBotMention(commandEvent.text, connection.botUserId)
     : commandEvent?.text;
   const parsedCommand = commandText ? parseSlackWorkCommand(commandText) : null;
   const mcpConversation = commandEvent?.type === "app_mention";

@@ -45,5 +45,5 @@ test("a channel-main @OKRI message is retained as its own work source", () => {
 
 test("missing Slack thread messages state that nothing was saved", () => {
   assert.match(context.missingSlackThreadSourceMessage(true), /아무 업무도 저장하지 않았습니다/);
-  assert.match(context.missingSlackThreadSourceMessage(false), /원본 스레드의 답글 입력창/);
+  assert.match(context.missingSlackThreadSourceMessage(false), /같은 메시지에서 @OKRI/);
 });

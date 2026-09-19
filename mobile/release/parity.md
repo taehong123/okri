@@ -42,10 +42,10 @@
 - Self-hosted deployment support keeps the frozen `/api/mobile/v1` routes,
   native-session semantics and SQLite-compatible schema intact. This is an
   infrastructure migration only; no native UI or mobile release is claimed.
-- Slack channel-main `@OKRI` invocations now retain their own message as the
-  creation source, while threaded invocations keep excluding the live command.
-  This is a Slack-only conversation fix; `/api/mobile/v1` and native UI are
-  unchanged.
+- Slack channel-main `@OKRI` invocations retain their own message as the
+  creation source even when Slack thread lookup is unavailable, while threaded
+  invocations keep excluding the live command. This is a Slack-only conversation
+  fix; `/api/mobile/v1` and native UI are unchanged.
 - Slack MCP answers now convert escaped/CommonMark emphasis to Slack mrkdwn so
   headings render as bold text instead of literal asterisks. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.

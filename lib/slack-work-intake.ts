@@ -441,7 +441,14 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       if (!threadReadError) threadReadError = error;
     }
   }
-  if (threadReadError && !collected.length && !imageFiles.length) throw threadReadError;
+  if (threadReadError && !collected.length && !imageFiles.length) {
+    const channelMainText = event.threadTs ? "" : cleanSlackText(event.text);
+    if (channelMainText) {
+      collected.push({ user: event.user, text: channelMainText, ts: event.ts });
+    } else {
+      throw threadReadError;
+    }
+  }
   if (!collected.length) collected.push({ user: event.user, text: cleanSlackText(event.text) });
 
   let chars = 0;

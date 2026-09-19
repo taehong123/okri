@@ -127,6 +127,23 @@ test("Slack thread reading keeps the root when replies rejects its arguments", a
   assert.equal(thread.truncated, true);
 });
 
+test("Slack channel-main reading uses the event body when reply lookup fails", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    throw Object.assign(new Error("not_in_channel"), { code: "not_in_channel" });
+  });
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a",
+    text: "결제 오류 재현 조건을 문서화하고 수정해 줘 <@UBOT123>", ts: "3.0",
+  });
+  assert.deepEqual(requests, [{ method: "conversations.replies", body: { channel: "C1", ts: "3.0" } }]);
+  assert.deepEqual(thread.messages, [{
+    user: "member-a", text: "결제 오류 재현 조건을 문서화하고 수정해 줘", ts: "3.0",
+  }]);
+  assert.equal(thread.truncated, true);
+});
+
 test("Slack work draft retries a rejected structured response with JSON compatibility mode", async () => {
   const requests = [];
   const originalFetch = globalThis.fetch;
@@ -168,7 +185,7 @@ test("Slack work draft retries a rejected structured response with JSON compatib
   }
 });
 
-test("Slack work draft never falls back to a request when Slack cannot read the thread", async () => {
+test("Slack work draft never falls back to a request when a referenced thread cannot be read", async () => {
   let modelCalled = false;
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async () => {
@@ -184,7 +201,7 @@ test("Slack work draft never falls back to a request when Slack cannot read the 
     const { prepareSlackWorkDraft } = load(async () => { throw slackError; }, { env: runtime });
     await assert.rejects(() => prepareSlackWorkDraft({
       authorization: { ownerId: "workspace-a", userId: "user-a" }, memberId: "member-a", token: "token",
-      event: { channel: "C1", channelType: "group", user: "member-a", text: "고객 오류 화면을 수정해 줘", ts: "1.2" },
+      event: { channel: "C1", channelType: "group", user: "member-a", text: "고객 오류 화면을 수정해 줘", ts: "1.2", threadTs: "1.0" },
       query: "고객 오류 화면을 수정해 줘",
     }), /아무 업무도 저장하지 않았습니다/);
     assert.equal(modelCalled, false);

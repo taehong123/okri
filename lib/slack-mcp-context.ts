@@ -38,7 +38,7 @@ export function slackThreadSourceMessages<T extends { user: string; text: string
 export function missingSlackThreadSourceMessage(hasThreadTs: boolean) {
   return hasThreadTs
     ? "Slack에서 원본 스레드 내용을 받지 못해 아무 업무도 저장하지 않았습니다. 해당 채널에 OKRI가 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요."
-    : "현재 @OKRI 호출이 원본 Slack 스레드 밖의 메시지로 들어와 위 내용을 읽을 수 없습니다. 아무 업무도 저장하지 않았습니다. 원본 스레드의 답글 입력창에서 @OKRI를 불러 주세요.";
+    : "Slack 채널 본문에 처리할 구체적인 업무 내용이 없어 아무 업무도 저장하지 않았습니다. 본문에 업무 내용을 적고 같은 메시지에서 @OKRI를 불러 주세요.";
 }
 
 function normalizeSlackText(value: string) {
