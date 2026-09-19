@@ -49,6 +49,9 @@
 - Slack MCP answers now convert escaped/CommonMark emphasis to Slack mrkdwn so
   headings render as bold text instead of literal asterisks. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.
+- Slack Daily team summaries now update their existing channel message when a
+  member submits or revises after the initial summary. This is Slack-only;
+  `/api/mobile/v1` and native UI are unchanged.
 - The protected Sites-to-self-hosted transfer receiver and import unpacker are
   one-time infrastructure operations. They do not change `/api/mobile/v1`,
   native authentication, or any native UI.

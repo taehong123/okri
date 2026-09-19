@@ -143,9 +143,8 @@ export async function runDueDailyDigests(db: D1Database, now = new Date(), owner
     try {
       const clock = digestClock(now, setting.timezone);
       if (!(JSON.parse(setting.weekdays) as number[]).includes(clock.weekday)) continue;
-      const channels = await db.prepare(`SELECT c.channel_id FROM slack_daily_channels c WHERE c.owner_id = ?
-        AND NOT EXISTS (SELECT 1 FROM slack_bot_deliveries d WHERE d.owner_id = c.owner_id AND d.bot_kind = 'daily_digest'
-          AND d.event_key = ? || '/' || c.channel_id || '/0') ORDER BY c.channel_id`).bind(setting.owner_id, clock.date).all<{ channel_id: string }>();
+      const channels = await db.prepare(`SELECT c.channel_id FROM slack_daily_channels c
+        WHERE c.owner_id = ? ORDER BY c.channel_id`).bind(setting.owner_id).all<{ channel_id: string }>();
       if (!channels.results.length) continue;
       if (clock.time < setting.summary_time) {
         const missing = await db.prepare(`SELECT m.id FROM workspace_members m

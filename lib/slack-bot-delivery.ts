@@ -25,15 +25,37 @@ export async function queueDailyDigest(db: D1Database, input: {
     throw new Error("데일리 요약 공유 설정을 확인해 주세요.");
   }
   const stamp = now.toISOString();
+  const policyJson = JSON.stringify(policy);
+  const connectionJson = connectionKey(connection);
+  const prefix = `${input.date}/${input.channel}/`;
+  const existing = await db.prepare(`SELECT * FROM slack_bot_deliveries
+    WHERE owner_id = ? AND bot_kind = 'daily_digest' AND event_key LIKE ? ORDER BY event_key`)
+    .bind(input.ownerId, `${prefix}%`).all<Row>();
+  // Never replace a payload while Slack may still be processing it. A later
+  // scheduler or submission will refresh the sent snapshot safely.
+  if (existing.results.some((row) => ["preparing", "sending", "uncertain"].includes(row.status))) return;
+  const byEventKey = new Map(existing.results.map((row) => [row.event_key, row]));
   // Persist every page together so an interrupted worker cannot lose later pages.
-  const pages = input.pages.map((page, index) => ({ page, index }));
-  await db.batch([...pages.slice(1), pages[0]].filter(Boolean).map(({ page, index }) => db.prepare(`INSERT INTO slack_bot_deliveries
-    (id, owner_id, bot_kind, subject_id, event_key, connection_key, policy, payload, status, attempts, retry_at, expires_at, last_error, created_at, updated_at)
-    SELECT ?, ?, 'daily_digest', ?, ?, ?, ?, ?, 'pending', 0, ?, ?, '', ?, ?
-    WHERE NOT EXISTS (SELECT 1 FROM slack_bot_deliveries WHERE owner_id = ? AND bot_kind = 'daily_digest' AND event_key = ?)
-    ON CONFLICT(owner_id, bot_kind, event_key) DO NOTHING`).bind(crypto.randomUUID(), input.ownerId, input.channel,
-      `${input.date}/${input.channel}/${index}`, connectionKey(connection), JSON.stringify(policy), JSON.stringify({ channel: input.channel, ...page }),
-      stamp, input.expiresAt, stamp, stamp, input.ownerId, `${input.date}/${input.channel}/0`)));
+  const pages = input.pages.map((page, index) => ({
+    eventKey: `${prefix}${index}`,
+    payload: JSON.stringify({ channel: input.channel, ...page }),
+  }));
+  const statements = [...pages.slice(1), pages[0]].filter(Boolean).flatMap(({ eventKey, payload }) => {
+    const current = byEventKey.get(eventKey);
+    if (!current) {
+      return [db.prepare(`INSERT INTO slack_bot_deliveries
+        (id, owner_id, bot_kind, subject_id, event_key, connection_key, policy, payload, status, attempts, retry_at, expires_at, last_error, created_at, updated_at)
+        VALUES (?, ?, 'daily_digest', ?, ?, ?, ?, ?, 'pending', 0, ?, ?, '', ?, ?)
+        ON CONFLICT(owner_id, bot_kind, event_key) DO NOTHING`).bind(crypto.randomUUID(), input.ownerId,
+        input.channel, eventKey, connectionJson, policyJson, payload, stamp, input.expiresAt, stamp, stamp)];
+    }
+    if (current.payload === payload && current.policy === policyJson && current.connection_key === connectionJson) return [];
+    return [db.prepare(`UPDATE slack_bot_deliveries SET connection_key = ?, policy = ?, payload = ?,
+      status = 'pending', attempts = 0, retry_at = ?, expires_at = ?, last_error = '', updated_at = ?
+      WHERE id = ? AND updated_at = ? AND status NOT IN ('preparing','sending','uncertain')`)
+      .bind(connectionJson, policyJson, payload, stamp, input.expiresAt, stamp, current.id, current.updated_at)];
+  });
+  if (statements.length) await db.batch(statements);
 }
 
 // Persist every page before the first Slack request. This keeps a long report
@@ -174,7 +196,7 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
     const key = (env as SlackRuntimeEnv).SLACK_TOKEN_ENCRYPTION_KEY;
     if (!key) throw new Error("Slack 암호화 설정이 없습니다.");
     const token = await decryptSlackSecret(connection.encrypted_bot_token, key);
-    let previousTimestamp: string | undefined;
+    let previousTimestamp: string | undefined = row.bot_kind === "daily_digest" ? row.message_ts ?? undefined : undefined;
     if (row.bot_kind === "daily_publication") {
       const previous = await db.prepare(`SELECT old.slack_message_ts FROM slack_daily_publications old
         JOIN slack_daily_publications current ON current.owner_id = old.owner_id AND current.member_id = old.member_id
@@ -207,7 +229,7 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
       // A deleted Daily card is a confirmed update rejection, so posting its
       // replacement cannot duplicate the missing message. Other failures keep
       // the normal no-duplicate safeguards.
-      if (row.bot_kind !== "daily_publication" || !previousTimestamp || !(failure instanceof SlackMessageError)
+      if (!["daily_publication", "daily_digest"].includes(row.bot_kind) || !previousTimestamp || !(failure instanceof SlackMessageError)
         || failure.outcome !== "rejected" || failure.code !== "message_not_found") throw failure;
       receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id });
     }

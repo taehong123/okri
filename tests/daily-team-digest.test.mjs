@@ -101,7 +101,7 @@ test("latest submitted Task snapshots, correct KR paths, Routine and unlinked bu
   assert.ok((await h.api.loadDailyDigest(h.raw, "a", "2026-09-07")).members.some((member) => member.name === "바뀐 이름"));
 });
 
-test("all submitted sends early once per channel, including a skip; scheduler and resubmission do not duplicate", async (t) => {
+test("all submitted sends early once per channel and resubmission updates that message", async (t) => {
   const h = harness(t);
   h.submit("a1", [task("a-t1")]);
   await h.api.runDueDailyDigests(h.raw, NOW, "a"); assert.equal(h.calls.length, 0);
@@ -109,8 +109,11 @@ test("all submitted sends early once per channel, including a skip; scheduler an
   await h.api.runDueDailyDigests(h.raw, NOW, "a");
   assert.equal(h.calls.length, 1); assert.equal(h.calls[0].channel, "C-a");
   assert.match(h.calls[0].text, /공유 2\/2명/); assert.match(h.calls[0].text, /스킵/);
-  h.submit("a1", [task("a-t2")], [], null, 2);
-  await h.api.runDueDailyDigests(h.raw, NOON, "a"); assert.equal(h.calls.length, 1);
+  h.submit("a1", [task("a-t1"), task("a-t2")], [], null, 2);
+  await h.api.runDueDailyDigests(h.raw, NOON, "a"); assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].messageTs, "1.1");
+  assert.match(h.calls[1].text, /공유 2\/2명/); assert.match(h.calls[1].text, /오늘 할 일 · 2건/);
+  await h.api.runDueDailyDigests(h.raw, new Date(NOON.getTime() + 60_000), "a"); assert.equal(h.calls.length, 2);
 });
 
 test("deadline shares zero submissions and prominently marks each missing member rather than counting them as zero", async (t) => {
@@ -119,6 +122,11 @@ test("deadline shares zero submissions and prominently marks each missing member
   await h.api.runDueDailyDigests(h.raw, NOON, "a"); assert.equal(h.calls.length, 1);
   assert.match(h.calls[0].text, /\*미공유 2명\*/); assert.match(h.calls[0].text, /한글 이름 1: \*미공유\*/);
   assert.doesNotMatch(h.calls[0].text, /한글 이름 1: 0건|다른 팀/);
+  h.submit("a1", [task("a-t1")]);
+  await h.api.runDueDailyDigests(h.raw, new Date(NOON.getTime() + 60_000), "a");
+  assert.equal(h.calls.length, 2); assert.equal(h.calls[1].messageTs, "1.1");
+  assert.match(h.calls[1].text, /공유 1\/2명/); assert.match(h.calls[1].text, /\*미공유 1명\*/);
+  assert.doesNotMatch(h.calls[1].text, /한글 이름 1: \*미공유\*/);
 });
 
 test("disabled, unconfigured, off-day, deleted workspace, no targets or no channels never send", async (t) => {
@@ -138,7 +146,7 @@ test("timezone local date, configured deadline and scheduled day are respected",
   await h.api.runDueDailyDigests(h.raw, new Date("2026-09-07T04:30:00Z"), "a"); assert.equal(h.calls.length, 1);
 });
 
-test("queued pages persist atomically and concurrent attempts reuse one immutable daily snapshot", async (t) => {
+test("queued pages persist atomically and a changed snapshot adds its missing continuation", async (t) => {
   const h = harness(t);
   const input = { ownerId: "a", channel: "C-a", date: "2026-09-07", memberIds: ["a1", "a2"], pages: [{ text: "page1", blocks: [] }, { text: "page2", blocks: [] }], expiresAt: new Date(NOON.getTime() + 3600000).toISOString() };
   h.db.exec("CREATE TRIGGER fail_page BEFORE INSERT ON slack_bot_deliveries WHEN NEW.event_key LIKE '%/0' BEGIN SELECT RAISE(ABORT,'failure'); END;");
@@ -147,9 +155,9 @@ test("queued pages persist atomically and concurrent attempts reuse one immutabl
   h.db.exec("DROP TRIGGER fail_page");
   await h.delivery.queueDailyDigest(h.raw, input, NOW);
   await h.delivery.queueDailyDigest(h.raw, { ...input, pages: [...input.pages, { text: "new page", blocks: [] }] }, NOW);
-  assert.equal(h.db.prepare("SELECT count(*) n FROM slack_bot_deliveries").get().n, 2);
+  assert.equal(h.db.prepare("SELECT count(*) n FROM slack_bot_deliveries").get().n, 3);
   await Promise.all([h.delivery.runDueSlackBotDeliveries(h.raw, NOW), h.delivery.runDueSlackBotDeliveries(h.raw, NOW)]);
-  assert.equal(h.calls.length, 2); assert.deepEqual(new Set(h.calls.map((call) => call.text)), new Set(["page1", "page2"]));
+  assert.equal(h.calls.length, 3); assert.deepEqual(new Set(h.calls.map((call) => call.text)), new Set(["page1", "page2", "new page"]));
 });
 
 test("pending summaries cancel after member removal, channel removal, disabling or day rollover", async (t) => {
