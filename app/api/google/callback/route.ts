@@ -5,6 +5,7 @@ import {
   exchangeGoogleCode,
   fetchGoogleProfile,
   googleConfigured,
+  googlePublicOrigin,
   type GoogleRuntimeEnv,
 } from "@/lib/google-oauth";
 import {
@@ -47,7 +48,7 @@ export async function GET(request: Request) {
     const profile = await fetchGoogleProfile(tokens.access_token);
     if (state.ownerId === GOOGLE_SIGN_IN_STATE_OWNER) {
       const headers = new Headers({
-        Location: new URL(returnTo, request.url).toString(),
+        Location: new URL(returnTo, googlePublicOrigin(request)).toString(),
         "Set-Cookie": await createGoogleSessionCookie(profile, runtime.GOOGLE_TOKEN_ENCRYPTION_KEY!),
       });
       appendGoogleSignInStateClearCookies(headers);
@@ -78,7 +79,7 @@ export async function GET(request: Request) {
 }
 
 function redirectWithAuthStatus(request: Request, returnTo: string, status: string, clearState = false) {
-  const url = new URL(returnTo, request.url);
+  const url = new URL(returnTo, googlePublicOrigin(request));
   url.searchParams.set("auth", status);
   const headers = new Headers({ Location: url.toString() });
   if (clearState) appendGoogleSignInStateClearCookies(headers);
@@ -95,7 +96,7 @@ function appendGoogleSignInStateClearCookies(headers: Headers) {
 }
 
 function redirectWithGoogleStatus(request: Request, returnTo: string, status: string) {
-  const url = new URL(returnTo, request.url);
+  const url = new URL(returnTo, googlePublicOrigin(request));
   url.searchParams.set("google", status);
   return Response.redirect(url.toString(), 303);
 }

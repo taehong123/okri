@@ -129,7 +129,7 @@ test("serves ChatGPT OAuth discovery metadata from well-known URLs", async () =>
   assert.deepEqual(authorizationServer.token_endpoint_auth_methods_supported, ["none"]);
 });
 
-test("Google OAuth keeps callback cookies on both official domains", async () => {
+test("OAuth URLs stay HTTPS behind the production proxy", async () => {
   const source = await readFile(new URL("../lib/google-oauth.ts", import.meta.url), "utf8");
   const compiled = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
@@ -138,10 +138,26 @@ test("Google OAuth keeps callback cookies on both official domains", async () =>
   const runtime = { GOOGLE_OAUTH_REDIRECT_URI: "https://okri.ai/api/google/callback" };
   assert.equal(oauthModule.googleRedirectUri(runtime, new Request("https://okri.ai/api/auth/google")), "https://okri.ai/api/google/callback");
   assert.equal(oauthModule.googleRedirectUri(runtime, new Request("https://okrptr.com/api/auth/google")), "https://okrptr.com/api/google/callback");
+  assert.equal(oauthModule.googleRedirectUri(runtime, new Request("http://okri.ai/api/auth/google")), "https://okri.ai/api/google/callback");
+  assert.equal(oauthModule.googleRedirectUri(runtime, new Request("http://okrptr.com/api/auth/google")), "https://okrptr.com/api/google/callback");
   assert.equal(oauthModule.googleRedirectUri(runtime, new Request("http://localhost/api/auth/google")), "https://okri.ai/api/google/callback");
   assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("https://okri.ai/api/auth/google"), "/?view=scrum"), null);
+  assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("http://okri.ai/api/auth/google"), "/?view=scrum"), null);
   assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("https://okrptr.com/api/auth/google"), "/?view=scrum"), null);
   assert.equal(oauthModule.googleCanonicalSignInUrl(runtime, new Request("https://okri.taehong0613.chatgpt.site/api/auth/google"), "/?view=scrum"), "https://okri.ai/api/auth/google?returnTo=%2F%3Fview%3Dscrum");
+
+  const slackSource = await readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8");
+  const slackCompiled = ts.transpileModule(slackSource, {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext },
+  }).outputText;
+  const slack = await import(`data:text/javascript;base64,${Buffer.from(slackCompiled).toString("base64")}`);
+  const slackRuntime = { SLACK_OAUTH_REDIRECT_URI: "https://okri.ai/api/slack/callback" };
+  const proxied = new Request("http://okri.ai/api/slack/auth");
+  assert.equal(slack.slackRedirectUri(slackRuntime, proxied), "https://okri.ai/api/slack/callback");
+  assert.equal(slack.slackCommandUrl(proxied), "https://okri.ai/api/slack/commands");
+  assert.equal(slack.slackInteractionUrl(proxied), "https://okri.ai/api/slack/interactions");
+  assert.equal(slack.slackEventsUrl(proxied), "https://okri.ai/api/slack/events");
+  assert.equal(slack.redirectWithSlackStatus(proxied, "/?settings=workspace", "setup_required").headers.get("location"), "https://okri.ai/?settings=workspace&slack=setup_required");
 });
 
 test("ships product metadata and removes starter assets", async () => {

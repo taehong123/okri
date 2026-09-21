@@ -38,18 +38,24 @@ export function googleConfigured(runtime: GoogleRuntimeEnv) {
   return Boolean(runtime.GOOGLE_CLIENT_ID && runtime.GOOGLE_CLIENT_SECRET && runtime.GOOGLE_TOKEN_ENCRYPTION_KEY);
 }
 
+export function googlePublicOrigin(request: Request) {
+  const requestUrl = new URL(request.url);
+  return ["okri.ai", "okrptr.com"].includes(requestUrl.hostname)
+    ? `https://${requestUrl.hostname}`
+    : requestUrl.origin;
+}
+
 export function googleRedirectUri(runtime: GoogleRuntimeEnv, request: Request) {
   const requestUrl = new URL(request.url);
   if (["okri.ai", "okrptr.com"].includes(requestUrl.hostname)) {
-    return new URL("/api/google/callback", requestUrl.origin).toString();
+    return new URL("/api/google/callback", googlePublicOrigin(request)).toString();
   }
   return runtime.GOOGLE_OAUTH_REDIRECT_URI || new URL("/api/google/callback", request.url).toString();
 }
 
 export function googleCanonicalSignInUrl(runtime: GoogleRuntimeEnv, request: Request, returnTo: string) {
-  const requestUrl = new URL(request.url);
   const callbackOrigin = new URL(googleRedirectUri(runtime, request)).origin;
-  if (callbackOrigin === requestUrl.origin) return null;
+  if (callbackOrigin === googlePublicOrigin(request)) return null;
   const canonical = new URL("/api/auth/google", callbackOrigin);
   canonical.searchParams.set("returnTo", returnTo);
   return canonical.toString();

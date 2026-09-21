@@ -63,24 +63,31 @@ export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);
 }
 
+export function slackPublicOrigin(request: Request) {
+  const requestUrl = new URL(request.url);
+  return ["okri.ai", "okrptr.com"].includes(requestUrl.hostname)
+    ? `https://${requestUrl.hostname}`
+    : requestUrl.origin;
+}
+
 export function slackRedirectUri(runtime: SlackRuntimeEnv, request: Request) {
   const requestUrl = new URL(request.url);
   if (["okri.ai", "okrptr.com"].includes(requestUrl.hostname)) {
-    return new URL("/api/slack/callback", requestUrl.origin).toString();
+    return new URL("/api/slack/callback", slackPublicOrigin(request)).toString();
   }
   return runtime.SLACK_OAUTH_REDIRECT_URI || new URL("/api/slack/callback", request.url).toString();
 }
 
 export function slackCommandUrl(request: Request) {
-  return new URL("/api/slack/commands", request.url).toString();
+  return new URL("/api/slack/commands", slackPublicOrigin(request)).toString();
 }
 
 export function slackInteractionUrl(request: Request) {
-  return new URL("/api/slack/interactions", request.url).toString();
+  return new URL("/api/slack/interactions", slackPublicOrigin(request)).toString();
 }
 
 export function slackEventsUrl(request: Request) {
-  return new URL("/api/slack/events", request.url).toString();
+  return new URL("/api/slack/events", slackPublicOrigin(request)).toString();
 }
 
 export function slackAuthorizationUrl(runtime: SlackRuntimeEnv, request: Request, state: string) {
@@ -118,7 +125,7 @@ export function classifySlackOAuthError(code: string, description = ""): SlackOA
 }
 
 export function redirectWithSlackStatus(request: Request, returnTo: string, status: SlackOAuthResultCode) {
-  const url = new URL(returnTo, request.url);
+  const url = new URL(returnTo, slackPublicOrigin(request));
   url.searchParams.set("slack", status);
   return Response.redirect(url.toString(), 303);
 }
