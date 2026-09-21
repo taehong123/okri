@@ -62,6 +62,7 @@ import {
   Sparkles,
   Table2,
   Target,
+  Ticket as TicketIcon,
   TextCursorInput,
   Trash2,
   Upload,
@@ -80,7 +81,7 @@ import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
 import { FirstRunSetup } from "./first-run-setup";
 import { canAutoOpenSetup, type OnboardingState } from "@/lib/onboarding";
-import { OkrFileSurface, type OkrFileCycleSummary } from "./okr-file-surface";
+import { OkrFileSurface, type OkrExecutionItem, type OkrFileCycleSummary } from "./okr-file-surface";
 import BillingView from "./billing-view";
 import GanttView from "./gantt-view";
 import { ChatAiUsage } from "./ai-usage-meter";
@@ -118,13 +119,13 @@ function localizedWeekdayLabel(day: number) {
     .format(new Date(Date.UTC(2026, 7, 2 + day)));
 }
 
-type View = "home" | "my_work" | "inbox" | "work" | "gantt" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
-const urlViews = new Set<View>(["my_work", "inbox", "work", "gantt", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
+type View = "home" | "my_work" | "inbox" | "work" | "tickets" | "gantt" | "routines" | "okr" | "data" | "scrum" | "recommendations" | "reviews" | "trash" | "integrations" | "billing";
+const urlViews = new Set<View>(["my_work", "inbox", "work", "tickets", "gantt", "routines", "okr", "data", "scrum", "recommendations", "reviews", "trash", "integrations", "billing"]);
 type NoticeTone = "success" | "error" | "info";
 type AppNotice = { id: number; message: string; tone: NoticeTone };
 
 function navigationFromLocation() {
-  if (typeof window === "undefined") return { view: "okr" as View, projectId: null as string | null, taskId: null as string | null };
+  if (typeof window === "undefined") return { view: "okr" as View, projectId: null as string | null, ticketId: null as string | null, taskId: null as string | null };
   const params = new URLSearchParams(window.location.search);
   const rawView = params.get("view");
   const requestedView = (rawView === "kr_data" ? "data" : rawView) as View | null;
@@ -132,6 +133,7 @@ function navigationFromLocation() {
   return {
     view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : params.get("guide") === "1" ? "home" : "okr",
     projectId,
+    ticketId: projectId ? null : params.get("ticket"),
     taskId: projectId ? null : params.get("task"),
   };
 }
@@ -149,7 +151,7 @@ function workspaceSettingsFromLocation() {
 }
 type Cadence = "daily" | "weekly" | "monthly" | "quarterly";
 type ItemStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked" | "archived";
-type ItemKind = "objective" | "key_result" | "initiative" | "project" | "task";
+type ItemKind = "objective" | "key_result" | "initiative" | "project" | "ticket" | "task";
 type Priority = "low" | "medium" | "high" | "urgent";
 type PropertyType = "text" | "number" | "select" | "date" | "checkbox" | "member" | "members";
 type PropertyValue = string | number | boolean | string[] | null;
@@ -392,7 +394,7 @@ type ProjectChatTarget = {
 
 type TaskContainerOption = {
   id: string;
-  kind: "project" | "routine";
+  kind: "project" | "ticket" | "routine";
   title: string;
 };
 
@@ -858,6 +860,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "okr", label: "OKR", icon: Target },
   { id: "work", get label() { return t("Project"); }, icon: Table2 },
   { id: "gantt", get label() { return t("간트"); }, icon: ChartGantt },
+  { id: "tickets", get label() { return t("Ticket"); }, icon: TicketIcon },
   { id: "inbox", get label() { return t("Task"); }, icon: Inbox },
   { id: "routines", get label() { return t("Routine"); }, icon: Repeat2 },
   { id: "data", get label() { return t("데이터"); }, icon: Database },
@@ -877,6 +880,7 @@ const viewTitles: Record<View, string> = {
   get inbox() { return t("Task"); },
   get my_work() { return t("내 업무"); },
   get work() { return t("Project"); },
+  get tickets() { return t("Ticket"); },
   get gantt() { return t("간트"); },
   get routines() { return t("Routine"); },
   okr: "OKR",
@@ -955,6 +959,7 @@ function WorkspaceApp() {
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(() => navigationFromLocation().taskId);
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(() => navigationFromLocation().projectId);
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(() => navigationFromLocation().ticketId);
   const [selectedDeleteItemIds, setSelectedDeleteItemIds] = useState<Set<string>>(new Set());
   const [trashingItems, setTrashingItems] = useState(false);
   const [googleStatus, setGoogleStatus] = useState<GoogleConnectionStatus | null>(null);
@@ -1217,12 +1222,14 @@ function WorkspaceApp() {
           setOkrEditorDirty(false);
           setActiveView(next.view);
           setSelectedProjectId(next.projectId);
+          setSelectedTicketId(next.ticketId);
           setSelectedTaskId(next.taskId);
         });
         return;
       }
       setActiveView(next.view);
       setSelectedProjectId(next.projectId);
+      setSelectedTicketId(next.ticketId);
       setSelectedTaskId(next.taskId);
       const settings = workspaceSettingsFromLocation();
       setWorkspaceSettingsOpen(settings.open);
@@ -1253,8 +1260,10 @@ function WorkspaceApp() {
   const activeItems = items.filter((entry) => !entry.archivedAt && entry.status !== "archived");
   const taskItems = activeItems.filter((entry) => entry.kind === "task");
   const executionItems = activeItems.filter((entry) => entry.kind === "project");
+  const ticketItems = activeItems.filter((entry) => entry.kind === "ticket");
   const taskContainerOptions: TaskContainerOption[] = [
     ...executionItems.map((entry) => ({ id: entry.id, kind: "project" as const, title: entry.title })),
+    ...ticketItems.map((entry) => ({ id: entry.id, kind: "ticket" as const, title: entry.title })),
     ...routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => ({ id: entry.id, kind: "routine" as const, title: entry.title })),
   ];
   const defaultOkrCycle = okrCycles.find((cycle) => cycle.status === "active") ?? okrCycles[0] ?? null;
@@ -1274,7 +1283,7 @@ function WorkspaceApp() {
     return counts;
   }, [activeItems, okrCycles]);
   const periodItems = activeItems.filter(
-    (entry) => cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective",
+    (entry) => entry.kind !== "ticket" && (cadence === "quarterly" || entry.cadence === cadence || entry.kind === "objective"),
   );
   const completed = periodItems.filter((entry) => isCompletedStatus(entry.status)).length;
   const blocked = periodItems.filter((entry) => entry.status === "blocked").length;
@@ -1284,6 +1293,7 @@ function WorkspaceApp() {
     : 0;
   const selectedTask = activeItems.find((entry) => entry.id === selectedTaskId && entry.kind === "task");
   const selectedProject = activeItems.find((entry) => entry.id === selectedProjectId && entry.kind === "project");
+  const selectedTicket = activeItems.find((entry) => entry.id === selectedTicketId && entry.kind === "ticket");
   const activeWorkspaces = workspaces.filter((entry) => !entry.scheduledDeletionAt);
   const searchDataRevision = useMemo(() => [items, routines], [items, routines]);
   const scheduledWorkspaces = workspaces.filter((entry) => Boolean(entry.scheduledDeletionAt));
@@ -1302,7 +1312,7 @@ function WorkspaceApp() {
   useEffect(() => {
     const timeout = window.setTimeout(() => setSelectedDeleteItemIds(new Set()), 0);
     return () => window.clearTimeout(timeout);
-  }, [activeView, currentWorkspace?.id, selectedProjectId, selectedTaskId]);
+  }, [activeView, currentWorkspace?.id, selectedProjectId, selectedTaskId, selectedTicketId]);
   const accountDisplayName = currentTeamMember?.displayName || authState.user?.displayName || "내 계정";
   const accountInitial = accountDisplayName.slice(0, 1).toLocaleUpperCase() || "O";
   const hasActiveObjective = activeItems.some((entry) => entry.kind === "objective");
@@ -1316,12 +1326,13 @@ function WorkspaceApp() {
     [assistantWorkspaceContext],
   );
 
-  function writeNavigation(view: View, projectId: string | null, taskId: string | null, mode: "push" | "replace" = "push") {
+  function writeNavigation(view: View, projectId: string | null, taskId: string | null, mode: "push" | "replace" = "push", ticketId: string | null = null) {
     const url = new URL(window.location.href);
     if (view === "home") url.searchParams.delete("view");
     else url.searchParams.set("view", view);
     if (projectId) url.searchParams.set("project", projectId); else url.searchParams.delete("project");
-    if (taskId && !projectId) url.searchParams.set("task", taskId); else url.searchParams.delete("task");
+    if (ticketId && !projectId) url.searchParams.set("ticket", ticketId); else url.searchParams.delete("ticket");
+    if (taskId && !projectId && !ticketId) url.searchParams.set("task", taskId); else url.searchParams.delete("task");
     url.searchParams.delete("search");
     url.searchParams.delete("focus");
     const state = { ...window.history.state, __okriNavigation: true };
@@ -1391,7 +1402,7 @@ function WorkspaceApp() {
     }
     const result = "kind" in target ? target : null;
     let targetCycleId = result?.cycleId ?? null;
-    const destination: SearchDestination = result ? { view: result.kind === "project" ? "work" : result.kind === "task" ? "inbox" : result.kind === "routine" ? "routines" : "okr" } : target as SearchDestination;
+    const destination: SearchDestination = result ? { view: result.kind === "project" ? "work" : result.kind === "ticket" ? "tickets" : result.kind === "task" ? "inbox" : result.kind === "routine" ? "routines" : "okr" } : target as SearchDestination;
     if (result) {
       const data = await hydrateSearchResult(result.kind, result.id, signal);
       if (!data) return false;
@@ -1404,11 +1415,12 @@ function WorkspaceApp() {
     const view = (destination.view ?? (activeView === "home" ? "okr" : activeView)) as View;
     setActiveView(view);
     setSelectedProjectId(result?.kind === "project" ? result.id : null);
+    setSelectedTicketId(result?.kind === "ticket" ? result.id : null);
     setSelectedTaskId(result?.kind === "task" ? result.id : null);
-    setSearchFocusId(result && !["project", "task"].includes(result.kind) ? result.id : null);
-    writeNavigation(view, result?.kind === "project" ? result.id : null, result?.kind === "task" ? result.id : null);
+    setSearchFocusId(result && !["project", "ticket", "task"].includes(result.kind) ? result.id : null);
+    writeNavigation(view, result?.kind === "project" ? result.id : null, result?.kind === "task" ? result.id : null, "push", result?.kind === "ticket" ? result.id : null);
     const url = new URL(window.location.href);
-    if (result && !["project", "task"].includes(result.kind)) url.searchParams.set("focus", result.id);
+    if (result && !["project", "ticket", "task"].includes(result.kind)) url.searchParams.set("focus", result.id);
     if (targetCycleId && view === "okr") url.searchParams.set("cycle", targetCycleId);
     for (const key of ["settings", "tab", "bot"]) url.searchParams.delete(key);
     if (destination.tab) {
@@ -1472,6 +1484,7 @@ function WorkspaceApp() {
         setOkrCreating(false);
         setOkrEditorDirty(false);
         setSelectedProjectId(null);
+        setSelectedTicketId(null);
         setSelectedTaskId(null);
         setActiveView(view);
         writeNavigation(view, null, null, mode);
@@ -1483,6 +1496,7 @@ function WorkspaceApp() {
       setOkrEditorDirty(false);
     }
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     setActiveView(view);
     writeNavigation(view, null, null, mode);
@@ -1496,17 +1510,28 @@ function WorkspaceApp() {
 
   function openTaskDetail(id: string) {
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(id);
     writeNavigation(activeView === "home" ? "inbox" : activeView, null, id);
   }
 
+  function openTicketDetail(id: string) {
+    setSelectedProjectId(null);
+    setSelectedTaskId(null);
+    setSelectedTicketId(id);
+    setActiveView("tickets");
+    writeNavigation("tickets", null, null, "push", id);
+  }
+
   function closeDetail() {
-    const hasDetailParam = new URLSearchParams(window.location.search).has("project") || new URLSearchParams(window.location.search).has("task");
+    const detailParams = new URLSearchParams(window.location.search);
+    const hasDetailParam = detailParams.has("project") || detailParams.has("ticket") || detailParams.has("task");
     if (hasDetailParam && window.history.state?.__okriNavigation) {
       window.history.back();
       return;
     }
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     writeNavigation(activeView === "home" ? "okr" : activeView, null, null, "replace");
   }
@@ -1514,19 +1539,23 @@ function WorkspaceApp() {
   useEffect(() => {
     if (workspaceDataState !== "ready") return;
     const missingProject = selectedProjectId && !items.some((entry) => entry.id === selectedProjectId && entry.kind === "project" && !entry.archivedAt);
+    const missingTicket = selectedTicketId && !items.some((entry) => entry.id === selectedTicketId && entry.kind === "ticket" && !entry.archivedAt);
     const missingTask = selectedTaskId && !items.some((entry) => entry.id === selectedTaskId && entry.kind === "task" && !entry.archivedAt);
-    if (!missingProject && !missingTask) return;
+    if (!missingProject && !missingTicket && !missingTask) return;
     const controller = new AbortController();
     const timeout = window.setTimeout(() => controller.abort("timeout"), 12_000);
-    const loadTimer = window.setTimeout(() => { void hydrateSearchResult(missingProject ? "project" : "task", (missingProject ? selectedProjectId : selectedTaskId)!, controller.signal).catch(() => {
+    const loadKind = missingProject ? "project" : missingTicket ? "ticket" : "task";
+    const loadId = missingProject ? selectedProjectId : missingTicket ? selectedTicketId : selectedTaskId;
+    const loadTimer = window.setTimeout(() => { void hydrateSearchResult(loadKind, loadId!, controller.signal).catch(() => {
       if (controller.signal.aborted && controller.signal.reason !== "timeout") return;
       setSelectedProjectId(null);
+      setSelectedTicketId(null);
       setSelectedTaskId(null);
       writeNavigation(activeView === "home" ? "okr" : activeView, null, null, "replace");
       showNotice(t("요청한 상세 항목을 찾을 수 없습니다."), "error");
     }).finally(() => window.clearTimeout(timeout)); }, 0);
     return () => { window.clearTimeout(loadTimer); window.clearTimeout(timeout); controller.abort(); };
-  }, [activeView, items, selectedProjectId, selectedTaskId, showNotice, workspaceDataState, hydrateSearchResult]);
+  }, [activeView, items, selectedProjectId, selectedTaskId, selectedTicketId, showNotice, workspaceDataState, hydrateSearchResult]);
 
   useEffect(() => {
     const user = authState.user;
@@ -1541,7 +1570,7 @@ function WorkspaceApp() {
     if (authState.user?.onboarding) return;
     if (!freshWorkspaceDataReady || !currentWorkspace || currentWorkspace.role !== "owner" || hasActiveObjective) return;
     const navigationParams = new URLSearchParams(window.location.search);
-    if (navigationParams.has("view") || navigationParams.has("project") || navigationParams.has("task")) return;
+    if (navigationParams.has("view") || navigationParams.has("project") || navigationParams.has("ticket") || navigationParams.has("task")) return;
     if (assistantAutoHandledWorkspaceRef.current === currentWorkspace.id) return;
     assistantAutoHandledWorkspaceRef.current = currentWorkspace.id;
     const cycle = selectedOkrCycle;
@@ -1557,6 +1586,7 @@ function WorkspaceApp() {
         targetCandidates: [],
       });
       setSelectedProjectId(null);
+      setSelectedTicketId(null);
       setSelectedTaskId(null);
       setActiveView("home");
     }, 0);
@@ -1579,6 +1609,7 @@ function WorkspaceApp() {
       targetCandidates: targeting.candidates,
     });
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     setMobileMenuOpen(false);
     setActiveView("home");
@@ -1751,16 +1782,18 @@ function WorkspaceApp() {
 
   async function moveSelectedItemsToTrash() {
     if (!selectedDeleteItemIds.size || trashingItems) return;
-    const selected = activeItems.filter((item) => selectedDeleteItemIds.has(item.id) && deletableItemIds.has(item.id) && (item.kind === "project" || item.kind === "task"));
+    const selected = activeItems.filter((item) => selectedDeleteItemIds.has(item.id) && deletableItemIds.has(item.id) && (item.kind === "project" || item.kind === "ticket" || item.kind === "task"));
     const projectIds = new Set(selected.filter((item) => item.kind === "project").map((item) => item.id));
-    const selectedStandaloneTaskIds = new Set(selected.filter((item) => item.kind === "task" && (!item.parentId || !projectIds.has(item.parentId))).map((item) => item.id));
-    const childTaskIds = new Set(activeItems.filter((item) => item.kind === "task" && item.parentId && projectIds.has(item.parentId)).map((item) => item.id));
+    const ticketIds = new Set(selected.filter((item) => item.kind === "ticket").map((item) => item.id));
+    const containerIds = new Set([...projectIds, ...ticketIds]);
+    const selectedStandaloneTaskIds = new Set(selected.filter((item) => item.kind === "task" && (!item.parentId || !containerIds.has(item.parentId))).map((item) => item.id));
+    const childTaskIds = new Set(activeItems.filter((item) => item.kind === "task" && item.parentId && containerIds.has(item.parentId)).map((item) => item.id));
     const taskIds = new Set([
       ...selectedStandaloneTaskIds,
       ...childTaskIds,
     ]);
     if (!selected.length) { setSelectedDeleteItemIds(new Set()); return; }
-    const message = t("선택한 Project {value1}개, 독립 Task {value2}개를 휴지통으로 이동할까요?\nProject와 함께 이동하는 하위 Task는 {value3}개이며, 중복을 제외한 전체 Task는 {value4}개입니다.\n휴지통에서 다시 복구할 수 있습니다.", { value1: messageValue(projectIds.size), value2: messageValue(selectedStandaloneTaskIds.size), value3: messageValue(childTaskIds.size), value4: messageValue(taskIds.size) });
+    const message = t("선택한 Project {value1}개, Ticket {value2}개, 독립 Task {value3}개를 휴지통으로 이동할까요?\n함께 이동하는 하위 Task는 {value4}개이며, 휴지통에서 다시 복구할 수 있습니다.", { value1: messageValue(projectIds.size), value2: messageValue(ticketIds.size), value3: messageValue(selectedStandaloneTaskIds.size), value4: messageValue(childTaskIds.size) });
     if (!await confirmAction({ title: t("선택 항목을 휴지통으로 이동"), message, confirmLabel: t("휴지통으로 이동"), danger: true })) return;
     setTrashingItems(true);
     try {
@@ -1769,21 +1802,22 @@ function WorkspaceApp() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ itemIds: selected.map((item) => item.id) }),
       });
-      const data = await response.json().catch(() => ({})) as { projectCount?: number; taskCount?: number; error?: string };
+      const data = await response.json().catch(() => ({})) as { projectCount?: number; ticketCount?: number; taskCount?: number; error?: string };
       if (!response.ok) throw new Error(apiError(data, "선택 항목을 휴지통으로 이동하지 못했습니다."));
       const refreshed = await fetch("/api/items", { cache: "no-store" });
       if (refreshed.ok) {
         const itemData = await refreshed.json() as { items: OkriItem[] };
         setItems(itemData.items);
       } else {
-        setItems((current) => current.filter((item) => !projectIds.has(item.id) && !taskIds.has(item.id)));
+        setItems((current) => current.filter((item) => !containerIds.has(item.id) && !taskIds.has(item.id)));
       }
       clearCachedBootstrap();
       setSelectedDeleteItemIds(new Set());
       setSelectedProjectId(null);
+      setSelectedTicketId(null);
       setSelectedTaskId(null);
       writeNavigation(activeView === "home" ? "okr" : activeView, null, null, "replace");
-      showNotice(t("Project {value1}개와 Task {value2}개를 휴지통으로 이동했습니다.", { value1: messageValue(data.projectCount ?? projectIds.size), value2: messageValue(data.taskCount ?? taskIds.size) }));
+      showNotice(t("Project {value1}개, Ticket {value2}개, Task {value3}개를 휴지통으로 이동했습니다.", { value1: messageValue(data.projectCount ?? projectIds.size), value2: messageValue(data.ticketCount ?? ticketIds.size), value3: messageValue(data.taskCount ?? taskIds.size) }));
     } catch (error) {
       showNotice(error instanceof Error ? error.message : t("선택 항목을 휴지통으로 이동하지 못했습니다."));
     } finally {
@@ -1814,6 +1848,29 @@ function WorkspaceApp() {
     showNotice(t("Project와 하위 Task {value1}개를 휴지통으로 이동했습니다.", { value1: messageValue(data.archivedTaskCount) }));
   }
 
+  async function trashTicketItem(ticket: OkriItem) {
+    if (!deletableItemIds.has(ticket.id)) {
+      showNotice(t("Ticket은 생성자만 휴지통으로 이동할 수 있습니다."), "error");
+      return;
+    }
+    const taskCount = activeItems.filter((item) => item.kind === "task" && item.parentId === ticket.id).length;
+    if (!await confirmAction({ title: t("Ticket을 휴지통으로 이동"), message: t("'{value1}' Ticket과 하위 Task {value2}개를 휴지통으로 이동합니다.\n휴지통에서 함께 복구할 수 있습니다.", { value1: messageValue(ticket.title), value2: messageValue(taskCount) }), confirmLabel: t("휴지통으로 이동"), danger: true })) return;
+    const response = await fetch("/api/item-trash", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ itemIds: [ticket.id] }),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({})) as { error?: string };
+      showNotice(apiError(data, "Ticket을 휴지통으로 이동하지 못했습니다."), "error");
+      return;
+    }
+    setItems((current) => current.filter((entry) => entry.id !== ticket.id && entry.parentId !== ticket.id));
+    clearCachedBootstrap();
+    closeDetail();
+    showNotice(t("Ticket과 하위 Task {value1}개를 휴지통으로 이동했습니다.", { value1: messageValue(taskCount) }));
+  }
+
   function openCreateItem(kind: ItemKind, cycleId: string | null = selectedOkrCycle?.id ?? null) {
     setCreateItemKind(kind);
     setCreateItemCycleId(cycleId);
@@ -1835,6 +1892,7 @@ function WorkspaceApp() {
       targetCandidates: [],
     });
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     setActiveView("home");
     writeNavigation("home", null, null);
@@ -1853,6 +1911,7 @@ function WorkspaceApp() {
       targetCandidates: [],
     });
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     setActiveView("home");
     writeNavigation("home", null, null);
@@ -1871,6 +1930,7 @@ function WorkspaceApp() {
       targetCandidates: [],
     });
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     setActiveView("home");
     writeNavigation("home", null, null);
@@ -1888,6 +1948,7 @@ function WorkspaceApp() {
       targetCandidates: [],
     });
     setSelectedProjectId(null);
+    setSelectedTicketId(null);
     setSelectedTaskId(null);
     setActiveView("home");
     writeNavigation("home", null, null);
@@ -1898,7 +1959,7 @@ function WorkspaceApp() {
     const [containerKind, containerId] = containerValue.split(":", 2);
     const container = containerValue ? taskContainerOptions.find((entry) => entry.kind === containerKind && entry.id === containerId) : null;
     const project = containerKind === "project" ? executionItems.find((entry) => entry.id === containerId) : null;
-    if (!titles.length || (containerValue && (!container || containerKind !== "project" && containerKind !== "routine"))) return false;
+    if (!titles.length || (containerValue && (!container || !["project", "ticket", "routine"].includes(containerKind)))) return false;
     try {
       const response = await fetch("/api/items", {
         method: "POST",
@@ -1907,7 +1968,7 @@ function WorkspaceApp() {
           titles,
           kind: "task",
           cycleId: container?.kind === "project" ? project?.cycleId ?? null : null,
-          parentId: container?.kind === "project" ? container.id : null,
+          parentId: container?.kind === "project" || container?.kind === "ticket" ? container.id : null,
           routineId: container?.kind === "routine" ? container.id : null,
           source: "web",
           assigneeMemberId,
@@ -1929,6 +1990,7 @@ function WorkspaceApp() {
 
   function openProjectPage(id: string) {
     setSelectedTaskId(null);
+    setSelectedTicketId(null);
     setSelectedProjectId(id);
     setActiveView("work");
     writeNavigation("work", id, null);
@@ -2179,6 +2241,7 @@ function WorkspaceApp() {
           setItems((current) => [...current, projectItem]);
           setOkrChatContext(null);
           setSelectedProjectId(null);
+          setSelectedTicketId(null);
           setSelectedTaskId(null);
           if (target.cycleId) {
             setSelectedOkrCycleId(target.cycleId);
@@ -2193,6 +2256,7 @@ function WorkspaceApp() {
       setItems((current) => [...current, projectItem, ...createdTasks]);
       setOkrChatContext(null);
       setSelectedProjectId(null);
+      setSelectedTicketId(null);
       setSelectedTaskId(null);
       if (target.cycleId) {
         setSelectedOkrCycleId(target.cycleId);
@@ -2348,7 +2412,7 @@ function WorkspaceApp() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
@@ -2358,7 +2422,7 @@ function WorkspaceApp() {
           {mobileNavItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
@@ -2368,8 +2432,8 @@ function WorkspaceApp() {
         <div className="sidebar-bottom">
           <AppInstallButton />
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>{t("AI 연결")}</span></button>
-          <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>{t("개인 앱 연동")}</span></button>
-          <button className={`nav-item ${activeView === "billing" && !selectedProject && !selectedTask ? "active" : ""}`} aria-current={activeView === "billing" && !selectedProject && !selectedTask ? "page" : undefined} onClick={() => navigateView("billing")}><CreditCard size={16} /><span>{t("요금제 및 결제")}</span></button>
+          <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>{t("개인 앱 연동")}</span></button>
+          <button className={`nav-item ${activeView === "billing" && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === "billing" && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} onClick={() => navigateView("billing")}><CreditCard size={16} /><span>{t("요금제 및 결제")}</span></button>
           <button className="profile-row" onClick={() => setPropertyPanelOpen(true)}><span className="avatar">{accountInitial}</span><span>{accountDisplayName}</span><MoreHorizontal size={15} /></button>
         </div>
       </aside>
@@ -2397,7 +2461,7 @@ function WorkspaceApp() {
             className="workspace-brand"
             onClick={() => navigateView("okr")}
             aria-label={t("홈으로 이동")}
-            aria-current={activeView === "okr" && !selectedProject && !selectedTask ? "page" : undefined}
+            aria-current={activeView === "okr" && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined}
           >
             <House size={18} />
           </button>
@@ -2406,7 +2470,7 @@ function WorkspaceApp() {
             className="workspace-mobile-home"
             onClick={goToMobileHome}
             aria-label={t("홈으로 이동")}
-            aria-current={activeView === "okr" && !selectedProject && !selectedTask ? "page" : undefined}
+            aria-current={activeView === "okr" && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined}
           >
             <House size={18} /><span>{t("홈")}</span>
           </button>
@@ -2429,6 +2493,8 @@ function WorkspaceApp() {
               <div className="page-create-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />{t("AI 대화로 추가")}</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />{t("직접 추가")}</button></div>
             ) : activeView === "work" ? (
               <div className="page-create-actions"><button onClick={() => openProjectCreationChat()}><Bot size={14} />{t("AI 대화로 추가")}</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />{t("직접 추가")}</button></div>
+            ) : activeView === "tickets" ? (
+              <button className="primary-action" onClick={() => openCreateItem("ticket", null)}><Plus size={14} />{t("Ticket 추가")}</button>
             ) : activeView === "routines" ? (
               <div className="page-create-actions"><button onClick={() => openRoutineCreationChat()}><Bot size={14} />{t("AI 대화로 추가")}</button><button className="primary-action" onClick={() => setRoutineCreateOpen(true)}><Plus size={14} />{t("직접 추가")}</button></div>
             ) : activeView === "reviews" ? (
@@ -2499,6 +2565,7 @@ function WorkspaceApp() {
             <>
           {activeView === "my_work" && <MyWorkView key={`${currentWorkspace?.id ?? ""}:${currentTeamMember?.id ?? ""}`} workspaceId={currentWorkspace?.id ?? ""} items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDeleteItem={(item) => deletableItemIds.has(item.id)} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} onClearItems={removeDeleteItems} onTrashSelected={() => void moveSelectedItemsToTrash()} trashing={trashingItems} />}
+          {activeView === "tickets" && <TicketListView tickets={ticketItems} tasks={taskItems} onOpenTicket={openTicketDetail} />}
           {activeView === "work" && (
             <section className="project-workspace">
               <TaskDatabase
@@ -2535,7 +2602,7 @@ function WorkspaceApp() {
                   cycle={okrCreating ? null : selectedOkrCycle ?? null}
                   creating={okrCreating}
                   readOnly={!canWriteWorkspace}
-                  executionItems={activeItems}
+                  executionItems={activeItems.filter((entry) => entry.kind !== "ticket") as OkrExecutionItem[]}
                   onSaved={applySavedOkrFile}
                   onSplit={(cycles) => {
                     setOkrCycles(cycles);
@@ -2729,6 +2796,7 @@ function WorkspaceApp() {
           onClose={closeDetail}
           onOpenParent={(kind, id) => {
             if (kind === "project") openProjectPage(id);
+            else if (kind === "ticket") openTicketDetail(id);
             else {
               navigateView("routines"); setSearchFocusId(id);
               const url = new URL(window.location.href); url.searchParams.set("focus", id);
@@ -2741,6 +2809,21 @@ function WorkspaceApp() {
           canDelete={deletableItemIds.has(selectedTask.id)}
           selected={selectedDeleteItemIds.has(selectedTask.id)}
           onToggleSelect={() => toggleDeleteSelection(selectedTask.id)}
+        />
+      )}
+      {selectedTicket && (
+        <TicketDetailPanel
+          ticket={selectedTicket}
+          tasks={taskItems}
+          teamMembers={teamMembers}
+          readOnly={!canWriteWorkspace}
+          canDelete={deletableItemIds.has(selectedTicket.id)}
+          onClose={closeDetail}
+          onPatch={(patch) => patchItem(selectedTicket.id, patch)}
+          onTaskCreated={(task) => setItems((current) => [...current, task])}
+          onOpenTask={openTaskDetail}
+          onTrash={() => void trashTicketItem(selectedTicket)}
+          onNotice={showNotice}
         />
       )}
       {currentWorkspace && authState.user && <WorkspaceSearch key={`${authState.user.id}:${currentWorkspace.id}`} open={searchOpen} identity={authState.user.id} workspaceId={currentWorkspace.id} workspaceName={currentWorkspace.name} personal={currentWorkspace.personal} members={teamMembers} cycles={okrCycles} refreshKey={searchDataRevision} onClose={closeSearch} onNavigate={navigateSearch} />}
@@ -3777,7 +3860,7 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
 function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onClose, onOpenParent, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
   task: OkriItem;
   readOnly: boolean;
-  onOpenParent: (kind: "project" | "routine", id: string) => void;
+  onOpenParent: (kind: "project" | "ticket" | "routine", id: string) => void;
   allItems: OkriItem[];
   routines: Routine[];
   teamMembers: TeamMember[];
@@ -3796,8 +3879,11 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
   const [savingChecklist, setSavingChecklist] = useState(false);
   const [checklistLoadError, setChecklistLoadError] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
-  const project = task.parentId ? byId.get(task.parentId) : undefined;
+  const linkedParent = task.parentId ? byId.get(task.parentId) : undefined;
+  const project = linkedParent?.kind === "project" ? linkedParent : undefined;
+  const ticket = linkedParent?.kind === "ticket" ? linkedParent : undefined;
   const projects = allItems.filter((entry) => entry.kind === "project" && !entry.archivedAt);
+  const tickets = allItems.filter((entry) => entry.kind === "ticket" && !entry.archivedAt);
   const initiative = project?.parentId ? byId.get(project.parentId) : undefined;
   const keyResult = initiative?.parentId ? byId.get(initiative.parentId) : undefined;
   const objective = keyResult?.parentId ? byId.get(keyResult.parentId) : undefined;
@@ -3805,8 +3891,8 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
   const routine = routineMatch?.active && routineMatch.systemKey !== "general" ? routineMatch : undefined;
   const projectDri = project ? assignmentLabel(project, "project_dri") : "미지정";
   const assigneeIds = task.assignments.filter((entry) => entry.role === "task_assignee").map((entry) => entry.memberId);
-  const taskContainerValue = project?.kind === "project" ? `project:${project.id}` : routine ? `routine:${routine.id}` : "";
-  const lineageTitle = routine ? `Routine · ${routine.title}` : project?.kind === "project" ? `Project · ${project.title}` : routineMatch?.systemKey === "general" ? "General 수집함" : "연결 끊김";
+  const taskContainerValue = project ? `project:${project.id}` : ticket ? `ticket:${ticket.id}` : routine ? `routine:${routine.id}` : "";
+  const lineageTitle = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : ticket ? `Ticket · ${ticket.title}` : routineMatch?.systemKey === "general" ? "General 수집함" : "연결 끊김";
   const propertyEntries: DocumentProperty[] = [
     { key: "status", label: t("상태"), value: statusLabels[task.status], primary: true },
     { key: "assignee", label: t("담당자"), value: assignmentLabel(task, "task_assignee"), primary: true },
@@ -3841,9 +3927,11 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
       void onPatch({ parentId: null, routineId: null, cycleId: null });
       return;
     }
-    if (kind === "project") {
+    if (kind === "project" || kind === "ticket") {
       const nextProject = projects.find((entry) => entry.id === id);
-      if (nextProject) void onPatch({ parentId: nextProject.id, routineId: null, cycleId: nextProject.cycleId });
+      const nextTicket = tickets.find((entry) => entry.id === id);
+      const nextParent = kind === "project" ? nextProject : nextTicket;
+      if (nextParent) void onPatch({ parentId: nextParent.id, routineId: null, cycleId: nextParent.kind === "project" ? nextParent.cycleId : null });
     } else if (kind === "routine" && routines.some((entry) => entry.id === id && entry.active && entry.systemKey !== "general")) {
       void onPatch({ parentId: null, routineId: id, cycleId: null });
     }
@@ -3913,13 +4001,13 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
   return (
     <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel task-detail-panel">
-        <header><div>{project?.kind === "project" || routine ? <button type="button" className="detail-parent-link" onClick={async () => { if (title.trim() && !await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) return; if (project?.kind === "project") onOpenParent("project", project.id); else if (routine) onOpenParent("routine", routine.id); }}><ArrowLeft size={14} />{lineageTitle}</button> : <p>{lineageTitle}</p>}<h2 className="document-title">{task.title}</h2></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
+        <header><div>{project || ticket || routine ? <button type="button" className="detail-parent-link" onClick={async () => { if (title.trim() && !await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) return; if (project) onOpenParent("project", project.id); else if (ticket) onOpenParent("ticket", ticket.id); else if (routine) onOpenParent("routine", routine.id); }}><ArrowLeft size={14} />{lineageTitle}</button> : <p>{lineageTitle}</p>}<h2 className="document-title">{task.title}</h2></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
         <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
         <div className="property-form"><label><span>{t("Task 이름")}</span><textarea aria-label={t("Task 이름")} defaultValue={task.title} rows={2} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></label></div>
         <section className="task-detail-fields" aria-label={t("Task 정보")}>
           <label><span>{t("우선순위")}</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>{t("기한")}</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
-          <label className="task-container-field"><span>{t("연결 대상")}</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="">General</option><optgroup label={t("Project")}>{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Routine")}>{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+          <label className="task-container-field"><span>{t("연결 대상")}</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="">General</option><optgroup label={t("Project")}>{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Ticket")}>{tickets.map((entry) => <option value={`ticket:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Routine")}>{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
         </section>
         {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label={t("담당자")} members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></section>}
         </>}</DocumentProperties>
@@ -3929,13 +4017,20 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
         </div>
         <details className="document-related"><summary>{t("상위 맵핑")} · Google Calendar</summary>
         <section className="task-lineage">
-          <header><b>{t("상위 맵핑")}</b><span>{routine ? t("Routine 기반 Task") : project ? t("OKR 실행 구조") : t("아직 연결 전")}</span></header>
+          <header><b>{t("상위 맵핑")}</b><span>{routine ? t("Routine 기반 Task") : project ? t("OKR 실행 구조") : ticket ? t("Ticket 실행 구조") : t("아직 연결 전")}</span></header>
           <LineageRow label={t("등록 경로")} value={sourceLabel(task.source)} />
           {routine ? (
             <>
               <LineageRow label={t("Routine")} value={routine.title} />
               <LineageRow label={t("트리거")} value={routine.triggerPoint || t("미지정")} />
               <LineageRow label={t("어디서/어떻게")} value={[routine.actionPlace, routine.actionSteps].filter(Boolean).join(" · ") || t("미지정")} />
+            </>
+          ) : ticket ? (
+            <>
+              <LineageRow label={t("Ticket")} value={ticket.title} />
+              <LineageRow label={t("상태")} value={ticketStatusLabel(ticket.status)} />
+              <LineageRow label={t("우선순위")} value={priorityLabels[ticket.priority]} />
+              <LineageRow label={t("기한")} value={dueLabel(ticket.dueDate)} />
             </>
           ) : (
             <>
@@ -4144,12 +4239,13 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   const [taskAssigneeIds, setTaskAssigneeIds] = useState<string[]>(currentMemberId ? [currentMemberId] : []);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", task: "project" };
+  const requiredParent: Record<ItemKind, ItemKind | null> = { objective: null, key_result: "objective", initiative: "key_result", project: "initiative", ticket: null, task: "project" };
   const parentKind = requiredParent[kind];
   const parentOptions = parentKind ? items.filter((entry) => entry.kind === parentKind && (!cycleId || entry.cycleId === cycleId)) : [];
   const taskProjectOptions = items.filter((entry) => entry.kind === "project" && !entry.archivedAt);
+  const taskTicketOptions = items.filter((entry) => entry.kind === "ticket" && !entry.archivedAt);
   const taskRoutineOptions = routines.filter((entry) => entry.active && entry.systemKey !== "general");
-  const hasTaskContainerOptions = taskProjectOptions.length > 0 || taskRoutineOptions.length > 0;
+  const hasTaskContainerOptions = taskProjectOptions.length > 0 || taskTicketOptions.length > 0 || taskRoutineOptions.length > 0;
   const projectProperties = kind === "project" ? properties.filter((property) => property.active && !property.systemKey) : [];
   const dirty = Boolean(title.trim() || description.trim() || parentId || taskContainer || templateId || Object.keys(customValues).length);
 
@@ -4171,13 +4267,13 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
 
   async function submit(event: FormEvent) {
     event.preventDefault();
-    if (!title.trim() || saving || (kind !== "task" && kind !== "objective" && !parentId)) return;
+    if (!title.trim() || saving || (!["task", "ticket", "objective"].includes(kind) && !parentId)) return;
     setSaving(true);
     setError("");
     const routineId = kind === "task" && taskContainer.startsWith("routine:") ? taskContainer.slice(8) : null;
-    const taskParentId = kind === "task" && taskContainer.startsWith("project:") ? taskContainer.slice(8) : null;
+    const taskParentId = kind === "task" && (taskContainer.startsWith("project:") || taskContainer.startsWith("ticket:")) ? taskContainer.split(":", 2)[1] : null;
     const nextParentId = kind === "task" ? taskParentId : parentId || null;
-    const nextDescription = kind === "project" ? description.trim() : "";
+    const nextDescription = kind === "project" || kind === "ticket" ? description.trim() : "";
     try {
       const response = await fetch("/api/items", {
         method: "POST",
@@ -4185,11 +4281,11 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
         body: JSON.stringify({
           title,
           kind,
-          cycleId: kind === "task" && (!nextParentId || routineId) ? null : cycleId,
+          cycleId: kind === "ticket" || kind === "task" && (!nextParentId || routineId || taskContainer.startsWith("ticket:")) ? null : cycleId,
           description: nextDescription,
           parentId: nextParentId,
           routineId,
-          status: kind === "task" ? "todo" : status,
+          status: kind === "task" ? "todo" : kind === "ticket" && status === "todo" ? "backlog" : status,
           priority,
           cadence: kind === "project" ? undefined : cadence,
           dueDate: dueDate || null,
@@ -4218,15 +4314,15 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
   return (
     <OverlayDialog title={t("새 항목")} variant="drawer" dirty={dirty} initialFocus="input" onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel">
-        <header><div><h2>{t("새 항목")}</h2><p>{kind === "project" ? t("Project 속성을 지정해서 추가") : t("OKR 실행 구조에 추가")}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("새 항목 닫기")} title={t("새 항목 닫기")}><X size={17} /></button></header>
+        <header><div><h2>{t("새 항목")}</h2><p>{kind === "project" ? t("Project 속성을 지정해서 추가") : kind === "ticket" ? t("요청을 Ticket으로 접수") : t("OKR 실행 구조에 추가")}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("새 항목 닫기")} title={t("새 항목 닫기")}><X size={17} /></button></header>
         <form className="property-form create-item-form" onSubmit={submit}>
           <label><span>{t("유형")}</span><select value={kind} disabled><option value={initialKind}>{kindLabel(initialKind)}</option></select></label>
           <label><span>{t("이름")}</span><input value={title} onChange={(event) => setTitle(event.target.value)} /></label>
           {onCreateWithChat && <div className="create-chat-nudge"><div><Bot size={15} /><span><b>{t("대화로 정리할까요?")}</b><small>{kind === "task" ? t("할 일을 다듬고, 연결 대상을 고르지 않으면 General에 저장합니다.") : kind === "project" ? t("결과와 범위를 말하면 Project 초안을 정리합니다.") : t("말로 설명하면 OKR 초안을 함께 정리해드려요.")}</small></span></div><button type="button" onClick={() => onCreateWithChat({ kind, title })}>{t("AI 대화로 추가")}<ChevronRight size={13} /></button></div>}
           {kind === "task" ? hasTaskContainerOptions ? (
-            <label><span>{t("연결 대상 · 선택 사항")}</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">{t("선택 안 함 — General에 저장")}</option>{taskProjectOptions.length > 0 && <optgroup label={t("Project")}>{taskProjectOptions.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup>}{taskRoutineOptions.length > 0 && <optgroup label={t("Routine")}>{taskRoutineOptions.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup>}</select></label>
+            <label><span>{t("연결 대상 · 선택 사항")}</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">{t("선택 안 함 — General에 저장")}</option>{taskProjectOptions.length > 0 && <optgroup label={t("Project")}>{taskProjectOptions.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup>}{taskTicketOptions.length > 0 && <optgroup label={t("Ticket")}>{taskTicketOptions.map((entry) => <option value={`ticket:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup>}{taskRoutineOptions.length > 0 && <optgroup label={t("Routine")}>{taskRoutineOptions.map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup>}</select></label>
           ) : (
-            <p className="task-container-empty task-container-general">{t("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.")}</p>
+            <p className="task-container-empty task-container-general">{t("연결할 Project·Ticket·Routine이 없어 General(기본)에 저장됩니다.")}</p>
           ) : parentKind && (
             <label><span>{t("상위 {kind}", { kind: kindLabel(parentKind) })}</span><select value={parentId} onChange={(event) => setParentId(event.target.value)}><option value="">{t("선택")}</option>{parentOptions.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label>
           )}
@@ -4247,6 +4343,17 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
                 <MemberMentionPicker label={t("하위 업무자")} members={teamMembers} selectedIds={projectWorkerIds} onChange={setProjectWorkerIds} placeholder={t("@실명으로 여러 명 태그")} />
               )}
               {projectProperties.length > 0 && <div className="project-field-grid custom-project-fields">{projectProperties.map((property) => <CreatePropertyField key={property.id} property={property} value={customValues[property.id] ?? property.defaultValue} members={teamMembers} onChange={updateCustomValue} />)}</div>}
+            </section>
+          )}
+          {kind === "ticket" && (
+            <section className="create-project-fields create-ticket-fields">
+              <header><b>{t("Ticket 정보")}</b><span>{t("요청을 실행 Task로 나누기 전의 기준")}</span></header>
+              <label><span>{t("설명")}</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} placeholder={t("요청 배경, 기대 결과, 참고 내용을 적어 주세요.")} /></label>
+              <div className="project-field-grid">
+                <label><span>{t("상태")}</span><select value={status === "todo" ? "backlog" : status} onChange={(event) => setStatus(event.target.value as ItemStatus)}><option value="backlog">{t("접수")}</option><option value="policy_discussion">{t("검토 중")}</option><option value="in_progress">{t("처리 중")}</option><option value="done">{t("종료")}</option></select></label>
+                <label><span>{t("우선순위")}</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+                <label><span>{t("기한")}</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
+              </div>
             </section>
           )}
           {kind === "task" && teamMembers.length > 0 && (
@@ -4525,7 +4632,7 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
             <article id={`routine-search-${routine.id}`} tabIndex={-1} className={`routine-card ${routine.active ? "" : "inactive"} ${routine.systemKey === "general" ? "general-routine" : ""} ${focusId === routine.id ? "search-target" : ""}`} key={routine.id}>
               <header>
                 {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={readOnly || !routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? t("완료 취소") : t("완료 처리")}><Check size={12} /></button>}
-                {routine.systemKey === "general" ? <div><b>{routine.title}<em className="system-badge">{t("기본")}</em></b><small>{t("Project·Routine에 연결하지 않은 Task가 모이는 기본 목록")}</small></div> : <button type="button" className="routine-expand" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedIds((current) => { const next = new Set(current); if (next.has(routine.id)) next.delete(routine.id); else next.add(routine.id); return next; })}><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? t("오늘 완료") : t("오늘 미완료")} · {teamMembers.find((member) => member.id === routine.assigneeMemberId)?.displayName ?? t("담당자 없음")}{hasDraftChange(routine) ? t(" · 저장하지 않은 변경") : ""}</small></span><ChevronDown size={16} /></button>}
+                {routine.systemKey === "general" ? <div><b>{routine.title}<em className="system-badge">{t("기본")}</em></b><small>{t("Project·Ticket·Routine에 연결하지 않은 Task가 모이는 기본 목록")}</small></div> : <button type="button" className="routine-expand" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedIds((current) => { const next = new Set(current); if (next.has(routine.id)) next.delete(routine.id); else next.add(routine.id); return next; })}><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? t("오늘 완료") : t("오늘 미완료")} · {teamMembers.find((member) => member.id === routine.assigneeMemberId)?.displayName ?? t("담당자 없음")}{hasDraftChange(routine) ? t(" · 저장하지 않은 변경") : ""}</small></span><ChevronDown size={16} /></button>}
               </header>
               {routine.systemKey !== "general" && <div className="routine-details" id={detailsId} hidden={!expanded}>
               <DocumentProperties readOnly={readOnly} autoSave={false} dirty={hasDraftChange(routine)} onEditorClose={() => {
@@ -5402,9 +5509,9 @@ function HomeOkrChat({ onCreate, onCreateProject, onCreateRoutine, onApplyOkrPla
           {mode === "project" && visibleFields.has("project") && <label><span>{t("상위 Initiative")}</span><select value={projectTarget?.initiativeId ?? ""} onChange={(event) => setProjectTarget(projectTargets.find((entry) => entry.initiativeId === event.target.value) ?? null)}><option value="">{t("저장 전에 선택")}</option>{projectTargets.map((entry) => <option value={entry.initiativeId} key={entry.initiativeId}>{entry.cycleName} · {entry.initiativeTitle}</option>)}</select></label>}
           {mode === "project" && visibleFields.has("project") && members.length > 0 && <label><span>{t("Project 책임자")}</span><select value={projectDriMemberId} onChange={(event) => setProjectDriMemberId(event.target.value)}>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
           {(mode === "task" || mode === "project" || mode === "routine") && visibleFields.has("tasks") && <label className="wide"><span>{mode === "task" ? t("Task 초안") : plan.taskParent === "routine" || !plan.project.trim() && plan.routineTitle.trim() ? t("첫 Task · Routine 아래") : plan.project.trim() ? t("첫 Task · Project 아래") : t("첫 Task")}</span><textarea value={plan.tasks} onChange={(event) => patch("tasks", event.target.value)} rows={4} placeholder={t("한 줄에 하나씩 입력")} /></label>}
-          {mode === "task" && visibleFields.has("tasks") && taskContainers.length > 0 && <label><span>{t("연결 대상 · 선택 사항")}</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">{t("선택 안 함 — General에 저장")}</option>{taskContainers.some((entry) => entry.kind === "project") && <optgroup label={t("Project")}>{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup>}{taskContainers.some((entry) => entry.kind === "routine") && <optgroup label={t("Routine")}>{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup>}</select></label>}
+          {mode === "task" && visibleFields.has("tasks") && taskContainers.length > 0 && <label><span>{t("연결 대상 · 선택 사항")}</span><select value={taskContainer} onChange={(event) => setTaskContainer(event.target.value)}><option value="">{t("선택 안 함 — General에 저장")}</option>{taskContainers.some((entry) => entry.kind === "project") && <optgroup label={t("Project")}>{taskContainers.filter((entry) => entry.kind === "project").map((entry) => <option key={entry.id} value={`project:${entry.id}`}>{entry.title}</option>)}</optgroup>}{taskContainers.some((entry) => entry.kind === "ticket") && <optgroup label={t("Ticket")}>{taskContainers.filter((entry) => entry.kind === "ticket").map((entry) => <option key={entry.id} value={`ticket:${entry.id}`}>{entry.title}</option>)}</optgroup>}{taskContainers.some((entry) => entry.kind === "routine") && <optgroup label={t("Routine")}>{taskContainers.filter((entry) => entry.kind === "routine").map((entry) => <option key={entry.id} value={`routine:${entry.id}`}>{entry.title}</option>)}</optgroup>}</select></label>}
           {mode === "task" && visibleFields.has("tasks") && members.length > 0 && <label><span>{t("담당자")}</span><select value={taskAssigneeMemberId} onChange={(event) => setTaskAssigneeMemberId(event.target.value)}><option value="">{t("미지정")}</option>{members.map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>}
-          {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty task-container-general">{t("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.")}</p>}
+          {mode === "task" && visibleFields.has("tasks") && taskContainers.length === 0 && <p className="task-container-empty task-container-general">{t("연결할 Project·Ticket·Routine이 없어 General(기본)에 저장됩니다.")}</p>}
           {visibleFields.has("tasks") && plan.project.trim() && plan.routineTitle.trim() && <label><span>{t("Task 상위")}</span><select value={plan.taskParent || "project"} onChange={(event) => patch("taskParent", event.target.value)}><option value="project">{t("Project")}</option><option value="routine">{t("Routine")}</option></select></label>}
           {visibleFields.has("routineTitle") && <label><span>{t("Routine 이름")}</span><input value={plan.routineTitle} onChange={(event) => patch("routineTitle", event.target.value)} placeholder={t("반복해서 할 일의 이름")} /></label>}
           {visibleFields.has("routineTrigger") && <label><span>{t("Routine 트리거")}</span><input value={plan.routineTrigger} onChange={(event) => patch("routineTrigger", event.target.value)} placeholder={t("Routine이 시작되는 시점")} /></label>}
@@ -5661,9 +5768,10 @@ function OkrFileRow({
 }
 
 function DeleteSelectCheckbox({ item, selected, onToggle }: { item: Pick<OkriItem, "id" | "kind" | "title">; selected: boolean; onToggle: (id: string) => void }) {
+  const itemKindLabel = item.kind === "project" ? t("Project") : item.kind === "ticket" ? t("Ticket") : t("Task");
   return (
     <label className="delete-select" title={t("{value1} 삭제 선택", { value1: messageValue(item.title) })}>
-      <input type="checkbox" checked={selected} onChange={() => onToggle(item.id)} aria-label={t("{value1} {value2} 삭제 선택", { value1: messageValue(item.kind === "project" ? t("Project") : t("Task")), value2: messageValue(item.title) })} />
+      <input type="checkbox" checked={selected} onChange={() => onToggle(item.id)} aria-label={t("{value1} {value2} 삭제 선택", { value1: messageValue(itemKindLabel), value2: messageValue(item.title) })} />
       <span><Check size={11} /></span>
     </label>
   );
@@ -5682,6 +5790,121 @@ function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggle
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className={`board-selectable-item ${selectionMode ? "selection-mode" : ""}`} key={entry.id}>{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b className={entry.kind === "project" ? "project-item-title" : undefined}>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">{t("작업 없음")}</span>}</div></section>; })}</div>;
 }
 
+function TicketListView({ tickets, tasks, onOpenTicket }: { tickets: OkriItem[]; tasks: OkriItem[]; onOpenTicket: (id: string) => void }) {
+  const [query, setQuery] = useState("");
+  const [status, setStatus] = useState<"active" | "done" | "all">("active");
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const visible = tickets.filter((ticket) => {
+    if (status === "active" && isCompletedStatus(ticket.status)) return false;
+    if (status === "done" && !isCompletedStatus(ticket.status)) return false;
+    return !normalizedQuery || `${ticket.title} ${ticket.description}`.toLocaleLowerCase().includes(normalizedQuery);
+  });
+  const taskCounts = new Map<string, { total: number; done: number }>();
+  for (const task of tasks) {
+    if (!task.parentId) continue;
+    const current = taskCounts.get(task.parentId) ?? { total: 0, done: 0 };
+    current.total += 1;
+    if (isCompletedStatus(task.status)) current.done += 1;
+    taskCounts.set(task.parentId, current);
+  }
+  return <section className="ticket-workspace" aria-label={t("Ticket 목록")}>
+    <div className="ticket-toolbar">
+      <label><Search size={14} /><span className="sr-only">{t("Ticket 검색")}</span><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder={t("Ticket 검색")} /></label>
+      <div className="ticket-status-filter" role="group" aria-label={t("Ticket 상태 필터")}>
+        {(["active", "done", "all"] as const).map((value) => <button type="button" key={value} aria-pressed={status === value} onClick={() => setStatus(value)}>{value === "active" ? t("진행 중") : value === "done" ? t("종료") : t("전체")}</button>)}
+      </div>
+      <span>{t("{count}개", { count: visible.length })}</span>
+    </div>
+    <div className="ticket-list">
+      {visible.map((ticket) => {
+        const count = taskCounts.get(ticket.id) ?? { total: 0, done: 0 };
+        return <button type="button" className="ticket-row" key={ticket.id} onClick={() => onOpenTicket(ticket.id)}>
+          <span className={`status-dot status-${ticket.status}`} aria-hidden="true" />
+          <span className="ticket-row-copy"><b>{ticket.title}</b><small>{ticket.description || t("설명 없음")}</small></span>
+          <span className="ticket-row-status">{ticketStatusLabel(ticket.status)}</span>
+          <span className={`ticket-row-priority priority-${ticket.priority}`}>{priorityLabels[ticket.priority]}</span>
+          <span className="ticket-row-tasks"><ListChecks size={13} />{count.done}/{count.total}</span>
+          <span className="ticket-row-due">{dueLabel(ticket.dueDate)}</span>
+          <ChevronRight size={15} aria-hidden="true" />
+        </button>;
+      })}
+      {!visible.length && <EmptyState icon={TicketIcon} title={normalizedQuery || status !== "active" ? t("조건에 맞는 Ticket이 없습니다") : t("Ticket이 없습니다")} />}
+    </div>
+  </section>;
+}
+
+function TicketDetailPanel({ ticket, tasks, teamMembers, readOnly, canDelete, onClose, onPatch, onTaskCreated, onOpenTask, onTrash, onNotice }: {
+  ticket: OkriItem;
+  tasks: OkriItem[];
+  teamMembers: TeamMember[];
+  readOnly: boolean;
+  canDelete: boolean;
+  onClose: () => void;
+  onPatch: (patch: Partial<OkriItem>) => Promise<unknown>;
+  onTaskCreated: (task: OkriItem) => void;
+  onOpenTask: (id: string) => void;
+  onTrash: () => void;
+  onNotice: (message: string, tone?: NoticeTone) => void;
+}) {
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [assigneeId, setAssigneeId] = useState(() => teamMembers.find((member) => member.isCurrent)?.id ?? "");
+  const [savingTask, setSavingTask] = useState(false);
+  const linkedTasks = tasks.filter((task) => task.parentId === ticket.id);
+  const completedTasks = linkedTasks.filter((task) => isCompletedStatus(task.status)).length;
+  const properties: DocumentProperty[] = [
+    { key: "status", label: t("상태"), value: ticketStatusLabel(ticket.status), primary: true },
+    { key: "tasks", label: t("연결 Task"), value: `${completedTasks}/${linkedTasks.length}`, primary: true },
+    { key: "priority", label: t("우선순위"), value: priorityLabels[ticket.priority] },
+    { key: "due", label: t("기한"), value: dueLabel(ticket.dueDate) },
+  ];
+
+  async function createTask(event: FormEvent) {
+    event.preventDefault();
+    const title = newTaskTitle.trim();
+    if (!title || savingTask || readOnly) return;
+    setSavingTask(true);
+    try {
+      const response = await fetch("/api/items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "task", title, parentId: ticket.id, cycleId: null, assigneeMemberId: assigneeId || null, source: "web" }),
+      });
+      const data = await response.json().catch(() => ({})) as { item?: OkriItem; error?: string };
+      if (!response.ok || !data.item) throw new Error(apiError(data, "Task를 만들지 못했습니다."));
+      onTaskCreated(data.item);
+      setNewTaskTitle("");
+      onNotice(t("Ticket 아래에 Task를 만들었습니다."));
+    } catch (error) {
+      onNotice(error instanceof Error ? error.message : t("Task를 만들지 못했습니다."), "error");
+    } finally {
+      setSavingTask(false);
+    }
+  }
+
+  return <OverlayDialog title={t("{value1} Ticket 상세", { value1: messageValue(ticket.title) })} variant="drawer" history={false} onRequestClose={onClose}>
+    {(requestClose) => <aside className="property-panel ticket-detail-panel">
+      <header><div><p>{t("Ticket")}</p><h2 className="document-title">{ticket.title}</h2></div><div className="task-detail-actions">{canDelete && !readOnly && <button type="button" className="icon-button danger-icon" onClick={onTrash} aria-label={t("Ticket을 휴지통으로 이동")} title={t("Ticket을 휴지통으로 이동")}><Trash2 size={16} /></button>}<button type="button" className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
+      <DocumentProperties entries={properties} readOnly={readOnly}>{() => <div className="property-form ticket-property-form">
+        <label><span>{t("Ticket 이름")}</span><textarea aria-label={t("Ticket 이름")} defaultValue={ticket.title} rows={2} disabled={readOnly} onBlur={(event) => { const title = event.currentTarget.value.trim(); if (title && title !== ticket.title) void onPatch({ title }); }} /></label>
+        <label><span>{t("설명")}</span><textarea aria-label={t("Ticket 설명")} defaultValue={ticket.description} rows={5} disabled={readOnly} onBlur={(event) => { if (event.currentTarget.value !== ticket.description) void onPatch({ description: event.currentTarget.value }); }} /></label>
+        <div className="project-field-grid">
+          <label><span>{t("상태")}</span><select disabled={readOnly} value={normalizeTicketStatus(ticket.status)} onChange={(event) => void onPatch({ status: event.target.value as ItemStatus })}><option value="backlog">{t("접수")}</option><option value="policy_discussion">{t("검토 중")}</option><option value="in_progress">{t("처리 중")}</option><option value="done">{t("종료")}</option></select></label>
+          <label><span>{t("우선순위")}</span><select disabled={readOnly} className={`priority-${ticket.priority}`} value={ticket.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+          <label><span>{t("기한")}</span><input disabled={readOnly} type="date" value={ticket.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
+        </div>
+      </div>}</DocumentProperties>
+      <section className="ticket-linked-tasks">
+        <header><div><b>{t("연결된 Task")}</b><span>{completedTasks}/{linkedTasks.length}</span></div></header>
+        {!readOnly && <form className="ticket-task-create" onSubmit={(event) => void createTask(event)}><input aria-label={t("새 Task 제목")} value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} maxLength={500} placeholder={t("실행할 Task 추가")} /><select aria-label={t("담당자")} value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}><option value="">{t("미지정")}</option>{teamMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select><button type="submit" disabled={!newTaskTitle.trim() || savingTask}><Plus size={14} />{savingTask ? t("저장 중") : t("추가")}</button></form>}
+        <div className="ticket-task-list">
+          {linkedTasks.map((task) => <button type="button" key={task.id} onClick={() => onOpenTask(task.id)}><span className={`task-list-check ${isCompletedStatus(task.status) ? "checked" : ""}`} aria-hidden="true"><Check size={12} /></span><span><b>{task.title}</b><small>{assignmentLabel(task, "task_assignee")} · {dueLabel(task.dueDate)}</small></span><ChevronRight size={14} /></button>)}
+          {!linkedTasks.length && <p>{t("아직 연결된 Task가 없습니다.")}</p>}
+        </div>
+      </section>
+    </aside>}
+  </OverlayDialog>;
+}
+
 function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDeleteItem, selectedItemIds, onToggleSelect, onSelectItems, onClearItems, onTrashSelected, trashing }: { items: OkriItem[]; allItems: OkriItem[]; routines: Routine[]; onOpenTask: (id: string) => void; onPatch: (id: string, patch: Partial<OkriItem>) => Promise<unknown>; canDeleteItem: (item: OkriItem) => boolean; selectedItemIds: Set<string>; onToggleSelect: (id: string) => void; onSelectItems: (ids: string[]) => void; onClearItems: (ids: string[]) => void; onTrashSelected: () => void; trashing: boolean }) {
   const [selectionMode, setSelectionMode] = useState(false);
   const byId = new Map(allItems.map((entry) => [entry.id, entry]));
@@ -5691,7 +5914,7 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
   const selectedTaskCount = taskIds.filter((id) => selectedItemIds.has(id)).length;
   const allSelected = deletableItems.length > 0 && selectedTaskCount === deletableItems.length;
   const orphanedIds = deletableItems.filter((entry) => entry.parentId
-    ? byId.get(entry.parentId)?.kind !== "project"
+    ? !["project", "ticket"].includes(byId.get(entry.parentId)?.kind ?? "")
     : entry.routineId ? !routineIds.has(entry.routineId) : true).map((entry) => entry.id);
   if (!items.length) return <EmptyState icon={Inbox} title={t("Task가 없습니다")} />;
   return (
@@ -5704,9 +5927,9 @@ function TaskListView({ items, allItems, routines, onOpenTask, onPatch, canDelet
         <button className="task-selection-delete" disabled={!selectedTaskCount || trashing} onClick={onTrashSelected}><Trash2 size={13} />{trashing ? t("이동 중") : t("선택 삭제")}</button>
       </div>}
       {items.map((entry) => {
-        const project = entry.parentId ? byId.get(entry.parentId) : undefined;
+        const parent = entry.parentId ? byId.get(entry.parentId) : undefined;
         const routine = entry.routineId ? routines.find((row) => row.id === entry.routineId) : undefined;
-        const relation = routine?.systemKey === "general" ? "General 수집함" : routine ? `Routine · ${routine.title}` : project?.kind === "project" ? `Project · ${project.title}` : "연결 끊김";
+        const relation = routine?.systemKey === "general" ? "General 수집함" : routine ? `Routine · ${routine.title}` : parent?.kind === "project" ? `Project · ${parent.title}` : parent?.kind === "ticket" ? `Ticket · ${parent.title}` : "연결 끊김";
         const assignee = assignmentLabel(entry, "task_assignee");
         return (
           <article className={`task-list-row ${selectionMode && canDeleteItem(entry) ? "deletion-selectable" : ""} ${isCompletedStatus(entry.status) ? "completed" : ""}`} key={entry.id}>
@@ -5844,14 +6067,14 @@ function TrashView({ workspaceId, onNotice, canDeleteRecords, canRestore }: { wo
 
   return (
     <div className="trash-sections">
-      {trashedItems.length > 0 && <section className="trash-list" aria-label={t("삭제한 Project와 Task")}>
-        <header className="trash-section-title"><div><b>Project·Task</b><span>{trashedItems.length}</span></div><p>{t("Project는 함께 삭제한 하위 Task까지 한 묶음으로 복구하거나 영구 삭제합니다.")}</p></header>
+      {trashedItems.length > 0 && <section className="trash-list" aria-label={t("삭제한 Project, Ticket과 Task")}>
+        <header className="trash-section-title"><div><b>Project·Ticket·Task</b><span>{trashedItems.length}</span></div><p>{t("Project와 Ticket은 함께 삭제한 하위 Task까지 한 묶음으로 복구하거나 영구 삭제합니다.")}</p></header>
         {trashedItems.map((entry) => (
           <article className="trash-record" key={entry.id}>
             <span className="trash-icon"><Trash2 size={15} /></span>
             <div>
               <h3>{entry.title}</h3>
-              <p>{entry.kind === "project" ? t("Project · 하위 Task {value1}개", { value1: messageValue(entry.trashedTaskCount) }) : t("독립 삭제한 Task")}</p>
+              <p>{entry.kind === "project" ? t("Project · 하위 Task {value1}개", { value1: messageValue(entry.trashedTaskCount) }) : entry.kind === "ticket" ? t("Ticket · 하위 Task {value1}개", { value1: messageValue(entry.trashedTaskCount) }) : t("독립 삭제한 Task")}</p>
               <small>{entry.archivedAt ? formatDateTime(entry.archivedAt) : t("삭제됨")}</small>
               {canRestore && entry.restoreParentRequired && <label className="trash-restore-parent"><span>{t("복구할 Initiative")}</span><select value={restoreParents[entry.id] ?? ""} onChange={(event) => setRestoreParents((current) => ({ ...current, [entry.id]: event.target.value }))}><option value="">{t("Initiative 선택")}</option>{initiativeOptions.map((initiative) => <option value={initiative.id} key={initiative.id}>{initiative.title}</option>)}</select></label>}
             </div>
@@ -6273,7 +6496,7 @@ function WorkspaceSettingsPanel({ currentWorkspace, scheduledWorkspaces, teamDat
         {activeTab === "backups" && <WorkspaceBackups key={`${currentWorkspace.id}:backups`} workspaceId={currentWorkspace.id} workspaceName={currentWorkspace.name} onNotice={onNotice} />}
         {activeTab === "summary" && <WorkspaceManagementSummary key={`${currentWorkspace.id}:summary`} />}
         {activeTab === "integrations" && <WorkspaceSlackIntegration key={`${currentWorkspace.id}:bots`} slack={slack} slackOAuthIssue={slackOAuthIssue} loading={integrationLoading} loadError={integrationLoadError} workspaceName={currentWorkspace.name} canManageSlack={canManageWorkspace} onSlackChange={onSlackChange} onRefresh={onRefreshIntegrations} onNotice={onNotice} />}
-        {activeTab === "danger" && <div className="workspace-settings-section danger-settings"><header><h3>{t("위험 구역")}</h3><p>{t("현재 워크스페이스의 실행 데이터와 워크스페이스 자체를 정리합니다.")}</p></header><article><div><b>{t("OKR 실행 데이터 클린업")}</b><p>{t("워크스페이스와 그룹은 유지하고 OKR·Project·Task를 휴지통으로 이동합니다.")}</p></div><button onClick={onCleanup}><Trash2 size={14} />{t("클린업 열기")}</button></article>{!currentWorkspace.personal && currentWorkspace.role === "owner" && <article><div><b>{t("워크스페이스 삭제 예약")}</b><p>{t("즉시 접근을 중단하고 30일 동안 복구할 수 있도록 삭제 예약합니다.")}</p></div><button onClick={() => onDeleteWorkspace(currentWorkspace)} disabled={workspaceSaving}><Trash2 size={14} />{t("삭제 예약")}</button></article>}</div>}
+        {activeTab === "danger" && <div className="workspace-settings-section danger-settings"><header><h3>{t("위험 구역")}</h3><p>{t("현재 워크스페이스의 실행 데이터와 워크스페이스 자체를 정리합니다.")}</p></header><article><div><b>{t("OKR 실행 데이터 클린업")}</b><p>{t("워크스페이스와 그룹은 유지하고 OKR·Project·Ticket·Task를 휴지통으로 이동합니다.")}</p></div><button onClick={onCleanup}><Trash2 size={14} />{t("클린업 열기")}</button></article>{!currentWorkspace.personal && currentWorkspace.role === "owner" && <article><div><b>{t("워크스페이스 삭제 예약")}</b><p>{t("즉시 접근을 중단하고 30일 동안 복구할 수 있도록 삭제 예약합니다.")}</p></div><button onClick={() => onDeleteWorkspace(currentWorkspace)} disabled={workspaceSaving}><Trash2 size={14} />{t("삭제 예약")}</button></article>}</div>}
         {activeTab === "scheduled" && <div className="workspace-settings-section scheduled-settings"><header><h3>{t("삭제 예정 워크스페이스")}</h3><p>{t("삭제 예약된 워크스페이스를 복구하거나 즉시 영구삭제합니다.")}</p></header><div className="scheduled-workspace-list">{scheduledWorkspaces.map((workspace) => <article key={workspace.id}><WorkspaceAvatar workspace={workspace} /><div><b>{workspace.name}</b><small>{workspaceDeletionLabel(workspace.scheduledDeletionAt)}</small></div><button onClick={() => onRestoreWorkspace(workspace)} disabled={workspaceSaving}><RotateCcw size={14} />{t("복구")}</button><button className="danger" onClick={() => onPermanentlyDeleteWorkspace(workspace)} disabled={workspaceSaving}><Trash2 size={14} />{t("영구삭제")}</button></article>)}</div></div>}
       </section>
     </div>
@@ -7758,8 +7981,18 @@ const statusLabels: Record<ItemStatus, string> = { get backlog() { return t("백
 const priorityLabels: Record<Priority, string> = { get low() { return t("낮음"); }, get medium() { return t("보통"); }, get high() { return t("높음"); }, get urgent() { return t("긴급"); } };
 const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", "red", "purple"];
 
-function kindLabel(kind: ItemKind) { return t({ objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task" }[kind]); }
+function kindLabel(kind: ItemKind) { return t({ objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", ticket: "Ticket", task: "Task" }[kind]); }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
+function normalizeTicketStatus(status: ItemStatus): "backlog" | "policy_discussion" | "in_progress" | "done" {
+  if (status === "done" || status === "development_done") return "done";
+  if (status === "in_progress" || status === "developing") return "in_progress";
+  if (status === "policy_discussion") return "policy_discussion";
+  return "backlog";
+}
+function ticketStatusLabel(status: ItemStatus) {
+  const normalized = normalizeTicketStatus(status);
+  return normalized === "backlog" ? t("접수") : normalized === "policy_discussion" ? t("검토 중") : normalized === "in_progress" ? t("처리 중") : t("종료");
+}
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
 function taskCompletionPatch(status: ItemStatus): Partial<OkriItem> { return { status: isCompletedStatus(status) ? "todo" : "done" }; }
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
@@ -7783,6 +8016,6 @@ function formatDateTime(value: string) {
   return date.toLocaleString(getClientLocale(), { dateStyle: "medium", timeStyle: "short" });
 }
 function localDate() { const now = new Date(); const offset = now.getTimezoneOffset() * 60_000; return new Date(now.getTime() - offset).toISOString().slice(0, 10); }
-function pageSubtitle(view: View) { return t({ home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", gantt: "Project 마감과 하위 Task 일정을 한눈에 확인", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내게 배정된 업무와 오늘의 진행 계획", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]); }
+function pageSubtitle(view: View) { return t({ home: "자유롭게 이야기하면 OKR과 실행 항목으로 정리", my_work: "내가 담당하는 Project, Task, Routine", inbox: "워크스페이스 전체 Task 목록", work: "Initiative 아래의 Project 속성과 상태 관리", gantt: "Project 마감과 하위 Task 일정을 한눈에 확인", tickets: "요청을 접수하고 실행 Task로 나누어 관리", routines: "OKR과 독립된 반복 실행과 하위 Task 관리", okr: "Objective부터 Project·Task까지의 OKR 실행 구조", data: "Key Result와 Project에 외부 API 수치 연결", scrum: "내게 배정된 업무와 오늘의 진행 계획", recommendations: "현재 데이터에서 계산한 다음 정리 항목", reviews: "주기별 진행과 막힘", trash: "삭제한 Project·Ticket·Task와 전체 데이터 정리 기록", integrations: "내 Google Calendar와 개인 Slack DM 연결", billing: "워크스페이스 플랜, 사용량, 카드와 결제 기록 관리" }[view]); }
 function routineCadenceLabel(cadence: RoutineCadence) { return t({ daily: "매일", weekly: "매주", monthly: "매월" }[cadence]); }
 function recommendationIcon(kind: Recommendation["kind"]) { if (kind === "blocked") return "!"; if (kind === "overdue") return "D"; if (kind === "due_soon") return "3"; return "P"; }

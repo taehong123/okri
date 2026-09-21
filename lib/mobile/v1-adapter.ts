@@ -58,6 +58,36 @@ export function mobileV1(endpoint: string, handler: Handler): Handler {
     if (acknowledgementsV1.has(key)) return Response.json({ ok: true }, { headers: resultHeaders });
     const data = record(await response.json().catch(() => null));
     const draft = record(data?.draft);
+    if (key === "GET bootstrap" && Array.isArray(data?.items)) {
+      const ticketIds = new Set(data.items.flatMap((value: unknown) => {
+        const item = record(value);
+        return item?.kind === "ticket" && typeof item.id === "string" ? [item.id] : [];
+      }));
+      // Ticket is web-only in this release. Keep the frozen native v1 model
+      // stable until a native client explicitly adds the new container.
+      data.items = data.items.filter((value: unknown) => {
+        const item = record(value);
+        return item?.kind !== "ticket" && !(item?.kind === "task" && typeof item.parentId === "string" && ticketIds.has(item.parentId));
+      });
+    }
+    if (key === "GET daily-scrum") {
+      const candidates = record(data?.candidates);
+      const hiddenKeys = new Set<string>();
+      for (const field of ["work", "yesterdayWork"] as const) {
+        if (!Array.isArray(candidates?.[field])) continue;
+        candidates[field] = candidates[field].filter((value: unknown) => {
+          const work = record(value);
+          const hidden = work?.parentKind === "ticket";
+          if (hidden && typeof work?.key === "string") hiddenKeys.add(work.key);
+          return !hidden;
+        });
+      }
+      if (draft) {
+        for (const field of ["selectedWorkIds", "selectedYesterdayWorkIds"] as const) {
+          if (Array.isArray(draft[field])) draft[field] = draft[field].filter((value: unknown) => typeof value !== "string" || !hiddenKeys.has(value));
+        }
+      }
+    }
     if (key === "GET daily-scrum" && draft?.workStatus === "skip" && draft.skipReason === null) {
       // Old clients express a skipped day through skipReason and clear that
       // field when selecting work again. Do not make a new skip invisible.

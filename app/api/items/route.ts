@@ -70,19 +70,19 @@ export async function POST(request: Request) {
         : [];
       if (!titles.length) return Response.json({ error: "titles are required" }, { status: 400 });
       if (payload.kind !== undefined && payload.kind !== "task") return Response.json({ error: "bulk creation only supports Task" }, { status: 400 });
-      const projectId = asNullableString(payload.parentId);
+      const parentId = asNullableString(payload.parentId);
       let routineId = asNullableString(payload.routineId);
-      if (authorization.apiToken && payload.generalConfirmed === true && (projectId || routineId)) {
-        return Response.json({ error: "Choose an exact Project/Routine or General, not both" }, { status: 400 });
+      if (authorization.apiToken && payload.generalConfirmed === true && (parentId || routineId)) {
+        return Response.json({ error: "Choose an exact Project/Ticket/Routine or General, not both" }, { status: 400 });
       }
-      if (authorization.apiToken && !projectId && !routineId) {
+      if (authorization.apiToken && !parentId && !routineId) {
         const reviewed = await inspectTokenTaskPlacement(authorization, titles.join("\n"), undefined, payload.generalConfirmed === true);
         if (reviewed.placement.status === "selection_required") return taskPlacementRequired(reviewed.placement);
         routineId = reviewed.context.fallback?.id ?? null;
       }
       const created = await createLinkedTasks(authorization.ownerId, {
         titles,
-        projectId,
+        parentId,
         routineId,
         assigneeMemberId: asMemberIds(payload.assigneeMemberId, 1)[0] ?? null,
         createdByUserId: authorization.userId,
@@ -113,7 +113,7 @@ export async function POST(request: Request) {
     const parentId = payload.parentId === undefined ? undefined : asNullableString(payload.parentId);
     let routineId = asNullableString(payload.routineId);
     if (authorization.apiToken && payload.generalConfirmed === true && (parentId || routineId)) {
-      return Response.json({ error: "Choose an exact Project/Routine or General, not both" }, { status: 400 });
+      return Response.json({ error: "Choose an exact Project/Ticket/Routine or General, not both" }, { status: 400 });
     }
     if (authorization.apiToken && (kind ?? "task") === "task" && !parentId && !routineId) {
       const reviewed = await inspectTokenTaskPlacement(authorization, title, asString(payload.description), payload.generalConfirmed === true);
@@ -192,7 +192,7 @@ function taskPlacementRequired(placement: ReturnType<typeof reviewTaskGeneralPla
     code: "task_placement_confirmation_required",
     created: false,
     placement,
-    nextStep: "Choose one returned Project/Routine, or explicitly choose General and retry with generalConfirmed=true.",
+    nextStep: "Choose one returned Project/Ticket/Routine, or explicitly choose General and retry with generalConfirmed=true.",
   }, { status: 409, headers: { "Cache-Control": "no-store" } });
 }
 

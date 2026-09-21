@@ -402,7 +402,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(page, /void restoreRecord\(record\)/);
   assert.match(page, /void restoreItem\(entry\)/);
   assert.match(page, /cycleId=\{createItemCycle\?\.id \?\? null\}/);
-  assert.match(page, /cycleId: kind === "task"/);
+  assert.match(page, /cycleId: kind === "ticket" \|\| kind === "task"/);
   assert.doesNotMatch(page, /\/api\/auth\/session/);
   assert.match(bootstrapRoute, /Promise\.all/);
   assert.match(bootstrapRoute, /Object\.assign\(\{\}, \.\.\.await Promise\.all/);
@@ -677,7 +677,7 @@ test("ships Project property, Task table, document, template, trash, and MCP sur
   assert.match(page, /연결 끊긴 Task/);
   assert.match(page, /bulk-delete-bar/);
   assert.match(page, /DeleteSelectCheckbox/);
-  assert.match(page, /삭제한 Project·Task와 전체 데이터 정리 기록/);
+  assert.match(page, /삭제한 Project·Ticket·Task와 전체 데이터 정리 기록/);
   assert.match(page, /전체 OKR 클린업 기록/);
   assert.match(page, /confirmationText: t\("영구 삭제"\)/);
   assert.match(page, /연결된 Task/);
@@ -771,8 +771,8 @@ test("defaults unlinked web Tasks to General and exposes direct bulk deletion", 
   assert.match(page, /AI 대화로 추가/);
   assert.match(page, /연결 대상 · 선택 사항/);
   assert.match(page, /선택 안 함 — General에 저장/);
-  assert.match(page, /연결할 Project·Routine이 없어 General\(기본\)에 저장됩니다/);
-  assert.match(page, /Project·Routine에 연결하지 않은 Task가 모이는 기본 목록/);
+  assert.match(page, /연결할 Project·Ticket·Routine이 없어 General\(기본\)에 저장됩니다/);
+  assert.match(page, /Project·Ticket·Routine에 연결하지 않은 Task가 모이는 기본 목록/);
   assert.doesNotMatch(page, /부모가 없는 Task/);
   assert.match(page, /initialRoutines=\{routines\}/);
   assert.match(page, /dailyScrumMemoryCache/);
@@ -783,7 +783,7 @@ test("defaults unlinked web Tasks to General and exposes direct bulk deletion", 
   assert.doesNotMatch(page, /할 일을 입력하면 미분류 Task에 저장됩니다/);
   assert.match(styles, /\.task-selection-bar/);
   assert.match(styles, /\.page-create-actions/);
-  assert.match(paceData, /if \(!projectId && !routineId\) routineId = \(await ensureGeneralRoutine\(ownerId\)\)\.id/);
+  assert.match(paceData, /if \(!parentId && !routineId\) routineId = \(await ensureGeneralRoutine\(ownerId\)\)\.id/);
   assert.match(paceData, /kind === "task" && !parentId && !routineId[\s\S]*?ensureGeneralRoutine\(ownerId\)/);
   assert.match(paceData, /export async function createLinkedTasks[\s\S]*?await d1\.batch/);
   assert.match(itemsRoute, /payload\.titles !== undefined/);

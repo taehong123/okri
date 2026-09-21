@@ -21,6 +21,7 @@ function fixture(t) {
     INSERT INTO workspace_members(id,workspace_id,display_name) VALUES ('member','team','조성배'),('private-member','other','기밀 담당자');
     INSERT INTO items(id,owner_id,kind,title,cycle_id) VALUES ('objective','team','objective','성장 목표','cycle'),('kr','team','key_result','성장 지표','cycle'),('ini','team','initiative','성장 계획','cycle');
     INSERT INTO items(id,owner_id,kind,title,parent_id,cycle_id,due_date) VALUES ('project','team','project','대시보드','ini','cycle','2026-09-06'),('task','team','task','대시보드 연결','project','cycle','2026-09-05');
+    INSERT INTO items(id,owner_id,kind,title,status) VALUES ('ticket','team','ticket','고객 로그인 문의','backlog');
     INSERT INTO items(id,owner_id,kind,title,status) VALUES ('done','team','project','대시보드','done'),('dev-done','team','task','개발 완료 업무','development_done'),('private','other','task','대시보드 기밀','todo'),('status-trash','team','task','삭제된 업무','archived');
     INSERT INTO items(id,owner_id,kind,title,archived_at) VALUES ('trash','team','project','대시보드 삭제','2026-09-01');
     INSERT INTO items(id,owner_id,kind,title,description,parent_id) VALUES ('orphan','team','task','안전한 항목','설명으로 찾아요','private');

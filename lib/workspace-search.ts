@@ -1,4 +1,4 @@
-export const SEARCH_KINDS = ["okr_file", "objective", "key_result", "initiative", "project", "task", "routine", "member"] as const;
+export const SEARCH_KINDS = ["okr_file", "objective", "key_result", "initiative", "project", "ticket", "task", "routine", "member"] as const;
 export type SearchKind = typeof SEARCH_KINDS[number];
 export type SearchResult = {
   id: string;
@@ -57,7 +57,7 @@ export function buildSearchQuery(ownerId: string, input: SearchRequest) {
       : input.filters.status === "active" ? "status NOT IN ('done','development_done','closed','inactive')" : "status = 'blocked'");
   }
   if (input.filters.due) {
-    conditions.push("kind IN ('project','task','objective','key_result','initiative','okr_file')");
+    conditions.push("kind IN ('project','ticket','task','objective','key_result','initiative','okr_file')");
     if (input.filters.due === "none") conditions.push("dueDate IS NULL");
     else { conditions.push(input.filters.due === "today" ? "substr(dueDate,1,10) = ?" : "substr(dueDate,1,10) < ? AND status NOT IN ('done','development_done','closed')"); args.push(input.date); }
   }

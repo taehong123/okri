@@ -28,7 +28,7 @@ export function DailyWorkPicker({ label, work, selected, disabled, noPlanned, ye
   function closeOnEscape(event: KeyboardEvent) { if (event.key === "Escape" && !busy) { event.stopPropagation(); closeEntry(); } }
   const normalized = query.trim().toLocaleLowerCase();
   const groups = useMemo(() => {
-    const rows = new Map<string, { title: string; parentKey?: string; kind?: "project" | "routine"; hasTasks?: boolean; entries: DailyWork[] }>();
+    const rows = new Map<string, { title: string; parentKey?: string; kind?: "project" | "ticket" | "routine"; hasTasks?: boolean; entries: DailyWork[] }>();
     if (!yesterday) {
       for (const container of containers) {
         const parentKey = `${container.kind}:${container.id}`;
@@ -41,7 +41,7 @@ export function DailyWorkPicker({ label, work, selected, disabled, noPlanned, ye
         continue;
       }
       const key = entry.parentId ? `${entry.parentKind ?? "parent"}:${entry.parentId}` : "general";
-      const parentKind = entry.parentKind === "project" || entry.parentKind === "routine" ? entry.parentKind : undefined;
+      const parentKind = entry.parentKind === "project" || entry.parentKind === "ticket" || entry.parentKind === "routine" ? entry.parentKind : undefined;
       const group = rows.get(key) ?? { title: entry.parentId ? entry.parentTitle : "General", kind: parentKind, entries: [] };
       group.entries.push(entry); rows.set(key, group);
     }
@@ -70,10 +70,10 @@ export function DailyWorkPicker({ label, work, selected, disabled, noPlanned, ye
   return <details className={`daily-task-picker${hasConflict ? " has-error" : ""}`} aria-label={label} open={yesterday ? undefined : true}>
     <summary aria-label={t("{value1} 선택 열기", { value1: messageValue(label) })}><span><b>{label}</b><small>{selected.length ? t("{count}개 선택", { count: selected.length }) : t("선택 없음")}</small></span><ChevronDown size={18} aria-hidden="true" /></summary>
     <div className="daily-picker-panel">
-      <label className="daily-picker-search"><Search size={16} aria-hidden="true" /><span className="sr-only">{t("업무 검색")}</span><input type="search" value={query} disabled={Boolean(creating)} onChange={(event) => setQuery(event.target.value)} placeholder={t("Project · Task · Routine 검색")} /></label>
+      <label className="daily-picker-search"><Search size={16} aria-hidden="true" /><span className="sr-only">{t("업무 검색")}</span><input type="search" value={query} disabled={Boolean(creating)} onChange={(event) => setQuery(event.target.value)} placeholder={t("Project · Ticket · Task · Routine 검색")} /></label>
       <div className="daily-task-groups">{groups.map((group) => {
         const container = work.find((entry) => (entry.kind === "project" || entry.kind === "routine") && entry.key === group.key);
-        return <section key={group.key} aria-label={group.title} data-kind={group.kind}><header className="daily-project-heading"><h3>{group.kind && <span className="daily-container-kind">{t(group.kind === "project" ? "Project" : "Routine")}</span>}{container ? <button type="button" title={t("{value1} 열기", { value1: container.title })} onClick={() => onOpen(container)}>{group.title}</button> : group.title}</h3>{group.parentKey && onCreate && <button className="icon-button" type="button" disabled={disabled || busy || Boolean(creating)} title={t("{value1}에 Task 추가", { value1: group.title })} aria-label={t("{value1}에 Task 추가", { value1: group.title })} onClick={(event) => { addButton.current = event.currentTarget; setCreated(null); setCreateFailed(false); setCreating({ parentKey: group.parentKey!, title: "", requestId: crypto.randomUUID() }); }}><Plus size={16} /></button>}</header>
+        return <section key={group.key} aria-label={group.title} data-kind={group.kind}><header className="daily-project-heading"><h3>{group.kind && <span className="daily-container-kind">{t(group.kind === "project" ? "Project" : group.kind === "ticket" ? "Ticket" : "Routine")}</span>}{container ? <button type="button" title={t("{value1} 열기", { value1: container.title })} onClick={() => onOpen(container)}>{group.title}</button> : group.title}</h3>{group.parentKey && onCreate && <button className="icon-button" type="button" disabled={disabled || busy || Boolean(creating)} title={t("{value1}에 Task 추가", { value1: group.title })} aria-label={t("{value1}에 Task 추가", { value1: group.title })} onClick={(event) => { addButton.current = event.currentTarget; setCreated(null); setCreateFailed(false); setCreating({ parentKey: group.parentKey!, title: "", requestId: crypto.randomUUID() }); }}><Plus size={16} /></button>}</header>
         {created && created.parentKey === group.parentKey && <div className="daily-create-feedback" role="status" aria-atomic="true" tabIndex={-1} ref={feedback}>
           <Check size={18} aria-hidden="true" /><div><b>{created.title}</b><span>{t("Task를 추가하고 오늘 할 일에 선택했습니다.")}</span></div>
           <button className="icon-button" type="button" aria-label={t("추가 결과 닫기")} title={t("추가 결과 닫기")} onClick={() => { setCreated(null); requestAnimationFrame(() => addButton.current?.focus()); }}><X size={16} /></button>

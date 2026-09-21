@@ -42,6 +42,11 @@
 - Self-hosted deployment support keeps the frozen `/api/mobile/v1` routes,
   native-session semantics and SQLite-compatible schema intact. This is an
   infrastructure migration only; no native UI or mobile release is claimed.
+- Web adds the independent `Ticket > Task` intake structure, including search,
+  recoverable trash and MCP lifecycle tools. The frozen native v1 adapter omits
+  Ticket records and their child Tasks from bootstrap and Daily responses, so
+  installed clients keep their Project/Routine/General model unchanged. Native
+  Ticket UI is deferred to a later store release with new consumer fixtures.
 - Slack channel-main `@OKRI` invocations retain their own message as the
   creation source even when Slack thread lookup is unavailable, while threaded
   invocations keep excluding the live command. This is a Slack-only conversation

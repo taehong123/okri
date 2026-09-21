@@ -431,14 +431,14 @@ test("저장 실패 시 가짜 Task나 허위 성공 메시지를 만들지 않�
   await expect(page.getByRole("status")).toHaveCount(0);
 });
 
-test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 General 안내를 표시한다", async ({ page }) => {
+test("연결할 Project·Ticket·Routine이 없으면 직접 추가와 AI 추가 모두 General 안내를 표시한다", async ({ page }) => {
   await installApiMocks(page, { withoutTaskContainers: true, slowRoutineRefresh: true });
   await page.goto("/?view=inbox");
 
   await page.getByRole("button", { name: "직접 추가", exact: true }).click();
   const dialog = page.getByRole("dialog", { name: "새 항목" });
   await expect(dialog.getByLabel("연결 대상 · 선택 사항")).toHaveCount(0);
-  await expect(dialog.getByText("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("연결할 Project·Ticket·Routine이 없어 General(기본)에 저장됩니다.", { exact: true })).toBeVisible();
   await dialog.getByLabel("이름").fill("General 저장 확인");
   await expect(dialog.getByRole("button", { name: "만들기" })).toBeEnabled();
   await dialog.getByRole("button", { name: "새 항목 닫기" }).click();
@@ -449,7 +449,7 @@ test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 
   await page.getByRole("button", { name: "메시지 보내기" }).click();
   await expect(page.getByLabel("Task 초안")).toHaveValue("AI로 정리된 Task");
   await expect(page.getByLabel("연결 대상 · 선택 사항")).toHaveCount(0);
-  await expect(page.getByText("연결할 Project·Routine이 없어 General(기본)에 저장됩니다.", { exact: true })).toBeVisible();
+  await expect(page.getByText("연결할 Project·Ticket·Routine이 없어 General(기본)에 저장됩니다.", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Task 1개 만들기" })).toBeEnabled();
 
   await page.goto("/?view=routines");
@@ -457,7 +457,7 @@ test("연결할 Project·Routine이 없으면 직접 추가와 AI 추가 모두 
   const generalCard = page.getByRole("article").filter({ hasText: "General" });
   await expect(generalCard).toContainText("General");
   await expect(generalCard.getByText("기본", { exact: true })).toBeVisible();
-  await expect(generalCard).toContainText("Project·Routine에 연결하지 않은 Task가 모이는 기본 목록");
+  await expect(generalCard).toContainText("Project·Ticket·Routine에 연결하지 않은 Task가 모이는 기본 목록");
 });
 
 test("Project·Task·Routine 추가 진입과 AI 도우미를 같은 구조로 제공한다", async ({ page, isMobile }) => {

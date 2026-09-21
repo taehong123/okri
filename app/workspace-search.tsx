@@ -14,6 +14,7 @@ const menuEntries: Menu[] = [
   { label: "OKR", keywords: "목표 objective key result initiative 파일", destination: { view: "okr" } },
   { label: "Project", keywords: "프로젝트 project", destination: { view: "work" } },
   { label: "간트", keywords: "일정 타임라인 gantt timeline project schedule", destination: { view: "gantt" } },
+  { label: "Ticket", keywords: "티켓 요청 문의 이슈 ticket request issue", destination: { view: "tickets" } },
   { label: "Task", keywords: "태스크 할일 task", destination: { view: "inbox" } },
   { label: "Routine", keywords: "루틴 반복 routine", destination: { view: "routines" } },
   { label: "데일리 스크럼", keywords: "daily scrum 데일리", destination: { view: "scrum" } },
@@ -35,7 +36,7 @@ const menuEntries: Menu[] = [
   { label: "AI 연결", keywords: "mcp chatgpt claude codex", destination: { ai: true } },
   { label: "요금제 및 결제", keywords: "billing plan 결제 요금", destination: { view: "billing" } },
 ];
-const kindLabels: Record<SearchResult["kind"], string> = { okr_file: "OKR 파일", objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", task: "Task", routine: "Routine", member: "멤버" };
+const kindLabels: Record<SearchResult["kind"], string> = { okr_file: "OKR 파일", objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", ticket: "Ticket", task: "Task", routine: "Routine", member: "멤버" };
 type History = { refs: string[]; queries: string[] };
 function readHistory(key: string): History {
   try {

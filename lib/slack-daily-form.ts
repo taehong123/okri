@@ -2,7 +2,7 @@ import type { DailyWork } from "@/lib/daily-work";
 import { dailyWorkStatusLabel, normalizeDailyWorkStatus, parseDailyWorkStatuses, type DailyWorkStatus } from "@/lib/daily-work-status";
 import type { Translator } from "@/lib/server-language";
 
-const names = { project: "Project", task: "Task", routine: "Routine" };
+const names = { project: "Project", ticket: "Ticket", task: "Task", routine: "Routine" };
 const identityTranslator: Translator = (key) => key;
 
 export type DailyChecklist = {
@@ -71,7 +71,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
       const emptyContainer = input.taskFocused && (entry.kind === "project" || entry.kind === "routine")
         && !input.work.some((task) => task.kind === "task" && task.parentKind === entry.kind && task.parentId === entry.id);
       const addButton = target && !input.taskEntry ? { type: "button", action_id: "daily_checklist_add_task", text: { type: "plain_text", text: t("Task 추가") }, value: target.key } : null;
-      const containerKind = group.key.startsWith("project:") ? "project" : group.key.startsWith("routine:") ? "routine" : null;
+      const containerKind = group.key.startsWith("project:") ? "project" : group.key.startsWith("ticket:") ? "ticket" : group.key.startsWith("routine:") ? "routine" : null;
       const groupTitle = containerKind ? `${t(names[containerKind])} · ${group.title}` : group.key === "general" ? t("General") : group.title;
       blocks.push({ type: "section", text: { type: "plain_text", text: groupTitle.slice(0, 2900) },
         ...(!emptyContainer && addButton ? { accessory: addButton } : {}) });
@@ -130,7 +130,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
 }
 
 export function dailyWorkContainerLabel(work: Pick<DailyWork, "parentKind" | "parentTitle">, t: Translator = identityTranslator) {
-  const kind = work.parentKind === "project" ? t("Project") : work.parentKind === "routine" ? t("Routine") : "";
+  const kind = work.parentKind === "project" ? t("Project") : work.parentKind === "ticket" ? t("Ticket") : work.parentKind === "routine" ? t("Routine") : "";
   return kind ? `${kind} · ${work.parentTitle}` : work.parentTitle;
 }
 

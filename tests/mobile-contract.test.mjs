@@ -31,13 +31,41 @@ test("new domain enum values cannot reach v1 clients without an explicit compati
       enums[declaration.name.text] = expression.elements.map(element => { assert.ok(ts.isStringLiteral(element)); return element.text; });
     }
   }
-  assert.deepEqual(enums.ITEM_KINDS, contracts.itemV1.shape.kind.options);
+  assert.ok(enums.ITEM_KINDS.includes("ticket"));
+  assert.deepEqual(enums.ITEM_KINDS.filter(kind => kind !== "ticket"), contracts.itemV1.shape.kind.options);
   assert.deepEqual(enums.ITEM_STATUSES, contracts.itemV1.shape.status.options);
   assert.deepEqual(enums.ROUTINE_CADENCES, contracts.routineV1.shape.cadence.options);
 });
+test("web-only Tickets and their Tasks are hidden from the frozen native v1 model", async () => {
+  const bootstrap = structuredClone(fixture.bootstrap);
+  bootstrap.items.push({ ...bootstrap.items[0], id: "ticket-1", kind: "ticket", cycleId: null, parentId: null, title: "문의" });
+  bootstrap.items.push({ ...bootstrap.items.find(item => item.kind === "task"), id: "ticket-task", cycleId: null, parentId: "ticket-1", title: "문의 처리" });
+  const bootstrapResponse = await mobileV1("bootstrap", async () => Response.json(bootstrap))(request("bootstrap"));
+  assert.equal(bootstrapResponse.status, 200);
+  const nativeBootstrap = await bootstrapResponse.json();
+  assert.ok(!nativeBootstrap.items.some(item => item.id === "ticket-1" || item.id === "ticket-task"));
+
+  const daily = structuredClone(fixture.daily);
+  const ticketWork = { ...daily.candidates.work.find(work => work.kind === "task"), id: "ticket-task", key: "task:ticket-task", parentId: "ticket-1", parentKind: "ticket", parentTitle: "문의" };
+  daily.candidates.work.push(ticketWork);
+  daily.candidates.yesterdayWork.push(ticketWork);
+  daily.draft.selectedWorkIds.push(ticketWork.key);
+  daily.draft.selectedYesterdayWorkIds.push(ticketWork.key);
+  const dailyResponse = await mobileV1("daily-scrum", async () => Response.json(daily))(request("daily-scrum"));
+  assert.equal(dailyResponse.status, 200);
+  const nativeDaily = await dailyResponse.json();
+  assert.ok(!nativeDaily.candidates.work.some(work => work.parentKind === "ticket"));
+  assert.ok(!nativeDaily.candidates.yesterdayWork.some(work => work.parentKind === "ticket"));
+  assert.ok(!nativeDaily.draft.selectedWorkIds.includes(ticketWork.key));
+  assert.ok(!nativeDaily.draft.selectedYesterdayWorkIds.includes(ticketWork.key));
+});
 test("web bootstrap composition maps isCurrent and does not expose other user IDs", async () => {
   const payload = structuredClone(fixture.bootstrap);
-  payload.team.members = payload.team.members.map(({ userId, ...m }) => ({ ...m, isCurrent: true }));
+  payload.team.members = payload.team.members.map((member) => {
+    const visible = { ...member };
+    delete visible.userId;
+    return { ...visible, isCurrent: true };
+  });
   payload.team.members.push({ ...payload.team.members[0], id: "other", isCurrent: false });
   const route = mobileV1("bootstrap", async req => {
     assert.equal(new URL(req.url).pathname, "/api/bootstrap");

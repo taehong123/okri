@@ -8,7 +8,7 @@ import { t , apiError , getClientLocale , messageValue } from "@/lib/client-lang
 type DataTargetKind = "key_result" | "project";
 export type DataItem = {
   id: string;
-  kind: "objective" | "key_result" | "initiative" | "project" | "task";
+  kind: "objective" | "key_result" | "initiative" | "project" | "ticket" | "task";
   cycleId: string | null;
   parentId: string | null;
   title: string;

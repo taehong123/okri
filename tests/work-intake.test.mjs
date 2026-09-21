@@ -36,6 +36,7 @@ function fixture() {
       ('ini','a','initiative','첫 경험 단순화','cycle-a','kr',NULL,'todo','2026-09-01'),
       ('p','a','project','온보딩 개편','cycle-a','ini',NULL,'in_progress','2026-09-02'),
       ('percent','a','project','100% 완료','cycle-a','ini',NULL,'todo','2026-09-01'),
+      ('ticket','a','ticket','로그인 오류 문의',NULL,NULL,NULL,'backlog','2026-09-03'),
       ('old','a','project','종료 주기','closed','ini',NULL,'todo','2026-09-02'),
       ('trash','a','project','휴지통','cycle-a','ini','2026-09-01','archived','2026-09-02'),
       ('hidden','b','project','온보딩 비밀',NULL,NULL,NULL,'todo','2026-09-02');
@@ -78,7 +79,7 @@ test("Task context is one read batch with tenant isolation, lineage and no docum
     const result = await intake.readWorkContext(d1, "a", "user", { kind: "task" });
     assert.equal(stats.batches, 1);
     assert.equal(db.prepare("SELECT total_changes() AS n").get().n, before);
-    assert.deepEqual(result.parents.map((row) => row.id), ["p", "percent"]);
+    assert.deepEqual(result.parents.map((row) => row.id), ["p", "percent", "ticket"]);
     assert.deepEqual(result.parents[0].path, ["고객 경험", "활성화 40%", "첫 경험 단순화", "온보딩 개편"]);
     assert.equal(result.parents[0].cycleId, "cycle-a");
     assert.deepEqual(result.routines.map((row) => row.id), ["r"]);
@@ -112,7 +113,7 @@ test("Queries escape LIKE patterns, preserve General fallback and disclose trunc
   const { db, d1 } = fixture();
   try {
     const limited = await intake.readWorkContext(d1, "a", "user", { kind: "task", limit: 1 });
-    assert.equal(limited.parents.length, 1);
+    assert.equal(limited.parents.length, 2);
     assert.equal(limited.truncated.project, true);
     assert.equal(limited.truncated.members, true);
     const filtered = await intake.readWorkContext(d1, "a", "user", { kind: "task", query: "%", memberQuery: "peer@example.com" });
@@ -134,6 +135,20 @@ test("Task context ranks an older Project named in the source ahead of recent ca
     assert.equal(result.parents[0].sourceMatched, true);
     assert.equal(result.truncated.project, true);
     assert.match(result.nextStep, /General보다 우선/);
+  } finally { db.close(); }
+});
+
+test("Ticket is an independent intake type and a first-class Task container", async () => {
+  const { db, d1 } = fixture();
+  try {
+    const ticket = await intake.readWorkContext(d1, "a", "user", { kind: "ticket" });
+    assert.deepEqual(ticket.parents, []);
+    assert.deepEqual(ticket.fields.ticket.required, ["title"]);
+    const task = await intake.readWorkContext(d1, "a", "user", { kind: "task", sourceText: "로그인 오류 문의를 처리" });
+    const placement = intake.reviewTaskGeneralPlacement(task);
+    assert.equal(placement.status, "selection_required");
+    assert.deepEqual(placement.candidates.map((entry) => [entry.id, entry.kind]), [["ticket", "ticket"]]);
+    assert.match(intake.WORKFLOW_INSTRUCTIONS, /independent Ticket > Task/);
   } finally { db.close(); }
 });
 
@@ -164,7 +179,7 @@ test("Unsure stays undecided; Routine does not need an Initiative or invented ta
   try {
     const result = await intake.readWorkContext(d1, "a", "user");
     assert.equal(result.kind, "unsure");
-    assert.deepEqual(Object.keys(result.fields), ["task", "project", "routine"]);
+    assert.deepEqual(Object.keys(result.fields), ["task", "project", "ticket", "routine"]);
     assert.equal(result.parents.filter((row) => row.kind === "initiative").length, 1);
     const routine = await intake.readWorkContext(d1, "a", "user", { kind: "routine" });
     assert.deepEqual(routine.parents, []);
@@ -204,20 +219,23 @@ function mcpFixture() {
     description: "", keyResultDescription: "", objectiveDescription: "", fingerprint: "a".repeat(64),
     revision: { initiative: "1", keyResult: "1", objective: "1", cycleStatus: "active" } };
   const data = {
-    ITEM_CADENCES: ["daily", "weekly", "monthly", "quarterly"], ITEM_KINDS: ["objective", "key_result", "initiative", "project", "task"],
+    ITEM_CADENCES: ["daily", "weekly", "monthly", "quarterly"], ITEM_KINDS: ["objective", "key_result", "initiative", "project", "ticket", "task"],
     ITEM_PRIORITIES: ["low", "medium", "high", "urgent"], ITEM_STATUSES: ["todo", "in_progress", "done", "blocked", "archived"],
     GROUP_COLORS: ["gray"], GROUP_VISIBILITIES: ["open", "private"], PROPERTY_TYPES: ["text", "number"], ROUTINE_CADENCES: ["daily", "weekly", "monthly"],
     getWorkspaceRules: async () => rules,
     getItem: async (_owner, id) => id === "task" ? fullItem({ id, status: "in_progress", cycleId: "cycle-a" })
+      : id === "ticket" ? fullItem({ id, kind: "ticket", title: "로그인 오류 문의", status: "backlog" })
+      : id === "trashed-ticket" ? fullItem({ id, kind: "ticket", title: "복구할 문의", status: "archived", archivedAt: "now" })
       : id === "approved-project" ? fullItem({ id, kind: "project", title: reviewReceipt.proposal.title,
         description: reviewReceipt.proposal.description, progress: reviewReceipt.proposal.progress, cycleId: "cycle-a", parentId: "ini" })
         : id === "p" || id === "ini" ? fullItem({ id, kind: id === "p" ? "project" : "initiative", cycleId: "cycle-a" }) : null,
     createItem: async (_owner, input) => { calls.push({ method: "create", input }); return fullItem(input); },
     updateItem: async (_owner, id, input) => { calls.push({ method: "update", input }); return fullItem({ id, status: "in_progress", ...input }); },
-    createLinkedTasks: async (_owner, input) => { calls.push({ method: "batch", input }); return input.titles.map((title) => fullItem({ title, cycleId: "cycle-a", parentId: input.projectId, dueDate: input.dueDate })); },
+    createLinkedTasks: async (_owner, input) => { calls.push({ method: "batch", input }); return input.titles.map((title) => fullItem({ title, cycleId: "cycle-a", parentId: input.parentId, dueDate: input.dueDate })); },
     archiveProject: async (_owner, _user, id) => { calls.push({ method: "archive", id }); return { project: fullItem({ id, kind: "project", title: "Archived", archivedAt: "now" }), affectedCount: 3 }; },
-    trashItems: async (_owner, _user, input) => { calls.push({ method: "trash-task", input }); return { trashedRootIds: input.itemIds, projectCount: 0, taskCount: 1, affectedItemCount: 1 }; },
+    trashItems: async (_owner, _user, input) => { calls.push({ method: input.itemIds[0] === "ticket" ? "trash-ticket" : "trash-task", input }); return { trashedRootIds: input.itemIds, projectCount: 0, ticketCount: input.itemIds[0] === "ticket" ? 1 : 0, taskCount: 1, affectedItemCount: input.itemIds[0] === "ticket" ? 2 : 1 }; },
     restoreProject: async (_owner, id) => { calls.push({ method: "restore", id }); return { project: fullItem({ id, kind: "project", title: "Restored" }), affectedCount: 3 }; },
+    restoreTrashedItems: async (_owner, ids) => { calls.push({ method: "restore-ticket", ids }); return { restored: true, restoredRootIds: ids, restoredCount: 2 }; },
     getItemPropertiesByName: async (_owner, ids) => { calls.push({ method: "properties", ids }); return {}; },
     getItemAssignmentMap: async () => ({}),
     replaceItemAssignmentRole: async () => {},
@@ -401,6 +419,24 @@ test("MCP moves an explicitly confirmed Task to recoverable trash with existing 
     assert.deepEqual(result, { trashed: true, title: "Task", taskCount: 1 });
     assert.deepEqual(f.calls.find((call) => call.method === "trash-task")?.input, { itemIds: ["task"] });
     await assert.rejects(() => f.call("trash_task", { id: "p", confirmed: true }), /Task not found/);
+  } finally { f.db.close(); }
+});
+
+test("MCP moves and restores a Ticket with its direct Tasks", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const { z } = require("zod");
+    const trashDefinition = f.tools.get("trash_ticket").definition;
+    const schema = z.object(trashDefinition.inputSchema);
+    assert.equal(schema.safeParse({ id: "ticket" }).success, false);
+    assert.equal(trashDefinition.annotations.destructiveHint, true);
+    const trashed = await f.call("trash_ticket", { id: "ticket", confirmed: true });
+    assert.deepEqual(trashed, { trashed: true, title: "로그인 오류 문의", taskCount: 1 });
+    assert.deepEqual(f.calls.find((call) => call.method === "trash-ticket")?.input, { itemIds: ["ticket"] });
+    const restored = await f.call("restore_ticket", { id: "trashed-ticket" });
+    assert.deepEqual(restored, { restored: true, title: "복구할 문의", restoredCount: 2 });
+    assert.deepEqual(f.calls.find((call) => call.method === "restore-ticket")?.ids, ["trashed-ticket"]);
   } finally { f.db.close(); }
 });
 

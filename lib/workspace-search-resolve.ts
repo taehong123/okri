@@ -30,7 +30,7 @@ export async function resolveSearchResult(ownerId: string, kind: SearchKind, id:
       inArray(items.kind, ["objective", "key_result", "initiative"]), isNull(items.archivedAt), ne(items.status, "archived")));
     tree.forEach((row) => context.set(row.id, row));
   }
-  if (item?.kind === "project") {
+  if (item?.kind === "project" || item?.kind === "ticket") {
     const tasks = await db.select().from(items).where(and(eq(items.ownerId, ownerId), eq(items.parentId, id), eq(items.kind, "task"), isNull(items.archivedAt), ne(items.status, "archived")));
     tasks.forEach((row) => context.set(row.id, row));
   }

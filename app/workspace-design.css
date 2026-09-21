@@ -57,6 +57,42 @@
 .app-shell .task-table-row .name-open-button { font-weight: 400; }
 .app-shell .task-list-row { padding-block: var(--space-2); }
 .app-shell .task-list-open b { font-weight: 400; line-height: 1.6; }
+.app-shell .ticket-workspace { min-width: 0; border-top: 1px solid var(--border-default); }
+.app-shell .ticket-toolbar { min-height: var(--row-height); display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border-bottom: 1px solid var(--border-default); }
+.app-shell .ticket-toolbar > label { min-width: 12rem; max-width: 24rem; flex: 1; display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); padding: 0 var(--space-3); border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--input-bg); color: var(--text-secondary); }
+.app-shell .ticket-toolbar input { min-width: 0; width: 100%; border: 0; outline: 0; background: transparent; color: var(--text-primary); font: inherit; font-size: var(--type-label); }
+.app-shell .ticket-toolbar > span { margin-left: auto; color: var(--text-secondary); font-size: var(--type-label); }
+.app-shell .ticket-status-filter { display: flex; align-items: center; padding: var(--space-1); border: 1px solid var(--border-default); border-radius: var(--radius-control); background: var(--bg-subtle); }
+.app-shell .ticket-status-filter button { min-height: calc(var(--control-height) - var(--space-2)); padding: 0 var(--space-3); border: 0; border-radius: calc(var(--radius-control) - 1px); background: transparent; color: var(--text-secondary); font: inherit; font-size: var(--type-label); cursor: pointer; }
+.app-shell .ticket-status-filter button[aria-pressed="true"] { background: var(--button-secondary-bg); color: var(--button-secondary-fg); }
+.app-shell .ticket-list { min-width: 0; }
+.app-shell .ticket-row { width: 100%; min-width: 0; min-height: calc(var(--row-height) + var(--space-3)); display: grid; grid-template-columns: .5rem minmax(12rem, 1fr) minmax(4.5rem, .28fr) minmax(4rem, .22fr) minmax(4rem, .22fr) minmax(6rem, .3fr) var(--control-height); align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border: 0; border-bottom: 1px solid var(--border-default); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.app-shell .ticket-row:hover { background: var(--bg-hover); }
+.app-shell .ticket-row-copy { min-width: 0; display: grid; gap: var(--space-1); }
+.app-shell .ticket-row-copy b { overflow: hidden; font-size: var(--type-body); font-weight: 500; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .ticket-row-copy small { overflow: hidden; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell :is(.ticket-row-status, .ticket-row-priority, .ticket-row-tasks, .ticket-row-due) { min-width: 0; color: var(--text-secondary); font-size: var(--type-label); white-space: nowrap; }
+.app-shell .ticket-row-tasks { display: inline-flex; align-items: center; gap: var(--space-1); }
+.app-shell .ticket-detail-panel { width: min(54rem, 100vw); background: var(--bg-page); }
+.app-shell .ticket-detail-panel > header { position: static; }
+.app-shell .ticket-property-form { border-bottom: 1px solid var(--border-default); }
+.app-shell .ticket-linked-tasks { display: grid; gap: var(--space-3); padding: var(--space-6); }
+.app-shell .ticket-linked-tasks > header { display: flex; align-items: center; justify-content: space-between; }
+.app-shell .ticket-linked-tasks > header > div { display: flex; align-items: center; gap: var(--space-2); }
+.app-shell .ticket-linked-tasks > header b { font-size: var(--type-section); font-weight: 600; }
+.app-shell .ticket-linked-tasks > header span { color: var(--text-secondary); font-size: var(--type-label); }
+.app-shell .ticket-task-create { display: grid; grid-template-columns: minmax(0, 1fr) minmax(8rem, .35fr) auto; gap: var(--space-2); }
+.app-shell .ticket-task-create :is(input, select, button) { min-width: 0; min-height: var(--control-height); border: 1px solid var(--border-control); border-radius: var(--radius-control); font: inherit; font-size: var(--type-label); }
+.app-shell .ticket-task-create :is(input, select) { padding: 0 var(--space-3); background: var(--input-bg); color: var(--text-primary); }
+.app-shell .ticket-task-create button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-1); padding: 0 var(--space-3); background: var(--button-primary-bg); color: var(--button-primary-fg); cursor: pointer; }
+.app-shell .ticket-task-list { border-top: 1px solid var(--border-default); }
+.app-shell .ticket-task-list > button { width: 100%; min-height: var(--row-height); display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr) var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) 0; border: 0; border-bottom: 1px solid var(--border-default); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
+.app-shell .ticket-task-list > button:hover { background: var(--bg-hover); }
+.app-shell .ticket-task-list > button > span:nth-child(2) { min-width: 0; display: grid; gap: var(--space-1); }
+.app-shell .ticket-task-list b { overflow: hidden; font-size: var(--type-body); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .ticket-task-list small, .app-shell .ticket-task-list > p { margin: 0; color: var(--text-secondary); font-size: var(--type-label); }
+.app-shell .ticket-task-list > p { padding: var(--space-6) 0; }
+.app-shell .danger-icon { color: var(--danger-fg); }
 .app-shell :is(.project-card-list, .board-column > div) { gap: var(--space-3); padding: var(--space-4) 0; }
 .app-shell :is(.project-card, .board-item, .routine-card) { border-radius: var(--radius-control); box-shadow: none; }
 .app-shell :is(.project-card-open, .routine-card) { padding: var(--space-4); gap: var(--space-4); }
@@ -303,3 +339,20 @@
 .daily-digest-settings .daily-digest-no-channel { color: var(--warning-fg); }
 .daily-digest-summary { display: flex; flex-wrap: wrap; justify-content: space-between; gap: var(--space-2) var(--space-4); padding-block: var(--space-3); border-top: 1px solid var(--border-default); font-size: var(--type-label); }
 .daily-digest-summary span { color: var(--text-secondary); overflow-wrap: anywhere; }
+
+@media (max-width: 700px) {
+  .app-shell .ticket-toolbar { align-items: stretch; flex-wrap: wrap; }
+  .app-shell .ticket-toolbar > label { min-width: 100%; max-width: none; }
+  .app-shell .ticket-status-filter { flex: 1; }
+  .app-shell .ticket-status-filter button { flex: 1; }
+  .app-shell .ticket-row { grid-template-columns: .5rem minmax(0, 1fr) var(--control-height); gap: var(--space-2); min-height: 5rem; }
+  .app-shell .ticket-row-copy { align-self: end; }
+  .app-shell .ticket-row-status { grid-column: 2; align-self: start; }
+  .app-shell .ticket-row-priority, .app-shell .ticket-row-tasks, .app-shell .ticket-row-due { display: none; }
+  .app-shell .ticket-row > svg { grid-column: 3; grid-row: 1 / span 2; }
+  .app-shell .ticket-detail-panel { width: 100vw; min-height: 100dvh; height: 100dvh; border-left: 0; }
+  .app-shell .ticket-detail-panel > header { position: sticky; top: 0; z-index: 8; padding: var(--space-4); background: var(--bg-page); }
+  .app-shell .ticket-linked-tasks { padding-inline: var(--space-4); padding-bottom: calc(var(--space-8) + env(safe-area-inset-bottom)); }
+  .app-shell .ticket-task-create { grid-template-columns: minmax(0, 1fr) auto; }
+  .app-shell .ticket-task-create select { grid-column: 1 / -1; grid-row: 2; }
+}

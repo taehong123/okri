@@ -60,6 +60,9 @@ test("Slack channel events, private responses, permissions, and request idempote
   assert.match(domain, /prepareSlackWorkDraft/);
   assert.match(domain, /검토 후 생성/);
   assert.match(domain, /selectedValue\(state, "work_target", targetAction\(command\)\)/);
+  assert.match(domain, /listItems\(authorization\.ownerId, \{ kind: "ticket"/);
+  assert.match(domain, /\["project", "ticket", "routine"\]\.includes\(parentKind\)/);
+  assert.match(domain, /parentKind === "project" \|\| parentKind === "ticket"/);
   assert.ok(domain.indexOf('parsed.command === "help"') < domain.indexOf("if (!linked)"));
   for (const command of ["/okri daily", "!내 업무", "!프로젝트 생성 [이름]", "!태스크 완료 [검색어]", "!메뉴얼"]) assert.ok(domain.includes(command));
   assert.match(domain, /authorization\.role === "viewer"/);

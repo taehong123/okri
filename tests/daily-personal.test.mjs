@@ -367,7 +367,7 @@ test("compact Slack checklist keeps every assigned Project, Task and Routine sel
     ["Project", "└ My Task", "Empty Project", "Store management", "└ Routine Task", "Empty Routine"]);
   assert.equal(modal.blocks[0].block_id, "work_status");
   assert.deepEqual(modal.blocks[0].element.options.map((option) => option.value), ["office", "remote", "skip"]);
-  assert.doesNotMatch(JSON.stringify(modal), /today_note|yesterday_note|blockers_note|skip_reason|skip_note|no_planned|\"value\":\"delete\"/);
+  assert.doesNotMatch(JSON.stringify(modal), /today_note|yesterday_note|blockers_note|skip_reason|skip_note|no_planned|"value":"delete"/);
   assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 2);
   const emptyHeading = modal.blocks.findIndex((block) => block.text?.text === "Project · Empty Project");
   assert.equal(modal.blocks[emptyHeading + 1].elements[0].text, "아직 Task가 없습니다.");
@@ -380,6 +380,15 @@ test("compact Slack checklist keeps every assigned Project, Task and Routine sel
   assert.equal(modal.blocks[emptyRoutineHeading + 2].elements[0].value, "routine:er");
   assert.match(JSON.stringify(modal), /daily_choice_routine:/);
   assert.match(JSON.stringify(modal), /아직 Task가 없습니다/);
+});
+
+test("compact Slack checklist labels Ticket Tasks without offering container creation", () => {
+  const ticketTask = { id: "tt", key: "task:tt", kind: "task", title: "Investigate request", parentId: "ticket", parentKind: "ticket", parentTitle: "Customer request" };
+  const input = { ...checklistInput([ticketTask]), taskFocused: true, taskTargets: [] };
+  const modal = form.dailyChecklistForm(input, "{}");
+  assert.ok(modal.blocks.some((block) => block.text?.text === "Ticket · Customer request"));
+  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 0);
+  assert.equal(form.dailyWorkContainerLabel(ticketTask), "Ticket · Customer request");
 });
 
 test("compact Slack state preserves assigned Project and Routine choices", async (t) => {

@@ -86,7 +86,7 @@ export default function WorkspaceBackups({ workspaceId, workspaceName, onNotice 
     <header className="backup-header"><div><h3>{t("백업 및 복원")}</h3><p>{t("30일 보관 · 한국 시간 기준")}</p></div><div className="backup-actions"><button type="button" onClick={() => void reload()} disabled={Boolean(busy)} aria-label={t("백업 목록 새로고침")} title={t("새로고침")}><RefreshCw size={15} /></button><button type="button" onClick={() => void create()} disabled={Boolean(busy)}>{busy === "create" ? <LoaderCircle className="spin" size={15} /> : <DatabaseBackup size={15} />}{busy === "create" ? t("백업 중") : t("지금 백업")}</button></div></header>
     {error && <p className="backup-error" role="alert">{error}</p>}
     {listing?.state?.last_error && <p className="backup-error" role="status">{t("최근 백업 작업을 완료하지 못했습니다. 다시 시도해 주세요.")}</p>}
-    <div className="backup-scope"><ShieldCheck size={17} /><p>{t("OKR·Project·Task·루틴·속성·프로젝트 본문·데일리 기록을 보관합니다. 멤버·그룹·권한·연동·결제·휴지통·첨부파일은 복원 대상에서 제외됩니다.")}</p></div>
+    <div className="backup-scope"><ShieldCheck size={17} /><p>{t("OKR·Project·Ticket·Task·루틴·속성·프로젝트 본문·데일리 기록을 보관합니다. 멤버·그룹·권한·연동·결제·휴지통·첨부파일은 복원 대상에서 제외됩니다.")}</p></div>
     {listing?.state?.last_success_at && <p className="backup-last">{t("마지막 백업")}{formatTime(listing.state.last_success_at)}</p>}
     {listing && <p className="backup-last">{listing.state?.last_daily_date ? t("최근 자동 백업 {value1}", { value1: messageValue(listing.state.last_daily_date) }) : t("자동 백업 실행 기록이 아직 없습니다.")}</p>}
     {busy && <p className="backup-progress" role="status"><LoaderCircle className="spin" size={16} />{busy === "restore" ? t("현재 상태를 백업하고 복원하고 있습니다. 완료될 때까지 기다려 주세요.") : busy === "create" ? t("현재 데이터를 별도 저장소에 백업하고 있습니다.") : t("백업을 불러오고 있습니다.")}</p>}

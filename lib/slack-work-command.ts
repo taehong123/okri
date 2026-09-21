@@ -162,14 +162,16 @@ export async function openSlackWorkCommandModal(triggerId: string, authorization
 export async function slackWorkCommandOptions(authorization: RequestAuthorization, memberId: string, actionId: string, query: string) {
   const normalized = query.trim().toLocaleLowerCase();
   if (actionId === "work_parent") {
-    const [projects, routines] = await Promise.all([
+    const [projects, tickets, routines] = await Promise.all([
       listItems(authorization.ownerId, { kind: "project", query: normalized || undefined, limit: 20 }),
+      listItems(authorization.ownerId, { kind: "ticket", query: normalized || undefined, limit: 20 }),
       listRoutines(authorization.ownerId, new Date().toISOString().slice(0, 10), false),
     ]);
     const matchingRoutines = routines.filter((routine) => !normalized || routine.title.toLocaleLowerCase().includes(normalized));
     const general = matchingRoutines.find((routine) => routine.systemKey === "general");
     const options = general ? [option(`General · ${general.title}`, `routine:${general.id}`)] : [];
     options.push(...projects.slice(0, Math.max(0, 20 - options.length)).map((item) => option(`Project · ${item.title}`, `project:${item.id}`)));
+    options.push(...tickets.slice(0, Math.max(0, 20 - options.length)).map((item) => option(`Ticket · ${item.title}`, `ticket:${item.id}`)));
     options.push(...matchingRoutines.filter((routine) => routine.systemKey !== "general")
       .slice(0, Math.max(0, 20 - options.length)).map((routine) => option(`Routine · ${routine.title}`, `routine:${routine.id}`)));
     return { options: options.slice(0, 20) };
@@ -226,12 +228,12 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
   if (command === "task_create") {
     const title = textValue(state, "work_title").trim();
     const [parentKind, parentId = ""] = selectedValue(state, "work_parent").split(":", 2);
-    if (!title || !parentId || !["project", "routine"].includes(parentKind)) throw new Error(t("제목과 상위 Project 또는 Routine을 선택해 주세요."));
-    const project = parentKind === "project" ? await getItem(authorization.ownerId, parentId) : null;
+    if (!title || !parentId || !["project", "ticket", "routine"].includes(parentKind)) throw new Error(t("제목과 상위 Project, Ticket 또는 Routine을 선택해 주세요."));
+    const parent = parentKind === "project" || parentKind === "ticket" ? await getItem(authorization.ownerId, parentId) : null;
     const item = await createItem(authorization.ownerId, {
       title, description: textValue(state, "work_description"), kind: "task",
-      parentId: parentKind === "project" ? parentId : null, routineId: parentKind === "routine" ? parentId : null,
-      cycleId: project?.cycleId ?? null, priority: selectedValue(state, "work_priority") as ItemPriority || "medium",
+      parentId: parentKind === "project" || parentKind === "ticket" ? parentId : null, routineId: parentKind === "routine" ? parentId : null,
+      cycleId: parent?.kind === "project" ? parent.cycleId : null, priority: selectedValue(state, "work_priority") as ItemPriority || "medium",
       dueDate: dateValue(state, "work_due") || null, source: "slack", createdByUserId: authorization.userId,
     });
     await replaceItemAssignmentRole(authorization.ownerId, item.id, "task_assignee", [selectedValue(state, "work_assignee") || metadata.memberId]);
@@ -277,7 +279,7 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
       const parent = selectedValue(state, "work_parent");
       if (parent) {
         const [kind, id] = parent.split(":", 2);
-        if (kind === "project") { patch.parentId = id; patch.routineId = null; }
+        if (kind === "project" || kind === "ticket") { patch.parentId = id; patch.routineId = null; }
         if (kind === "routine") { patch.routineId = id; patch.parentId = null; }
       }
     }
@@ -303,10 +305,10 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     t("Initiative 검색"),
     draft?.parentKind === "initiative" && draft.parentId ? option(draft.parentLabel || "Initiative", draft.parentId) : undefined,
   ), false));
-  if (metadata.command === "task_create") blocks.push(input("work_parent", t("상위 Project 또는 Routine"), externalSelect(
+  if (metadata.command === "task_create") blocks.push(input("work_parent", t("상위 Project, Ticket 또는 Routine"), externalSelect(
     "work_parent",
     t("상위 업무 검색"),
-    draft?.parentId && ["project", "routine"].includes(draft.parentKind)
+    draft?.parentId && ["project", "ticket", "routine"].includes(draft.parentKind)
       ? option(draft.parentLabel || draft.parentKind, `${draft.parentKind}:${draft.parentId}`)
       : undefined,
   ), false));
@@ -588,7 +590,7 @@ function reviewDraftText(draft: SlackWorkDraft, t: Translator) {
     `${t("기한")}: ${draft.dueDate || "-"}`,
     `${t("우선순위")}: ${t(priorityLabel(draft.priority))}`,
     draft.imageCount ? t("이미지 {count}개 · 생성 후 Project에 저장", { count: `${draft.imageCount}${draft.imagesTruncated ? "+" : ""}` }) : "",
-    draft.kind === "task" && draft.imageCount ? t("이미지는 Task가 연결된 Project에 저장됩니다. Routine을 선택하면 저장되지 않습니다.") : "",
+    draft.kind === "task" && draft.imageCount ? t("이미지는 Task가 연결된 Project에 저장됩니다. Ticket 또는 Routine을 선택하면 저장되지 않습니다.") : "",
     draft.threadTruncated ? t("긴 스레드의 최근 내용 중심으로 초안을 만들었습니다.") : "",
     `_${t("아직 저장되지 않았습니다. 검토 후 생성해 주세요.")}_`,
   ].filter(Boolean).join("\n");

@@ -55,6 +55,7 @@ import {
   replaceItemAssignmentRole,
   permanentlyDeleteArchivedProject,
   restoreProject,
+  restoreTrashedItems,
   saveDailyScrum,
   saveWorkspaceRules,
   saveProjectDocument,
@@ -291,7 +292,7 @@ const taskPlacementOutput = z.object({
   status: z.enum(["general_ready", "selection_required"]),
   reason: z.enum(["user_selected_general", "no_active_candidates", "source_matched_candidate", "active_candidates_available"]),
   candidates: z.array(z.object({
-    id: z.string(), kind: z.enum(["project", "routine"]), title: z.string(), path: z.array(z.string()), sourceMatched: z.boolean(),
+    id: z.string(), kind: z.enum(["project", "ticket", "routine"]), title: z.string(), path: z.array(z.string()), sourceMatched: z.boolean(),
   })),
   general: z.object({ id: z.string(), title: z.string() }).nullable(),
 });
@@ -474,7 +475,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "prepare_work",
     {
       title: "Prepare work with classification and connection choices",
-      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. When source_text is supplied, existing Project or Routine titles directly mentioned there are marked sourceMatched and ranked first even when they are not recent. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
+      description: "Use when the user wants to organize/save work ('이거 해야 해') and needs Task/Project/Ticket/Routine guidance or missing parent/member IDs. One read returns classification criteria, required vs optional fields, workspace rules, parent paths, member IDs and Project property definitions. When source_text is supplied, existing Project, Ticket, or Routine titles directly mentioned there are marked sourceMatched and ranked first even when they are not recent. No records are saved. Skip when all necessary IDs are already known; do not follow with redundant list calls.",
       inputSchema: {
         kind: z.enum(WORK_KINDS).default("unsure").describe("Your semantic hypothesis or the user's chosen type; unsure does not silently classify or save"),
         query: z.string().max(120).optional().describe("Short existing parent title/topic to filter candidates, not the full work request. Omit to browse recent parents."),
@@ -549,7 +550,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "capture_item",
     {
       title: "Review placement or capture a Task in General",
-      description: "Review active Project/Routine choices before saving one concrete Task to General. Without general_confirmed, this tool returns compact placement choices and saves nothing whenever any active Project/Routine exists; if none exists it may save to General immediately. Set general_confirmed=true only after the user explicitly chooses General in the current conversation. If a container is selected, use create_item with its exact ID. When the user refers to this/above/the current thread, the host model must extract the actual work from visible messages; this MCP server cannot fetch a host conversation transcript. Never create a placeholder Task for missing context.",
+      description: "Review active Project/Ticket/Routine choices before saving one concrete Task to General. Without general_confirmed, this tool returns compact placement choices and saves nothing whenever any active container exists; if none exists it may save to General immediately. Set general_confirmed=true only after the user explicitly chooses General in the current conversation. If a container is selected, use create_item with its exact ID. When the user refers to this/above/the current thread, the host model must extract the actual work from visible messages; this MCP server cannot fetch a host conversation transcript. Never create a placeholder Task for missing context.",
       inputSchema: {
         title: z.string().trim().min(1).max(500).describe("Short actionable title in the user's language"),
         description: z.string().optional().describe("Concrete details extracted from conversation messages visible to the host model; never a note saying the source could not be read"),
@@ -557,7 +558,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         priority: z.enum(ITEM_PRIORITIES).optional(),
         source_ref: z.string().optional().describe("Optional identifier for traceability only; it does not let the MCP server fetch the host conversation transcript"),
         assignee_member_id: memberIdInput.optional().describe("Active workspace member ID for the single Task assignee"),
-        general_confirmed: z.literal(true).optional().describe("Set only after the user explicitly selects General instead of the returned Project/Routine choices"),
+        general_confirmed: z.literal(true).optional().describe("Set only after the user explicitly selects General instead of the returned Project/Ticket/Routine choices"),
       },
       outputSchema: { item: itemOutput.optional(), placement: taskPlacementOutput.optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -568,7 +569,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       if (placement.status === "selection_required") {
         return {
           structuredContent: { placement },
-          content: [{ type: "text" as const, text: "Task NOT created. Show these Project/Routine choices once, prioritizing sourceMatched=true and the full path. After the user selects one, use create_item with its ID; use this tool again with general_confirmed=true only if the user chooses General." }],
+          content: [{ type: "text" as const, text: "Task NOT created. Show these Project/Ticket/Routine choices once, prioritizing sourceMatched=true and the full path. After the user selects one, use create_item with its ID; use this tool again with general_confirmed=true only if the user chooses General." }],
         };
       }
       await validateMcpMembers(ownerId, [assignee_member_id]);
@@ -596,11 +597,11 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "create_item",
     {
       title: "Create a structured OKR item",
-      description: "Save a correctly classified, concrete Task or OKR item. A Task with a selected Project/Routine uses its exact ID. A Task without one performs the same server-side placement check: it returns choices without saving when active containers exist, and uses General only after general_confirmed=true or when no active container exists. If the user refers to this/above/the current thread, use the conversation messages visible to the host model; this MCP server cannot fetch the host transcript itself. Never create a placeholder for missing context. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id. Keep internal values private and never send the user elsewhere.",
+      description: "Save a correctly classified, concrete Task, Ticket, or OKR item. A Task with a selected Project/Ticket/Routine uses its exact ID. A Ticket is an independent request container and does not use an OKR cycle or parent. A Task without a container performs the same server-side placement check: it returns choices without saving when active containers exist, and uses General only after general_confirmed=true or when no active container exists. If the user refers to this/above/the current thread, use the conversation messages visible to the host model; this MCP server cannot fetch the host transcript itself. Never create a placeholder for missing context. Project calls first return an unsaved review and an internal same_tool_confirmation value. After the user explicitly approves the exact proposal and Initiative in this conversation, call create_item again with the same Project title and parent_id plus that internal template_id. Keep internal values private and never send the user elsewhere.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS),
         title: z.string().trim().min(1).max(500),
-        parent_id: memberIdInput.optional().describe("KR→Objective, Initiative→KR, Project→Initiative, Task→Project; never a Routine ID"),
+        parent_id: memberIdInput.optional().describe("KR→Objective, Initiative→KR, Project→Initiative, Task→Project or Ticket; never a Routine ID"),
         routine_id: memberIdInput.optional().describe("Task-only alternative to parent_id for an independent Routine"),
         cycle_id: memberIdInput.optional().describe("Objective's selected OKR file; children inherit their parent's cycle when omitted"),
         description: z.string().optional(),
@@ -614,7 +615,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         dri_member_id: z.string().optional().describe("Active workspace member ID for a Project DRI"),
         worker_member_ids: z.array(z.string()).optional().describe("Active workspace member IDs for Project workers"),
         assignee_member_id: z.string().optional().describe("Active workspace member ID for a Task assignee"),
-        general_confirmed: z.literal(true).optional().describe("Task-only: set only after the user explicitly selects General instead of returned Project/Routine choices"),
+        general_confirmed: z.literal(true).optional().describe("Task-only: set only after the user explicitly selects General instead of returned Project/Ticket/Routine choices"),
       },
       outputSchema: { item: itemOutput.optional(), review: z.record(z.string(), z.unknown()).optional(), placement: taskPlacementOutput.optional() },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -682,7 +683,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         if (taskPlacement.status === "selection_required") {
           return {
             structuredContent: { placement: taskPlacement },
-            content: [{ type: "text" as const, text: "Task NOT created. Present the returned Project/Routine choices once, using sourceMatched and full paths. Call create_item again with the selected parent_id/routine_id, or with general_confirmed=true only if the user explicitly chooses General." }],
+            content: [{ type: "text" as const, text: "Task NOT created. Present the returned Project/Ticket/Routine choices once, using sourceMatched and full paths. Call create_item again with the selected parent_id/routine_id, or with general_confirmed=true only if the user explicitly chooses General." }],
           };
         }
         resolvedRoutineId = inspected.context.fallback?.id;
@@ -789,10 +790,10 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "create_tasks",
     {
       title: "Create multiple explicitly requested Tasks together",
-      description: "Save 1–50 explicitly supplied, concrete Task titles sharing one confirmed Project/Routine, assignee, due date, priority and cadence. Without a container, the server returns placement choices and saves nothing whenever active Project/Routine candidates exist. Set general_confirmed=true only after the user explicitly chooses General; when no active container exists General is allowed automatically. When the user refers to earlier conversation content, use only messages visible to the host model and never create placeholders. Do not invent Tasks from a Project idea.",
+      description: "Save 1–50 explicitly supplied, concrete Task titles sharing one confirmed Project/Ticket/Routine, assignee, due date, priority and cadence. Without a container, the server returns placement choices and saves nothing whenever active candidates exist. Set general_confirmed=true only after the user explicitly chooses General; when no active container exists General is allowed automatically. When the user refers to earlier conversation content, use only messages visible to the host model and never create placeholders. Do not invent Tasks from a Project idea.",
       inputSchema: {
         titles: z.array(z.string().trim().min(1).max(500)).min(1).max(50),
-        parent_id: memberIdInput.optional().describe("Existing Project ID; mutually exclusive with routine_id"),
+        parent_id: memberIdInput.optional().describe("Existing Project or Ticket ID; mutually exclusive with routine_id"),
         routine_id: memberIdInput.optional(),
         assignee_member_id: memberIdInput.optional(),
         due_date: dueDateInput.optional(),
@@ -805,8 +806,8 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     },
     async (input) => {
       for (const title of input.titles) assertConcreteWorkInput({ title });
-      if (input.parent_id && input.routine_id) throw new Error("Choose Project or Routine, not both");
-      if (input.general_confirmed && (input.parent_id || input.routine_id)) throw new Error("Choose an exact Project/Routine or General, not both");
+      if (input.parent_id && input.routine_id) throw new Error("Choose Project, Ticket, or Routine, not more than one");
+      if (input.general_confirmed && (input.parent_id || input.routine_id)) throw new Error("Choose an exact Project/Ticket/Routine or General, not both");
       let resolvedRoutineId = input.routine_id;
       let taskPlacement: z.infer<typeof taskPlacementOutput> | undefined;
       if (!input.parent_id && !input.routine_id) {
@@ -815,13 +816,13 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         if (taskPlacement.status === "selection_required") {
           return {
             structuredContent: { items: [], count: 0, placement: taskPlacement },
-            content: [{ type: "text" as const, text: "No Tasks were created. Present the returned Project/Routine choices once, then call create_tasks with the selected parent_id/routine_id; use general_confirmed=true only if the user explicitly chooses General." }],
+            content: [{ type: "text" as const, text: "No Tasks were created. Present the returned Project/Ticket/Routine choices once, then call create_tasks with the selected parent_id/routine_id; use general_confirmed=true only if the user explicitly chooses General." }],
           };
         }
         resolvedRoutineId = inspected.context.fallback?.id;
       }
       const rows = await createLinkedTasks(ownerId, {
-        titles: input.titles, projectId: input.parent_id, routineId: resolvedRoutineId,
+        titles: input.titles, parentId: input.parent_id, routineId: resolvedRoutineId,
         assigneeMemberId: input.assignee_member_id, dueDate: input.due_date,
         priority: input.priority, cadence: input.cadence, source: "mcp", createdByUserId: authorization.userId,
       });
@@ -837,7 +838,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "list_items",
     {
       title: "List and search OKRI items",
-      description: "Find existing OKRs, projects, tasks, or unclassified captures before reviewing, updating, or linking them.",
+      description: "Find existing OKRs, Projects, Tickets, Tasks, or unclassified captures before reviewing, updating, or linking them.",
       inputSchema: {
         kind: z.enum(ITEM_KINDS).optional(),
         status: z.enum(ITEM_STATUSES).optional(),
@@ -872,7 +873,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "update_item",
     {
       title: "Update an OKRI item",
-      description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
+      description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tickets use backlog, policy_discussion, in_progress, or done. Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
         title: z.string().trim().min(1).max(500).optional(),
@@ -950,7 +951,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "link_item",
     {
       title: "Link an item into the OKR hierarchy",
-      description: "Link to an existing parent: Project→Initiative, Task→Project OR independent Routine. Pass exactly one of parent_id/routine_id. Preserves status. Cross-cycle moves of non-Task items need a separate explicit restructuring flow.",
+      description: "Link to an existing parent: Project→Initiative, Task→Project/Ticket OR independent Routine. Pass exactly one of parent_id/routine_id. Preserves status. Cross-cycle moves of non-Task items need a separate explicit restructuring flow.",
       inputSchema: { id: memberIdInput, parent_id: memberIdInput.optional(), routine_id: memberIdInput.optional() },
       outputSchema: { item: itemOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
@@ -995,6 +996,50 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       return {
         structuredContent: { trashed: true as const, title: task.title, taskCount: result.taskCount },
         content: [{ type: "text", text: `Moved Task "${task.title}" to trash. It can be restored from OKRI.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "trash_ticket",
+    {
+      title: "Move a Ticket and its Tasks to trash",
+      description: "Move one existing Ticket and all direct child Tasks to the recoverable unified trash. Resolve the exact Ticket first. Set confirmed=true only when the user explicitly asked to delete or move that exact Ticket to trash in the current message. The server enforces Ticket creator permission.",
+      inputSchema: {
+        id: memberIdInput.describe("Exact existing Ticket ID"),
+        confirmed: z.literal(true).describe("Required explicit confirmation from the user's current message"),
+      },
+      outputSchema: { trashed: z.literal(true), title: z.string(), taskCount: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const ticket = await getItem(ownerId, id);
+      if (!ticket || ticket.kind !== "ticket") throw new Error("Ticket not found");
+      if (ticket.archivedAt) throw new Error("Ticket is already in trash");
+      const result = await trashItems(ownerId, authorization.userId, { itemIds: [id] });
+      return {
+        structuredContent: { trashed: true as const, title: ticket.title, taskCount: result.taskCount },
+        content: [{ type: "text", text: `Moved Ticket "${ticket.title}" and ${result.taskCount} Tasks to trash.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "restore_ticket",
+    {
+      title: "Restore a trashed Ticket and its Tasks",
+      description: "Restore one trashed Ticket and all Tasks that were moved with it.",
+      inputSchema: { id: memberIdInput.describe("Exact trashed Ticket ID") },
+      outputSchema: { restored: z.literal(true), title: z.string(), restoredCount: z.number() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async ({ id }) => {
+      const ticket = await getItem(ownerId, id);
+      if (!ticket || ticket.kind !== "ticket" || !ticket.archivedAt) throw new Error("Trashed Ticket not found");
+      const result = await restoreTrashedItems(ownerId, [id]);
+      return {
+        structuredContent: { restored: true as const, title: ticket.title, restoredCount: result.restoredCount },
+        content: [{ type: "text", text: `Restored Ticket "${ticket.title}" and its trashed Tasks.` }],
       };
     },
   );
@@ -1905,10 +1950,10 @@ function assertMcpAssignmentFields(input: McpAssignmentFields) {
 
 function assertMcpItemFields(input: McpAssignmentFields & { parent_id?: string; routine_id?: string; template_id?: string; general_confirmed?: true }) {
   assertMcpAssignmentFields(input);
-  if (input.parent_id && input.routine_id) throw new Error("Choose Project or Routine, not both");
+  if (input.parent_id && input.routine_id) throw new Error("Choose Project, Ticket, or Routine, not more than one");
   if (input.kind !== "task" && input.routine_id) throw new Error("Only Tasks can belong to a Routine");
   if (input.kind !== "task" && input.general_confirmed) throw new Error("Only Tasks can select General");
-  if (input.general_confirmed && (input.parent_id || input.routine_id)) throw new Error("Choose an exact Project/Routine or General, not both");
+  if (input.general_confirmed && (input.parent_id || input.routine_id)) throw new Error("Choose an exact Project/Ticket/Routine or General, not both");
   if (input.kind !== "project" && input.template_id) throw new Error("Only Projects can use a body template");
   if (["key_result", "initiative", "project"].includes(input.kind) && !input.parent_id) throw new Error("Choose an existing parent from prepare_work before saving this type");
 }

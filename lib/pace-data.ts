@@ -9,7 +9,7 @@ import {
   prepareRoutineProperties,
 } from "./routine-properties";
 import { effectiveIntegrationProvider, type IntegrationProvider } from "@/lib/integration-providers";
-import { and, asc, desc, eq, inArray, isNull, like, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, like, lte, ne, or, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import { readGoogleSession } from "@/lib/google-session";
 import { completeOnboardingForInvitedWorkspace } from "@/lib/account-onboarding";
@@ -86,8 +86,9 @@ import {
   reserveProjectCreation,
 } from "@/lib/billing";
 
-export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "task"] as const;
+export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "ticket", "task"] as const;
 export const ITEM_STATUSES = ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
+export const TICKET_STATUSES = ["backlog", "policy_discussion", "in_progress", "done"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
@@ -227,6 +228,7 @@ const parentKind: Record<ItemKind, ItemKind | null> = {
   key_result: "objective",
   initiative: "key_result",
   project: "initiative",
+  ticket: null,
   task: "project",
 };
 const completedStatuses = new Set<ItemStatus>(["done", "development_done"]);
@@ -4113,6 +4115,8 @@ export async function createLinkedTasks(
   ownerId: string,
   input: {
     titles: string[];
+    parentId?: string | null;
+    /** @deprecated Use parentId. Kept for existing API and MCP callers. */
     projectId?: string | null;
     routineId?: string | null;
     assigneeMemberId?: string | null;
@@ -4128,21 +4132,21 @@ export async function createLinkedTasks(
   if (!titles.length) throw new Error("At least one Task title is required");
   if (titles.length > 50) throw new Error("At most 50 Tasks can be created at once");
 
-  const projectId = input.projectId?.trim() || null;
+  const parentId = input.parentId?.trim() || input.projectId?.trim() || null;
   let routineId = input.routineId?.trim() || null;
-  if (projectId && routineId) throw new Error("Tasks can be linked to only one Project or Routine");
-  if (!projectId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
+  if (parentId && routineId) throw new Error("Tasks can be linked to only one Project, Ticket, or Routine");
+  if (!parentId && !routineId) routineId = (await ensureGeneralRoutine(ownerId)).id;
 
   let cycleId: string | null = null;
-  if (projectId) {
-    const project = await getItem(ownerId, projectId);
-    if (!project || project.kind !== "project" || project.archivedAt) throw new Error("Active Project not found");
-    cycleId = project.cycleId;
+  if (parentId) {
+    const parent = await getItem(ownerId, parentId);
+    if (!parent || !["project", "ticket"].includes(parent.kind) || parent.archivedAt) throw new Error("Active Project or Ticket not found");
+    cycleId = parent.kind === "project" ? parent.cycleId : null;
   } else if (routineId) {
     const routine = await getRoutine(ownerId, routineId);
     if (!routine || !routine.active) throw new Error("Active Routine not found");
   }
-  await validateParent(ownerId, "task", projectId, routineId, cycleId);
+  await validateParent(ownerId, "task", parentId, routineId, cycleId);
 
   const assigneeMemberId = input.assigneeMemberId?.trim() || null;
   if (assigneeMemberId) {
@@ -4163,7 +4167,7 @@ export async function createLinkedTasks(
     d1.prepare(`INSERT INTO items
       (id, owner_id, cycle_id, parent_id, routine_id, kind, title, description, status, priority, cadence, progress, source, created_by_user_id, sort_order, created_at, updated_at, due_date)
       VALUES (?, ?, ?, ?, ?, 'task', ?, '', 'todo', ?, ?, 0, ?, ?, 0, ?, ?, ?)`)
-      .bind(task.id, ownerId, cycleId, projectId, routineId, task.title, input.priority ?? rules.defaultPriority, input.cadence ?? rules.defaultCadence, source, input.createdByUserId, now, now, input.dueDate ?? null),
+      .bind(task.id, ownerId, cycleId, parentId, routineId, task.title, input.priority ?? rules.defaultPriority, input.cadence ?? rules.defaultCadence, source, input.createdByUserId, now, now, input.dueDate ?? null),
     d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
       VALUES (?, ?, ?, 'created', ?, ?, ?)`)
       .bind(crypto.randomUUID(), ownerId, task.id, source, JSON.stringify({ kind: "task", status: "todo" }), now),
@@ -4222,9 +4226,14 @@ export async function createItem(
     if (!routine || !routine.active) throw new Error("Web Tasks must use an active Routine");
   }
   const defaultStatus = systemDefault("status");
+  if (kind === "ticket" && input.status !== undefined && !TICKET_STATUSES.includes(input.status as (typeof TICKET_STATUSES)[number])) {
+    throw new Error("Ticket status must be backlog, policy_discussion, in_progress, or done");
+  }
   const status = kind === "task"
     ? normalizeTaskStatus(input.status)
-    : input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
+    : kind === "ticket"
+      ? input.status ?? "backlog"
+      : input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
   await validateParent(ownerId, kind, parentId, routineId, cycleId);
   const rules = await getWorkspaceRules(ownerId);
@@ -4309,9 +4318,12 @@ export async function updateItem(
   const current = await getItem(ownerId, id);
   if (!current) throw new Error("Item not found");
   if (current.archivedAt) throw new Error("Restore the item before changing it");
-  if (patch.status === "archived") throw new Error("Use the Project archive action instead");
+  if (patch.status === "archived") throw new Error("Use the recoverable trash action instead");
 
   const normalizedPatch = { ...patch };
+  if (current.kind === "ticket" && normalizedPatch.status !== undefined && !TICKET_STATUSES.includes(normalizedPatch.status as (typeof TICKET_STATUSES)[number])) {
+    throw new Error("Ticket status must be backlog, policy_discussion, in_progress, or done");
+  }
   if (current.kind === "task") {
     if (normalizedPatch.status !== undefined) normalizedPatch.status = normalizeTaskStatus(normalizedPatch.status);
     delete normalizedPatch.progress;
@@ -4378,7 +4390,7 @@ export type ItemAssignmentSummary = {
 
 export class ItemDeletePermissionError extends Error {
   constructor() {
-    super("Project는 생성자 또는 책임자만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
+    super("Project는 생성자 또는 책임자만, Ticket은 생성자만, Task는 생성자 또는 담당자만 삭제할 수 있습니다.");
     this.name = "ItemDeletePermissionError";
   }
 }
@@ -4500,10 +4512,10 @@ export async function listTrashedItems(ownerId: string): Promise<TrashedItemRoot
     .from(items)
     .where(and(
       eq(items.ownerId, ownerId),
-      inArray(items.kind, ["project", "task"]),
+      inArray(items.kind, ["project", "ticket", "task"]),
       sql`${items.archivedAt} IS NOT NULL`,
       or(
-        eq(items.kind, "project"),
+        inArray(items.kind, ["project", "ticket"]),
         isNull(items.archiveRootId),
         sql`${items.archiveRootId} = ${items.id}`,
       ),
@@ -4517,7 +4529,7 @@ export async function listTrashedItems(ownerId: string): Promise<TrashedItemRoot
   for (const task of archivedTasks) {
     if (task.archiveRootId) taskCounts.set(task.archiveRootId, (taskCounts.get(task.archiveRootId) ?? 0) + 1);
   }
-  return roots.map((item) => ({ item, taskCount: item.kind === "project" ? taskCounts.get(item.id) ?? 0 : 0 }));
+  return roots.map((item) => ({ item, taskCount: item.kind === "task" ? 0 : taskCounts.get(item.id) ?? 0 }));
 }
 
 export async function listArchivedProjects(ownerId: string) {
@@ -4538,57 +4550,61 @@ export async function trashItems(
     .from(items)
     .where(and(
       eq(items.ownerId, ownerId),
-      inArray(items.kind, ["project", "task"]),
+      inArray(items.kind, ["project", "ticket", "task"]),
       isNull(items.archivedAt),
       input.scope === "all_project_task" ? undefined : inArray(items.id, requestedIds),
     ));
-  if (!candidates.length) return { trashedRootIds: [] as string[], projectCount: 0, taskCount: 0, affectedItemCount: 0 };
+  if (!candidates.length) return { trashedRootIds: [] as string[], projectCount: 0, ticketCount: 0, taskCount: 0, affectedItemCount: 0 };
   if (input.scope !== "all_project_task" && candidates.length !== requestedIds.length) {
-    throw new Error("One or more Project or Task items were not found");
+    throw new Error("One or more Project, Ticket, or Task items were not found");
   }
 
   const projectIds = new Set(candidates.filter((item) => item.kind === "project").map((item) => item.id));
+  const ticketIds = new Set(candidates.filter((item) => item.kind === "ticket").map((item) => item.id));
+  const containerIds = new Set([...projectIds, ...ticketIds]);
   const candidateTasks = candidates.filter((item) => item.kind === "task");
   const deletionRoots = [
-    ...candidates.filter((item) => item.kind === "project"),
-    ...candidateTasks.filter((item) => !item.parentId || !projectIds.has(item.parentId)),
+    ...candidates.filter((item) => item.kind === "project" || item.kind === "ticket"),
+    ...candidateTasks.filter((item) => !item.parentId || !containerIds.has(item.parentId)),
   ];
   await assertItemDeletePermission(ownerId, userId, deletionRoots);
   const unselectedParentIds = [...new Set(candidateTasks
     .map((item) => item.parentId)
-    .filter((parentId): parentId is string => typeof parentId === "string" && !projectIds.has(parentId)))];
-  const archivedParentProjects = unselectedParentIds.length
+    .filter((parentId): parentId is string => typeof parentId === "string" && !containerIds.has(parentId)))];
+  const archivedParentContainers = unselectedParentIds.length
     ? await getDb().select({ id: items.id }).from(items).where(and(
       eq(items.ownerId, ownerId),
-      eq(items.kind, "project"),
+      inArray(items.kind, ["project", "ticket"]),
       inArray(items.id, unselectedParentIds),
       sql`${items.archivedAt} IS NOT NULL`,
     ))
     : [];
-  const archivedParentProjectIds = new Set(archivedParentProjects.map((project) => project.id));
+  const archivedParentContainerIds = new Set(archivedParentContainers.map((container) => container.id));
   const taskIdsByArchivedParent = new Map<string, string[]>();
   const standaloneTaskIds: string[] = [];
   for (const task of candidateTasks) {
-    if (task.parentId && projectIds.has(task.parentId)) continue;
-    if (task.parentId && archivedParentProjectIds.has(task.parentId)) {
+    if (task.parentId && containerIds.has(task.parentId)) continue;
+    if (task.parentId && archivedParentContainerIds.has(task.parentId)) {
       taskIdsByArchivedParent.set(task.parentId, [...(taskIdsByArchivedParent.get(task.parentId) ?? []), task.id]);
     } else {
       standaloneTaskIds.push(task.id);
     }
   }
-  const selectedProjectIds = [...projectIds];
-  const projectTaskRows = selectedProjectIds.length
+  const selectedContainerIds = [...containerIds];
+  const containerTaskRows = selectedContainerIds.length
     ? await getDb().select({ id: items.id }).from(items).where(and(
       eq(items.ownerId, ownerId),
       eq(items.kind, "task"),
-      inArray(items.parentId, selectedProjectIds),
+      inArray(items.parentId, selectedContainerIds),
       isNull(items.archivedAt),
     ))
     : [];
   const now = new Date().toISOString();
   const d1 = (env as RuntimeEnv).DB;
   const statements = [
-    ...selectedProjectIds.flatMap((projectId) => [
+    ...selectedContainerIds.flatMap((containerId) => {
+      const kind = projectIds.has(containerId) ? "project" : "ticket";
+      return [
       d1.prepare(`UPDATE items
         SET archived_from_status = CASE
               WHEN archived_at IS NULL OR archived_from_status IS NULL THEN status
@@ -4599,12 +4615,13 @@ export async function trashItems(
             archive_root_id = ?,
             updated_at = ?
         WHERE owner_id = ? AND (id = ? OR (parent_id = ? AND kind = 'task'))`)
-        .bind(now, projectId, now, ownerId, projectId, projectId),
+        .bind(now, containerId, now, ownerId, containerId, containerId),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
         VALUES (?, ?, ?, 'item_trashed', 'web', ?, ?)`)
-        .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ rootId: projectId, kind: "project" }), now),
-    ]),
-    ...[...taskIdsByArchivedParent.entries()].flatMap(([projectId, taskIds]) => [
+        .bind(crypto.randomUUID(), ownerId, containerId, JSON.stringify({ rootId: containerId, kind }), now),
+      ];
+    }),
+    ...[...taskIdsByArchivedParent.entries()].flatMap(([containerId, taskIds]) => [
       d1.prepare(`UPDATE items
         SET archived_from_status = CASE
               WHEN archived_from_status IS NULL THEN status
@@ -4613,10 +4630,10 @@ export async function trashItems(
             status = 'archived', archived_at = ?, archive_root_id = ?, updated_at = ?
         WHERE owner_id = ? AND kind = 'task' AND archived_at IS NULL
           AND id IN (${taskIds.map(() => "?").join(", ")})`)
-        .bind(now, projectId, now, ownerId, ...taskIds),
+        .bind(now, containerId, now, ownerId, ...taskIds),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
         VALUES (?, ?, ?, 'item_trashed', 'web', ?, ?)`)
-        .bind(crypto.randomUUID(), ownerId, projectId, JSON.stringify({ rootId: projectId, kind: "project", addedTaskCount: taskIds.length }), now),
+        .bind(crypto.randomUUID(), ownerId, containerId, JSON.stringify({ rootId: containerId, kind: "container", addedTaskCount: taskIds.length }), now),
     ]),
     ...standaloneTaskIds.flatMap((taskId) => [
       d1.prepare(`UPDATE items
@@ -4634,12 +4651,13 @@ export async function trashItems(
   ];
   if (statements.length) await d1.batch(statements);
   const appendedTaskIds = [...taskIdsByArchivedParent.values()].flat();
-  const trashedTaskIds = new Set([...projectTaskRows.map((entry) => entry.id), ...appendedTaskIds, ...standaloneTaskIds]);
+  const trashedTaskIds = new Set([...containerTaskRows.map((entry) => entry.id), ...appendedTaskIds, ...standaloneTaskIds]);
   return {
-    trashedRootIds: [...new Set([...selectedProjectIds, ...taskIdsByArchivedParent.keys(), ...standaloneTaskIds])],
-    projectCount: selectedProjectIds.length,
+    trashedRootIds: [...new Set([...selectedContainerIds, ...taskIdsByArchivedParent.keys(), ...standaloneTaskIds])],
+    projectCount: projectIds.size,
+    ticketCount: ticketIds.size,
     taskCount: trashedTaskIds.size,
-    affectedItemCount: selectedProjectIds.length + trashedTaskIds.size,
+    affectedItemCount: selectedContainerIds.length + trashedTaskIds.size,
   };
 }
 
@@ -4649,7 +4667,7 @@ export async function restoreTrashedItems(ownerId: string, itemIds: string[], pr
   const roots = await getDb().select().from(items).where(and(
     eq(items.ownerId, ownerId),
     inArray(items.id, requestedIds),
-    inArray(items.kind, ["project", "task"]),
+    inArray(items.kind, ["project", "ticket", "task"]),
     sql`${items.archivedAt} IS NOT NULL`,
   ));
   if (roots.length !== requestedIds.length) throw new Error("One or more trashed items were not found");
@@ -4684,11 +4702,27 @@ export async function restoreTrashedItems(ownerId: string, itemIds: string[], pr
             cycle_id = ?, archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
         WHERE owner_id = ? AND kind = 'task' AND (parent_id = ? OR archive_root_id = ?)`)
         .bind(selectedParent.cycleId, now, ownerId, root.id, root.id));
+    } else if (root.kind === "ticket") {
+      const [{ count }] = await getDb().select({ count: sql<number>`count(*)` }).from(items).where(and(
+        eq(items.ownerId, ownerId),
+        or(eq(items.id, root.id), eq(items.archiveRootId, root.id)),
+      ));
+      restoredCount += Number(count ?? 0);
+      statements.push(d1.prepare(`UPDATE items
+        SET status = CASE WHEN archived_from_status IS NULL OR archived_from_status = 'archived' THEN 'backlog' ELSE archived_from_status END,
+            cycle_id = NULL, archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
+        WHERE owner_id = ? AND id = ? AND kind = 'ticket'`)
+        .bind(now, ownerId, root.id));
+      statements.push(d1.prepare(`UPDATE items
+        SET status = CASE WHEN archived_from_status IS NULL OR archived_from_status = 'archived' THEN 'todo' ELSE archived_from_status END,
+            cycle_id = NULL, archived_at = NULL, archived_from_status = NULL, archive_root_id = NULL, updated_at = ?
+        WHERE owner_id = ? AND kind = 'task' AND (parent_id = ? OR archive_root_id = ?)`)
+        .bind(now, ownerId, root.id, root.id));
     } else {
       let parentActive = false;
       if (root.parentId) {
         const parent = await getItem(ownerId, root.parentId);
-        parentActive = Boolean(parent && parent.kind === "project" && !parent.archivedAt);
+        parentActive = Boolean(parent && (parent.kind === "project" || parent.kind === "ticket") && !parent.archivedAt);
       }
       let routineId = root.routineId;
       if (!parentActive) {
@@ -4718,24 +4752,26 @@ export async function permanentlyDeleteTrashedItems(ownerId: string, userId: str
   const roots = await getDb().select().from(items).where(and(
     eq(items.ownerId, ownerId),
     inArray(items.id, requestedIds),
-    inArray(items.kind, ["project", "task"]),
+    inArray(items.kind, ["project", "ticket", "task"]),
     sql`${items.archivedAt} IS NOT NULL`,
   ));
   if (roots.length !== requestedIds.length) throw new Error("One or more trashed items were not found");
   await assertItemDeletePermission(ownerId, userId, roots);
   const projectIds = new Set(roots.filter((root) => root.kind === "project").map((root) => root.id));
-  const standaloneTaskIds = roots.filter((root) => root.kind === "task" && (!root.parentId || !projectIds.has(root.parentId))).map((root) => root.id);
+  const ticketIds = new Set(roots.filter((root) => root.kind === "ticket").map((root) => root.id));
+  const containerIds = new Set([...projectIds, ...ticketIds]);
+  const standaloneTaskIds = roots.filter((root) => root.kind === "task" && (!root.parentId || !containerIds.has(root.parentId))).map((root) => root.id);
   const affectedRows = await getDb().select({ id: items.id, kind: items.kind }).from(items).where(and(
     eq(items.ownerId, ownerId),
     or(
       selectedIdCondition(items.id, standaloneTaskIds),
-      selectedIdCondition(items.id, [...projectIds]),
-      selectedIdCondition(items.archiveRootId, [...projectIds]),
-      selectedIdCondition(items.parentId, [...projectIds]),
+      selectedIdCondition(items.id, [...containerIds]),
+      selectedIdCondition(items.archiveRootId, [...containerIds]),
+      selectedIdCondition(items.parentId, [...containerIds]),
     ),
   ));
   const affectedIds = [...new Set(affectedRows.map((row) => row.id))];
-  if (!affectedIds.length) return { deleted: true, deletedRootIds: [] as string[], deletedProjectCount: 0, deletedTaskCount: 0, deletedItemCount: 0 };
+  if (!affectedIds.length) return { deleted: true, deletedRootIds: [] as string[], deletedProjectCount: 0, deletedTicketCount: 0, deletedTaskCount: 0, deletedItemCount: 0 };
   const placeholders = affectedIds.map(() => "?").join(", ");
   const d1 = (env as RuntimeEnv).DB;
   await d1.batch([
@@ -4753,6 +4789,7 @@ export async function permanentlyDeleteTrashedItems(ownerId: string, userId: str
     deleted: true,
     deletedRootIds: roots.map((root) => root.id),
     deletedProjectCount: affectedRows.filter((row) => row.kind === "project").length,
+    deletedTicketCount: affectedRows.filter((row) => row.kind === "ticket").length,
     deletedTaskCount: affectedRows.filter((row) => row.kind === "task").length,
     deletedItemCount: affectedRows.length,
   };
@@ -5504,6 +5541,7 @@ export async function getPeriodReview(ownerId: string, cadence: ItemCadence) {
       and(
         eq(items.ownerId, ownerId),
         isNull(items.archivedAt),
+        ne(items.kind, "ticket"),
         or(eq(items.cadence, cadence), and(sql`${items.dueDate} IS NOT NULL`, lte(items.dueDate, boundary))),
       ),
     )
@@ -6219,7 +6257,7 @@ async function validateParent(
     throw new Error("Only Task can be linked under Routine");
   }
   if (routineId && parentId) {
-    throw new Error("Task can be linked under either Project or Routine");
+    throw new Error("Task can be linked under either Project, Ticket, or Routine");
   }
   if (routineId) {
     const routine = await getRoutine(ownerId, routineId);
@@ -6228,7 +6266,7 @@ async function validateParent(
   }
   const expected = parentKind[kind];
   if (!expected) {
-    if (parentId) throw new Error("Objective cannot have a parent");
+    if (parentId) throw new Error(`${kind} cannot have a parent`);
     return;
   }
 
@@ -6239,6 +6277,12 @@ async function validateParent(
   const parent = await getItem(ownerId, parentId);
   if (!parent) throw new Error("Parent item not found");
   if (parent.archivedAt) throw new Error("Restore the parent item before linking work to it");
+  if (kind === "task" && (parent.kind === "project" || parent.kind === "ticket")) {
+    if (cycleId !== undefined && parent.cycleId !== cycleId) {
+      throw new Error("Task and parent must use the same OKR cycle boundary");
+    }
+    return;
+  }
   if (parent.kind !== expected) {
     throw new Error(`${kind} must be linked under ${expected}`);
   }
