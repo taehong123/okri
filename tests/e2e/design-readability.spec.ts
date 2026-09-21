@@ -76,7 +76,7 @@ test('structure is preserved; focus, zoom and workspace menu stay usable', async
   test.skip(info.project.name !== 'desktop-chromium');
   await installApiMocks(page, { teamWorkspace: true });
   await page.goto('/?view=work');
-  await expect(page.locator('.desktop-navigation .nav-item span')).toHaveText(['AI 대화', '내 업무', 'OKR', 'Project', 'Ticket', 'Task', 'Routine', '데이터', '데일리', '추천', '리뷰', '휴지통']);
+  await expect(page.locator('.desktop-navigation .nav-item span')).toHaveText(['AI 대화', '내 업무', 'OKR', '간트', 'Task', 'Project', 'Routine', 'Ticket', '데이터', '데일리', '추천', '리뷰', '휴지통']);
   await expect(page.locator('.page-create-actions > button')).toHaveText(['AI 대화로 추가', '직접 추가']);
   await page.getByRole('tab', { name: '카드', exact: true }).click();
   await page.getByRole('button', { name: '선택', exact: true }).click();

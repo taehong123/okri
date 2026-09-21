@@ -858,11 +858,11 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "home", get label() { return t("AI 대화"); }, icon: Bot },
   { id: "my_work", get label() { return t("내 업무"); }, icon: Briefcase },
   { id: "okr", label: "OKR", icon: Target },
-  { id: "work", get label() { return t("Project"); }, icon: Table2 },
   { id: "gantt", get label() { return t("간트"); }, icon: ChartGantt },
-  { id: "tickets", get label() { return t("Ticket"); }, icon: TicketIcon },
   { id: "inbox", get label() { return t("Task"); }, icon: Inbox },
+  { id: "work", get label() { return t("Project"); }, icon: Table2 },
   { id: "routines", get label() { return t("Routine"); }, icon: Repeat2 },
+  { id: "tickets", get label() { return t("Ticket"); }, icon: TicketIcon },
   { id: "data", get label() { return t("데이터"); }, icon: Database },
   { id: "scrum", get label() { return t("데일리"); }, icon: CalendarCheck },
   { id: "recommendations", get label() { return t("추천"); }, icon: Lightbulb },
@@ -870,7 +870,7 @@ const navItems: { id: View; label: string; icon: LucideIcon }[] = [
   { id: "trash", get label() { return t("휴지통"); }, icon: Trash2 },
 ];
 
-const mobileNavItems = (["home", "okr", "my_work", "work", "inbox"] satisfies View[])
+const mobileNavItems = (["home", "my_work", "okr", "gantt", "inbox"] satisfies View[])
   .map((id) => navItems.find((entry) => entry.id === id)!);
 const mobileMoreItems = navItems.filter((entry) => !mobileNavItems.some((mobileEntry) => mobileEntry.id === entry.id));
 

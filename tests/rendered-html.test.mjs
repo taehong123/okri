@@ -208,7 +208,19 @@ test("ships product metadata and removes starter assets", async () => {
   assert.doesNotMatch(page, /assistant-sidebar-tab/);
   assert.match(page, /\{ id: "home", get label\(\) \{ return t\("AI 대화"\); \}, icon: Bot \}/);
   assert.ok(page.indexOf('{ id: "my_work", get label() { return t("내 업무"); }') < page.indexOf('{ id: "okr", label: "OKR"'), "내 업무가 OKR보다 먼저 표시되어야 합니다");
-  assert.match(page, /const mobileNavItems = \(\["home", "okr", "my_work", "work", "inbox"\]/);
+  const workNavigationOrder = [
+    '{ id: "okr", label: "OKR"',
+    '{ id: "gantt", get label() { return t("간트"); }',
+    '{ id: "inbox", get label() { return t("Task"); }',
+    '{ id: "work", get label() { return t("Project"); }',
+    '{ id: "routines", get label() { return t("Routine"); }',
+    '{ id: "tickets", get label() { return t("Ticket"); }',
+  ].map((entry) => page.indexOf(entry));
+  assert.ok(
+    workNavigationOrder.every((position, index) => position >= 0 && (index === 0 || position > workNavigationOrder[index - 1])),
+    "업무 메뉴가 OKR, 간트, Task, Project, Routine, Ticket 순서여야 합니다",
+  );
+  assert.match(page, /const mobileNavItems = \(\["home", "my_work", "okr", "gantt", "inbox"\]/);
   assert.match(page, /id="home-okr-chat-title".*AI 대화/);
   assert.match(page, /assistant-target-picker/);
   assert.match(page, /Objective, KR, Initiative, Project 검색/);
