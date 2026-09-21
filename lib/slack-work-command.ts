@@ -17,7 +17,7 @@ import {
   type ItemStatus,
   type RequestAuthorization,
 } from "@/lib/pace-data";
-import { createSlackMemberLinkUrl, dailyMemberBySlack, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
 import { saveSlackProjectImages } from "@/lib/project-images";
 import { readLanguagePreferences, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
@@ -71,8 +71,8 @@ export async function handleSlackWorkCommandEvent(
   parsed: ParsedSlackWorkCommand,
   options: { preparingNotice?: boolean } = {},
 ) {
-  const linked = await dailyMemberBySlack(connection.teamId, event.user);
   const token = await slackTokenForConnection(connection);
+  const linked = await resolveSlackMemberForEvent(connection, event.user, token);
   await ensureSlackWorkChannel(token, event);
   const t = linked
     ? await memberTranslator(linked.authorization)

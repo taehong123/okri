@@ -1211,15 +1211,52 @@ test("email synchronization adds new members once and preserves cached DM channe
   await assert.rejects(matching.attachSlackMember(raw, "w", "T", "me", users[0], "email"));
 });
 
+test("a member's first Slack invocation auto-links a unique matching email and continues", async () => {
+  const source = ts.createSourceFile("slack-daily.ts", await read("../lib/slack-daily.ts"), ts.ScriptTarget.Latest, true);
+  const fn = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "resolveSlackMemberForEvent").getFullText(source);
+  const actor = { authorization, memberId: "me" };
+  let linked = null;
+  let synchronized = 0;
+  const api = compile('const { env, dailyMemberBySlack, slackTokenForConnection, findSlackUser, synchronizeSlackMembers } = require("fixture");\n' + fn, {
+    fixture: {
+      env: { DB: { marker: "db" } },
+      dailyMemberBySlack: async () => linked,
+      slackTokenForConnection: async () => { throw new Error("the supplied token should be reused"); },
+      findSlackUser: async (token, slackUserId) => {
+        assert.equal(token, "bot-token"); assert.equal(slackUserId, "U1");
+        return { id: "U1", profile: { email: "me@example.test" } };
+      },
+      synchronizeSlackMembers: async (db, ownerId, teamId, users) => {
+        assert.equal(db.marker, "db"); assert.equal(ownerId, "w"); assert.equal(teamId, "T"); assert.equal(users[0].id, "U1");
+        synchronized++; linked = actor;
+      },
+    },
+  });
+  assert.equal(await api.resolveSlackMemberForEvent({ ownerId: "w", teamId: "T" }, "U1", "bot-token"), actor);
+  assert.equal(synchronized, 1);
+  assert.equal(await api.resolveSlackMemberForEvent({ ownerId: "w", teamId: "T" }, "U1", "bot-token"), actor);
+  assert.equal(synchronized, 1);
+});
+
+test("Slack user lookup falls back to the workspace directory after users.info user_not_found", async () => {
+  const source = ts.createSourceFile("slack-daily.ts", await read("../lib/slack-daily.ts"), ts.ScriptTarget.Latest, true);
+  const errorClass = source.statements.find((node) => ts.isClassDeclaration(node) && node.name?.text === "SlackRequestError").getFullText(source);
+  const fn = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "findSlackUser").getFullText(source);
+  const api = compile(`const { listAllSlackUsers } = require("fixture");\nconst slackApiError = () => "Slack failed";\n${errorClass}\nasync function slackApi() { throw new SlackRequestError("user_not_found", "users.info"); }\n${fn}\nmodule.exports.findSlackUser = findSlackUser;`, {
+    fixture: { listAllSlackUsers: async () => [{ id: "U1", profile: { email: "me@example.test" } }] },
+  });
+  assert.equal((await api.findSlackUser("bot-token", "U1")).profile.email, "me@example.test");
+});
+
 test("one-time Slack links never take over a colleague's existing account and cannot be replayed", async (t) => {
   const { db, raw } = fixture(t);
   db.exec("INSERT INTO slack_link_tokens (token_hash,owner_id,team_id,slack_user_id,expires_at) VALUES ('hash','w','T','U1','2099-01-01T00:00:00Z')");
   const source = ts.createSourceFile("slack-daily.ts", await read("../lib/slack-daily.ts"), ts.ScriptTarget.Latest, true);
   const fn = source.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === "consumeSlackMemberLink").getFullText(source);
-  const api = compile('const { env, sha256, currentMemberForSlackPreference, getSlackConnection, slackTokenForConnection, slackApi, scheduleMemberReminder } = require("fixture");\n' + fn, {
+  const api = compile('const { env, sha256, currentMemberForSlackPreference, getSlackConnection, slackTokenForConnection, findSlackUser, scheduleMemberReminder } = require("fixture");\n' + fn, {
     fixture: { env: { DB: raw }, sha256: async () => "hash", currentMemberForSlackPreference: async () => ({ id: "me", displayName: "Me" }),
       getSlackConnection: async () => ({ teamId: "T" }), slackTokenForConnection: async () => "mock",
-      slackApi: async () => ({ user: { id: "U1", profile: { email: "me@example.test" } } }), scheduleMemberReminder: async () => {} },
+      findSlackUser: async () => ({ id: "U1", profile: { email: "me@example.test" } }), scheduleMemberReminder: async () => {} },
   });
   await matching.attachSlackMember(raw, "w", "T", "colleague", { id: "U1" }, "admin");
   await assert.rejects(api.consumeSlackMemberLink(authorization, "mock"));

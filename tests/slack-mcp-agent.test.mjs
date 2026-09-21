@@ -65,7 +65,7 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /chat\.postMessage/);
   assert.match(agent, /chat\.update/);
   assert.match(agent, /thread_ts: event\.threadTs \|\| event\.ts/);
-  assert.match(agent, /dailyMemberBySlack/);
+  assert.match(agent, /resolveSlackMemberForEvent\(connection, event\.user, token\)/);
   assert.match(agent, /source: "slack_mcp"/);
   assert.match(agent, /workspaceRequestsThisMinute/);
   assert.match(agent, /workspaceRequestsToday/);

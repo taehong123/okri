@@ -10,7 +10,7 @@ import {
   reserveAiUsageEvent,
   type RequestAuthorization,
 } from "@/lib/pace-data";
-import { createSlackMemberLinkUrl, dailyMemberBySlack, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
 import { formatSlackMrkdwn } from "@/lib/slack-mrkdwn";
 import {
   hasInlineSlackCreationDetails,
@@ -87,7 +87,7 @@ const topicTools: Array<[RegExp, string[]]> = [
 export async function handleSlackMcpConversation(request: Request, connection: SlackConnection, event: AgentEvent, query: string) {
   const token = await slackTokenForConnection(connection);
   await ensureChannelMembership(token, event);
-  const linked = await dailyMemberBySlack(connection.teamId, event.user);
+  const linked = await resolveSlackMemberForEvent(connection, event.user, token);
   if (!linked) {
     const link = await createSlackMemberLinkUrl(connection.ownerId, connection.teamId, event.user, request);
     await postPrivateLink(token, event, `OKRI 계정 연결이 필요합니다. 15분 안에 로그인해 연결해 주세요.\n${link}`);

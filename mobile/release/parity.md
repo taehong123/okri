@@ -56,6 +56,10 @@
   including before their Slack account is linked; admins can explicitly exclude
   them while DM delivery remains limited to linked members. This is Slack/web
   administration only; `/api/mobile/v1` and native UI are unchanged.
+- A new Slack member's first bot invocation now links automatically when their
+  Slack email uniquely matches one active OKRI member, then continues the same
+  request. Ambiguous or unavailable email falls back to a private one-time link.
+  This is Slack-only; `/api/mobile/v1` and native UI are unchanged.
 - The protected Sites-to-self-hosted transfer receiver and import unpacker are
   one-time infrastructure operations. They do not change `/api/mobile/v1`,
   native authentication, or any native UI.

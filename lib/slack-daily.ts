@@ -11,7 +11,7 @@ import {
   workspaceMembers,
   type SlackConnection,
 } from "@/db/schema";
-import { currentDailyMember, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
+import { currentDailyMember, dailyMemberBySlack, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
 import { dailyWorkStatusLabel, normalizeDailyWorkStatus, parseDailyWorkStatuses, validateDailyWorkStatuses } from "@/lib/daily-work-status";
 import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
 import { dailyWorkContainerLabel, dailyWorkOption } from "@/lib/slack-daily-form";
@@ -21,7 +21,7 @@ import { dispatchSlackAutomationEvent, ensureWorkspace, getSlackConnection, getS
 import { decryptSlackSecret, slackDailyScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { dailyDeliveryHealth } from "@/lib/slack-daily-status";
 
-export { dailyMemberBySlack } from "@/lib/daily-bot";
+export { dailyMemberBySlack };
 
 type SlackApiResult = { ok?: boolean; error?: string; response_metadata?: { next_cursor?: string; messages?: string[] } } & Record<string, unknown>;
 type SlackUser = {
@@ -66,6 +66,38 @@ export async function slackApi<T extends SlackApiResult>(token: string, method: 
   const result = await response.json() as T;
   if (!response.ok || !result.ok) throw new SlackRequestError(result.error, method, result.response_metadata?.messages);
   return result;
+}
+
+async function findSlackUser(token: string, slackUserId: string) {
+  try {
+    return (await slackApi<SlackApiResult & { user?: SlackUser }>(token, "users.info", { user: slackUserId })).user;
+  } catch (error) {
+    if (!(error instanceof SlackRequestError)) throw error;
+    try {
+      return (await listAllSlackUsers(token)).find((user) => user.id === slackUserId);
+    } catch (directoryError) {
+      if (!(directoryError instanceof SlackRequestError)) throw directoryError;
+      return undefined;
+    }
+  }
+}
+
+export async function resolveSlackMemberForEvent(connection: SlackConnection, slackUserId: string, token?: string) {
+  const existing = await dailyMemberBySlack(connection.teamId, slackUserId);
+  if (existing) return existing;
+
+  const botToken = token ?? await slackTokenForConnection(connection);
+  const user = await findSlackUser(botToken, slackUserId);
+  if (!user?.profile?.email || user.deleted || user.is_bot || user.is_app_user || user.id === "USLACKBOT") return null;
+
+  try {
+    await synchronizeSlackMembers(env.DB, connection.ownerId, connection.teamId, [user]);
+  } catch (error) {
+    const racedLink = await dailyMemberBySlack(connection.teamId, slackUserId);
+    if (racedLink) return racedLink;
+    throw error;
+  }
+  return dailyMemberBySlack(connection.teamId, slackUserId);
 }
 
 export async function syncSlackDailyInstallation(ownerId: string) {
@@ -124,14 +156,14 @@ export async function createSlackMemberLinkUrl(ownerId: string, teamId: string, 
   const connection = await getSlackConnection(ownerId);
   if (!connection || connection.teamId !== teamId) throw new Error("Slack 연결을 찾을 수 없습니다.");
   const token = await slackTokenForConnection(connection);
-  const profile = await slackApi<SlackApiResult & { user?: SlackUser }>(token, "users.info", { user: slackUserId });
+  const user = await findSlackUser(token, slackUserId);
   const rawToken = randomHex(32);
   const tokenHash = await sha256(rawToken);
   const now = new Date();
   await env.DB.prepare(`INSERT INTO slack_link_tokens
     (token_hash, owner_id, team_id, slack_user_id, slack_email, created_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
-    .bind(tokenHash, ownerId, teamId, slackUserId, profile.user?.profile?.email ?? "", now.toISOString(), new Date(now.getTime() + 15 * 60_000).toISOString()).run();
+    .bind(tokenHash, ownerId, teamId, slackUserId, user?.profile?.email ?? "", now.toISOString(), new Date(now.getTime() + 15 * 60_000).toISOString()).run();
   const runtime = env as unknown as { OKRI_APP_URL?: string; OKRPTR_APP_URL?: string };
   const appBase = runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL
     ? String(runtime.OKRI_APP_URL || runtime.OKRPTR_APP_URL).replace(/\/$/, "")
@@ -149,8 +181,8 @@ export async function consumeSlackMemberLink(authorization: RequestAuthorization
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection || connection.teamId !== row.team_id) throw new Error("Slack 워크스페이스 연결이 변경되었습니다.");
   const token = await slackTokenForConnection(connection);
-  const profile = await slackApi<SlackApiResult & { user?: SlackUser }>(token, "users.info", { user: row.slack_user_id });
-  if (!profile.user || profile.user.deleted || profile.user.is_bot) throw new Error("연결할 수 없는 Slack 사용자입니다.");
+  const user = await findSlackUser(token, row.slack_user_id);
+  if (user?.deleted || user?.is_bot || user?.is_app_user || user?.id === "USLACKBOT") throw new Error("연결할 수 없는 Slack 사용자입니다.");
   const now = new Date().toISOString();
   const linkId = crypto.randomUUID();
   const results = await env.DB.batch([
@@ -164,8 +196,8 @@ export async function consumeSlackMemberLink(authorization: RequestAuthorization
         AND NOT EXISTS (SELECT 1 FROM slack_member_links link WHERE
           (link.owner_id = member.workspace_id AND link.member_id = member.id)
           OR (link.team_id = token.team_id AND link.slack_user_id = token.slack_user_id))`)
-      .bind(linkId, profile.user.profile?.email ?? row.slack_email ?? "",
-        profile.user.profile?.display_name || profile.user.profile?.real_name || member.displayName,
+      .bind(linkId, user?.profile?.email ?? row.slack_email ?? "",
+        user?.profile?.display_name || user?.profile?.real_name || member.displayName,
         now, now, tokenHash, now, member.id, authorization.ownerId),
     env.DB.prepare(`UPDATE slack_link_tokens SET used_at = ? WHERE token_hash = ? AND used_at IS NULL
       AND EXISTS (SELECT 1 FROM slack_member_links WHERE id = ? AND owner_id = ? AND member_id = ?)`)
