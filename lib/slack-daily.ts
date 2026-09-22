@@ -56,6 +56,11 @@ export async function slackTokenForConnection(connection: Pick<SlackConnection, 
   return decryptSlackSecret(connection.encryptedBotToken, (env as SlackRuntimeEnv).SLACK_TOKEN_ENCRYPTION_KEY!);
 }
 
+export async function slackCanvasTokenForConnection(connection: Pick<SlackConnection, "encryptedUserToken">) {
+  if (!connection.encryptedUserToken) return null;
+  return decryptSlackSecret(connection.encryptedUserToken, (env as SlackRuntimeEnv).SLACK_TOKEN_ENCRYPTION_KEY!);
+}
+
 export async function slackApi<T extends SlackApiResult>(token: string, method: string, body: Record<string, unknown> = {}, signal?: AbortSignal) {
   const response = await fetch(`https://slack.com/api/${method}`, {
     method: "POST",

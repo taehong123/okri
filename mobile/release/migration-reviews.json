@@ -19,5 +19,12 @@
     "rollbackPlan": "Leave the additive tables and indexes in place when rolling application code back. Older web and native clients ignore them; do not drop tables or rewrite migration history.",
     "dataPreservation": "Only new tables, indexes and backup-revision triggers are created. The UPDATE tokens occur inside additive ON CONFLICT trigger bodies; no existing business rows are deleted, rewritten or renamed.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-22"
+  },
+  "drizzle/0066_slack_canvas_user_token.sql": {
+    "sha256": "ff6b2aa630ccd33504a688d58f5b67d9d1fcc2bee0d6d271362a117c28be3957",
+    "v1Compatibility": "The migration only adds defaulted web integration credential metadata to slack_connections. Frozen mobile v1 routes, payloads, authentication and item semantics are unchanged.",
+    "rollbackPlan": "Leave the additive columns in place when rolling application code back. Older application versions ignore them; do not drop encrypted credentials or rewrite migration history.",
+    "dataPreservation": "Three ADD COLUMN statements preserve every existing Slack connection and default delegated credentials to empty until an Owner or Admin explicitly reauthorizes.",
+    "reviewedBy": "Codex native compatibility integration review, 2026-09-23"
   }
 }

@@ -1,6 +1,6 @@
 import { env } from "cloudflare:workers";
 import { authorizeRequest, canManageTeam, consumeSlackOAuthState, getSlackConnection, getSlackConnectionByTeam, hasWorkspaceAdminAccess, saveSlackConnection, SlackWorkspaceConnectionError } from "@/lib/pace-data";
-import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchangeSlackCode, redirectWithSlackStatus, revokeSlackToken, SlackOAuthExchangeError, slackConfigured, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
+import { classifySlackOAuthError, decryptSlackSecret, encryptSlackSecret, exchangeSlackCode, redirectWithSlackStatus, revokeSlackToken, SlackOAuthExchangeError, slackCanvasUserScopes, slackConfigured, slackScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { disconnectSlackDaily, syncSlackDailyInstallation } from "@/lib/slack-daily";
 
 export async function GET(request: Request) {
@@ -47,8 +47,9 @@ async function handleSlackCallback(request: Request) {
   try {
     const install = await exchangeSlackCode(runtime, request, code);
     const botToken = install.access_token ?? "";
+    const userToken = install.authed_user?.access_token ?? "";
     const teamId = install.team?.id ?? "";
-    if (!botToken || !teamId) return redirectWithSlackStatus(request, returnTo, "oauth_exchange_failed");
+    if (!botToken || !userToken || !teamId) return redirectWithSlackStatus(request, returnTo, "missing_scope");
     const targetConnection = await getSlackConnectionByTeam(teamId);
     if (targetConnection && targetConnection.ownerId !== state.ownerId) return redirectWithSlackStatus(request, returnTo, "workspace_already_connected");
     const currentConnection = await getSlackConnection(state.ownerId);
@@ -62,9 +63,16 @@ async function handleSlackCallback(request: Request) {
       appId: install.app_id ?? "",
       encryptedBotToken: await encryptSlackSecret(botToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!),
       scope: install.scope ?? "",
+      encryptedUserToken: await encryptSlackSecret(userToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!),
+      userScope: install.authed_user?.scope ?? "",
+      authedSlackUserId: install.authed_user?.id ?? "",
     });
     const grantedScopes = new Set((install.scope ?? "").split(/[ ,]/).map((scope) => scope.trim()).filter(Boolean));
-    const missingScopes = slackScopes.filter((scope) => !grantedScopes.has(scope));
+    const grantedUserScopes = new Set((install.authed_user?.scope ?? "").split(/[ ,]/).map((scope) => scope.trim()).filter(Boolean));
+    const missingScopes = [
+      ...slackScopes.filter((scope) => !grantedScopes.has(scope)),
+      ...slackCanvasUserScopes.filter((scope) => !grantedUserScopes.has(scope)),
+    ];
     await finalizeSlackInstallation(state.ownerId, teamId, previousConnection, runtime);
     return redirectWithSlackStatus(request, returnTo, missingScopes.length ? "missing_scope" : "setup_required");
   } catch (error) {
@@ -80,6 +88,12 @@ async function finalizeSlackInstallation(ownerId: string, teamId: string, previo
       const previousToken = await decryptSlackSecret(previousConnection.encryptedBotToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!);
       await revokeSlackToken(previousToken);
     } catch { /* Old-token revocation is best effort after the atomic swap. */ }
+    if (previousConnection.encryptedUserToken) {
+      try {
+        const previousToken = await decryptSlackSecret(previousConnection.encryptedUserToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!);
+        await revokeSlackToken(previousToken);
+      } catch { /* Delegated read-token revocation is also best effort. */ }
+    }
   }
   await syncSlackDailyInstallation(ownerId);
 }

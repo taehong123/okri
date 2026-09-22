@@ -10,7 +10,7 @@ import {
   reserveAiUsageEvent,
   type RequestAuthorization,
 } from "@/lib/pace-data";
-import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackCanvasTokenForConnection, slackTokenForConnection } from "@/lib/slack-daily";
 import { formatSlackMrkdwn } from "@/lib/slack-mrkdwn";
 import {
   hasInlineSlackCreationDetails,
@@ -86,6 +86,7 @@ const topicTools: Array<[RegExp, string[]]> = [
 
 export async function handleSlackMcpConversation(request: Request, connection: SlackConnection, event: AgentEvent, query: string) {
   const token = await slackTokenForConnection(connection);
+  const canvasToken = await slackCanvasTokenForConnection(connection).catch(() => null);
   await ensureChannelMembership(token, event);
   const linked = await resolveSlackMemberForEvent(connection, event.user, token);
   if (!linked) {
@@ -109,6 +110,7 @@ export async function handleSlackMcpConversation(request: Request, connection: S
       teamId: connection.teamId,
       botUserId: connection.botUserId,
       token,
+      canvasToken,
       event,
       query,
     });
@@ -125,12 +127,13 @@ async function runMcpAgent(input: {
   teamId: string;
   botUserId: string;
   token: string;
+  canvasToken: string | null;
   event: AgentEvent;
   query: string;
 }) {
   const runtime = env as RuntimeEnv;
   const [thread, authors, session] = await Promise.all([
-    readSlackThread(input.token, input.event).then((value) => ({ ...value, readFailed: false as const, readError: null })).catch((error) => {
+    readSlackThread(input.token, input.event, input.canvasToken).then((value) => ({ ...value, readFailed: false as const, readError: null })).catch((error) => {
       console.error("Slack MCP thread read failed", safeError(error));
       return {
         messages: [{ user: input.event.user, text: cleanSlack(input.query) }], truncated: true,

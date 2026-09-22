@@ -407,6 +407,13 @@
       "when": 1790058427633,
       "tag": "0065_client_directory",
       "breakpoints": true
+    },
+    {
+      "idx": 58,
+      "version": "6",
+      "when": 1790121600000,
+      "tag": "0066_slack_canvas_user_token",
+      "breakpoints": true
     }
   ]
 }

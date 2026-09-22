@@ -1396,3 +1396,25 @@ test("adds isolated workspace billing and email consent records while scrubbing 
   assert.equal(db.prepare("SELECT COUNT(*) AS count FROM billing_trial_claims WHERE billing_owner_user_id = 'owner-a'").get().count, 1);
   db.close();
 });
+
+test("Slack Canvas delegated-token migration preserves existing connections", async () => {
+  const migration = await readFile(new URL("../drizzle/0066_slack_canvas_user_token.sql", import.meta.url), "utf8");
+  assert.equal(migration.includes("\r"), false);
+  const db = new DatabaseSync(":memory:");
+  db.exec(`CREATE TABLE slack_connections (
+    id TEXT PRIMARY KEY, owner_id TEXT NOT NULL, user_id TEXT NOT NULL, team_id TEXT NOT NULL,
+    encrypted_bot_token TEXT NOT NULL, scope TEXT NOT NULL DEFAULT ''
+  );
+  INSERT INTO slack_connections (id, owner_id, user_id, team_id, encrypted_bot_token, scope)
+    VALUES ('connection-a', 'workspace-a', 'user-a', 'team-a', 'ciphertext', 'chat:write');`);
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  assert.deepEqual({ ...db.prepare(`SELECT id, encrypted_bot_token, encrypted_user_token, user_scope, authed_slack_user_id
+    FROM slack_connections WHERE id = 'connection-a'`).get() }, {
+    id: "connection-a",
+    encrypted_bot_token: "ciphertext",
+    encrypted_user_token: "",
+    user_scope: "",
+    authed_slack_user_id: "",
+  });
+  db.close();
+});

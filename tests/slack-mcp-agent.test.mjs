@@ -102,6 +102,9 @@ test("Slack MCP OAuth covers public, private, direct, and group-direct thread hi
     assert.match(manifest, new RegExp(scope));
   }
   assert.match(manifest, /message\.mpim/);
+  assert.match(oauth, /user_scope/);
+  assert.match(oauth, /slackCanvasUserScopes/);
+  assert.match(manifest, /user:\s+- files:read\s+- canvases:read/);
 });
 
 test("Slack MCP conversation preserves Project approval state without exposing it", async () => {

@@ -25,7 +25,10 @@ function harness() {
     oauth: { ownerId: "workspace", userId: "user", returnTo: "/?bot=daily" },
     stillAdmin: true, configured: true, signature: true, connection: old,
     target: null, cleanupError: null, deleteError: null,
-    install: { access_token: "mock-token", team: { id: "T-new" }, scope: "chat:write" },
+    install: {
+      access_token: "mock-token", team: { id: "T-new" }, scope: "chat:write",
+      authed_user: { id: "U-installer", access_token: "mock-user-token", scope: "files:read,canvases:read" },
+    },
   };
   class SlackWorkspaceConnectionError extends Error {}
   class SlackOAuthExchangeError extends Error {}
@@ -61,7 +64,10 @@ function harness() {
       },
       async consumeSlackOAuthState(value) { calls.push(["state", value]); return state.oauth; },
       async hasWorkspaceAdminAccess(owner, user) { calls.push(["access", owner, user]); return state.stillAdmin; },
-      async saveSlackConnection(value) { calls.push(["save", value.ownerId, value.teamId]); return { previousConnection: state.connection }; },
+      async saveSlackConnection(value) {
+        calls.push(["save", value.ownerId, value.teamId, value.encryptedUserToken, value.userScope, value.authedSlackUserId]);
+        return { previousConnection: state.connection };
+      },
       SlackWorkspaceConnectionError,
     },
     "@/lib/slack-daily": {
@@ -95,7 +101,8 @@ function harness() {
       async encryptSlackSecret() { calls.push(["encrypt"]); return "mock-new-cipher"; },
       async exchangeSlackCode() { calls.push(["exchange"]); return state.install; },
       redirectWithSlackStatus: (request, path, status) => Response.redirect(new URL(`${path}&slack=${status}`, request.url), 303),
-      classifySlackOAuthError: () => "oauth_exchange_failed", slackScopes: ["chat:write"], SlackOAuthExchangeError,
+      classifySlackOAuthError: () => "oauth_exchange_failed", slackScopes: ["chat:write"],
+      slackCanvasUserScopes: ["files:read", "canvases:read"], SlackOAuthExchangeError,
     },
   };
   const routes = Object.fromEntries(Object.entries(sources).map(([name, output]) => {
@@ -129,15 +136,25 @@ test("summary settings and onboarding preserve OFF/time and validate input under
   }
 });
 
-test("daily settings do not require channel message history or mention access", () => {
+test("daily settings keep Canvas delegated scopes separate from bot scopes", () => {
   const loaded = { exports: {} };
   new Function("require", "module", "exports", oauthOutput)(() => ({}), loaded, loaded.exports);
-  for (const scope of ["channels:history", "groups:history", "app_mentions:read", "files:read", "canvases:read"]) {
+  for (const scope of ["channels:history", "groups:history", "app_mentions:read", "files:read"]) {
     assert.ok(!loaded.exports.slackDailyScopes.includes(scope));
     assert.ok(loaded.exports.slackScopes.includes(scope));
   }
+  assert.ok(!loaded.exports.slackScopes.includes("canvases:read"));
+  assert.deepEqual(loaded.exports.slackCanvasUserScopes, ["files:read", "canvases:read"]);
   assert.ok(loaded.exports.slackDailyScopes.includes("im:history"));
   assert.ok(loaded.exports.slackDailyScopes.includes("chat:write"));
+});
+
+test("Slack authorization requests a read-only delegated Canvas token", () => {
+  const loaded = { exports: {} };
+  new Function("module", "exports", oauthOutput)(loaded, loaded.exports);
+  const url = new URL(loaded.exports.slackAuthorizationUrl({ SLACK_CLIENT_ID: "client" }, new Request("https://okri.ai/api/slack/auth"), "state"));
+  assert.equal(url.searchParams.get("user_scope"), "files:read,canvases:read");
+  assert.ok(!url.searchParams.get("scope").split(",").includes("canvases:read"));
 });
 
 test("bulk send and polling use authorized workspace and require admin access", async () => {
@@ -233,6 +250,10 @@ test("OAuth team switch cleans before saving and same-team reinstall keeps recip
     const response = await h.routes.callback.GET(h.request("GET"));
     assert.match(response.headers.get("location"), /slack=setup_required/);
     assert.deepEqual(h.calls.find((c) => c[0] === "authorize"), ["authorize", "workspace"]);
+    assert.deepEqual(h.calls.find((c) => c[0] === "save"), [
+      "save", "workspace", sameTeam ? "T-old" : "T-new", "mock-new-cipher", "files:read,canvases:read", "U-installer",
+    ]);
+    assert.equal(h.calls.filter((c) => c[0] === "encrypt").length, 2);
     assert.deepEqual(h.calls.filter((c) => ["cleanup", "save", "revoke", "sync"].includes(c[0])).map((c) => c[0]),
       sameTeam ? ["save", "sync"] : ["cleanup", "save", "revoke", "sync"]);
   }

@@ -97,6 +97,32 @@ test("Slack thread reading includes the attached Huddle notes Canvas once", asyn
   assert.equal(thread.messages.at(-1).user, "member-b");
 });
 
+test("Slack thread reading falls back to the delegated Canvas token", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (token, method) => {
+    requests.push({ token, method });
+    if (method === "files.info" && token === "bot-token") {
+      throw Object.assign(new Error("file_not_found"), { code: "file_not_found" });
+    }
+    if (method === "files.info") return { file: {
+      id: "canvas-1", title: "Huddle notes", is_huddle_canvas: true,
+      canvas_metadata: { originating_huddle_id: "huddle-1" },
+      contents_extracts: [{ text: "Decision: ship the payment fix today." }],
+    } };
+    return { messages: [{
+      user: "member-a", text: "Huddle thread", ts: "1.0", subtype: "huddle_thread",
+      room: { call_family: "huddle", attached_file_ids: ["canvas-1"] },
+    }] };
+  });
+
+  const thread = await readSlackThread("bot-token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "read this", ts: "1.2", threadTs: "1.0",
+  }, "user-token");
+
+  assert.deepEqual(requests.filter((request) => request.method === "files.info").map((request) => request.token), ["bot-token", "user-token"]);
+  assert.match(thread.messages.at(-1).text, /Decision: ship the payment fix today/);
+});
+
 test("Slack thread reading ignores non-Huddle attachments and empty Huddle canvases", async () => {
   const requests = [];
   const { readSlackThread } = load(async (_token, method, body) => {

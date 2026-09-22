@@ -17,7 +17,7 @@ import {
   type ItemStatus,
   type RequestAuthorization,
 } from "@/lib/pace-data";
-import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackTokenForConnection } from "@/lib/slack-daily";
+import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackCanvasTokenForConnection, slackTokenForConnection } from "@/lib/slack-daily";
 import { saveSlackProjectImages } from "@/lib/project-images";
 import { readLanguagePreferences, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
@@ -72,6 +72,7 @@ export async function handleSlackWorkCommandEvent(
   options: { preparingNotice?: boolean } = {},
 ) {
   const token = await slackTokenForConnection(connection);
+  const canvasToken = await slackCanvasTokenForConnection(connection).catch(() => null);
   const linked = await resolveSlackMemberForEvent(connection, event.user, token);
   await ensureSlackWorkChannel(token, event);
   const t = linked
@@ -104,6 +105,7 @@ export async function handleSlackWorkCommandEvent(
         authorization: linked.authorization,
         memberId: linked.memberId,
         token,
+        canvasToken,
         event,
         query: parsed.query,
       });
@@ -609,13 +611,14 @@ async function attachSlackThreadImages(
       return `\n${t("Slack 연결이 변경되어 이미지는 저장하지 못했습니다.")}`;
     }
     const token = await slackTokenForConnection(connection);
+    const canvasToken = await slackCanvasTokenForConnection(connection).catch(() => null);
     const thread = await readSlackThread(token, {
       channel: metadata.sourceThread.channel,
       channelType: "channel",
       user: metadata.slackUserId,
       text: "",
       threadTs: metadata.sourceThread.ts,
-    });
+    }, canvasToken);
     if (!thread.imageFiles.length) return "";
     if (!projectId) return `\n${t("이미지는 Project에만 저장됩니다. 이번 이미지는 저장하지 않았습니다.")}`;
     const result = await saveSlackProjectImages({

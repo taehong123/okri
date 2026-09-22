@@ -11,7 +11,9 @@ const read = p => readFile(new URL(p, root), "utf8");
 const digest = s => createHash("sha256").update(s).digest("hex");
 test("native and store-feedback tables are created after the deployed 0062 migration and a second run preserves them", async t => {
   const db = new DatabaseSync(":memory:"); t.after(() => db.close());
-  db.exec("CREATE TABLE users (id TEXT PRIMARY KEY); CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at INTEGER);");
+  db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE slack_connections (id TEXT PRIMARY KEY);
+    CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at INTEGER);`);
   db.prepare("INSERT INTO __drizzle_migrations (hash,created_at) VALUES (?,?)").run("already-published-0062", 1789012386612);
   const statement = (sql, args = []) => ({
     bind: (...values) => statement(sql, values),

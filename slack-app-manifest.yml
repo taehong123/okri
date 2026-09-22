@@ -33,6 +33,8 @@ oauth_config:
       - mpim:history
       - app_mentions:read
       - files:read
+    user:
+      - files:read
       - canvases:read
 settings:
   interactivity:

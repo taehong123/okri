@@ -13,6 +13,12 @@ export type SlackOAuthResponse = {
   bot_user_id?: string;
   app_id?: string;
   team?: { id?: string; name?: string };
+  authed_user?: {
+    id?: string;
+    access_token?: string;
+    scope?: string;
+    token_type?: string;
+  };
   error?: string;
 };
 
@@ -57,8 +63,9 @@ export const slackScopes = [
   "mpim:history",
   "app_mentions:read",
   "files:read",
-  "canvases:read",
 ];
+
+export const slackCanvasUserScopes = ["files:read", "canvases:read"];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);
@@ -95,6 +102,7 @@ export function slackAuthorizationUrl(runtime: SlackRuntimeEnv, request: Request
   const url = new URL("https://slack.com/oauth/v2/authorize");
   url.searchParams.set("client_id", requireSlackValue(runtime.SLACK_CLIENT_ID, "SLACK_CLIENT_ID"));
   url.searchParams.set("scope", slackScopes.join(","));
+  url.searchParams.set("user_scope", slackCanvasUserScopes.join(","));
   url.searchParams.set("redirect_uri", slackRedirectUri(runtime, request));
   url.searchParams.set("state", state);
   return url.toString();

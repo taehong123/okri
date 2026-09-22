@@ -770,6 +770,9 @@ async function ensureSchema() {
           app_id TEXT NOT NULL DEFAULT '',
           encrypted_bot_token TEXT NOT NULL,
           scope TEXT NOT NULL DEFAULT '',
+          encrypted_user_token TEXT NOT NULL DEFAULT '',
+          user_scope TEXT NOT NULL DEFAULT '',
+          authed_slack_user_id TEXT NOT NULL DEFAULT '',
           connected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
           updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         )`),
@@ -1014,6 +1017,9 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_reason TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN skip_note TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE daily_submissions ADD COLUMN work_status TEXT NOT NULL DEFAULT 'office'");
+      await addColumnIfMissing(d1, "ALTER TABLE slack_connections ADD COLUMN encrypted_user_token TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE slack_connections ADD COLUMN user_scope TEXT NOT NULL DEFAULT ''");
+      await addColumnIfMissing(d1, "ALTER TABLE slack_connections ADD COLUMN authed_slack_user_id TEXT NOT NULL DEFAULT ''");
       await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN onboarding_completed_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN summary_enabled INTEGER NOT NULL DEFAULT 1");
       await addColumnIfMissing(d1, "ALTER TABLE slack_daily_settings ADD COLUMN summary_time TEXT NOT NULL DEFAULT '12:00'");
@@ -2166,6 +2172,9 @@ export async function saveSlackConnection(input: {
   appId: string;
   encryptedBotToken: string;
   scope: string;
+  encryptedUserToken: string;
+  userScope: string;
+  authedSlackUserId: string;
 }) {
   await ensureSchema();
   const previousConnection = await getSlackConnection(input.ownerId);
@@ -2182,11 +2191,13 @@ export async function saveSlackConnection(input: {
       env.DB.prepare("DELETE FROM slack_connections WHERE owner_id = ?").bind(input.ownerId),
       env.DB.prepare(`INSERT INTO slack_connections (
         id, owner_id, user_id, team_id, team_name, bot_user_id, app_id,
-        encrypted_bot_token, scope, connected_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        encrypted_bot_token, scope, encrypted_user_token, user_scope, authed_slack_user_id,
+        connected_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .bind(
           crypto.randomUUID(), input.ownerId, input.userId, input.teamId, input.teamName,
-          input.botUserId, input.appId, input.encryptedBotToken, input.scope, now, now,
+          input.botUserId, input.appId, input.encryptedBotToken, input.scope,
+          input.encryptedUserToken, input.userScope, input.authedSlackUserId, now, now,
         ),
     ]);
   } catch (error) {
@@ -2226,6 +2237,8 @@ export function serializeSlackConnection(connection: SlackConnection | null, url
     teamId: connection?.teamId ?? null,
     botUserId: connection?.botUserId ?? null,
     scope: connection?.scope ?? "",
+    userScope: connection?.userScope ?? "",
+    canvasUserAuthorized: Boolean(connection?.encryptedUserToken),
     connectedAt: connection?.connectedAt ?? null,
     updatedAt: connection?.updatedAt ?? null,
     redirectUrl: urls.redirectUrl,

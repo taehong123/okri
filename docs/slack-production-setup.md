@@ -12,7 +12,7 @@
    - Interactivity: `/api/slack/interactions`
    - Options Load URL: `/api/slack/interactions` (`settings.interactivity.message_menu_options_url`)
    - Events API: `/api/slack/events`
-4. Bot Token Scopes에 `commands`, `chat:write`, `im:write`, `im:history`, `users:read`, `users:read.email`, `channels:read`, `channels:join`, `groups:read`, `channels:history`, `groups:history`, `mpim:read`, `mpim:history`, `app_mentions:read`, `files:read`, `canvases:read`가 있는지 확인한다.
+4. Bot Token Scopes에 `commands`, `chat:write`, `im:write`, `im:history`, `users:read`, `users:read.email`, `channels:read`, `channels:join`, `groups:read`, `channels:history`, `groups:history`, `mpim:read`, `mpim:history`, `app_mentions:read`, `files:read`가 있고, User Token Scopes에 `files:read`, `canvases:read`가 있는지 확인한다.
 5. Event Subscription에 `message.im`이 있는지 확인한다.
 
 ## 2. 운영 보안 값 등록
@@ -60,7 +60,7 @@
 한 OKRI 워크스페이스에는 Slack 워크스페이스 하나만 연결한다. 같은 Slack 워크스페이스를 다른 OKRI 워크스페이스로 옮기려면 기존 연결을 먼저 해제한다.
 
 권한을 추가하면 기존 워크스페이스에는 자동으로 권한이 생기지 않는다. OKRI에서 **권한 업데이트**를 눌러 한 번 다시 승인해야 한다.
-공용 Slack 앱에도 같은 Bot Token Scopes를 먼저 반영해야 하며, 파일의 매니페스트만 고치고 Slack 앱 설정을 갱신하지 않은 상태로 고객에게 재승인을 요청하지 않는다. `canvases:read` 승인 후 봇은 허들 스레드의 `attached_file_ids`에 연결된 Huddle Canvas만 `files.info`로 읽고, 일반 Canvas나 허들 음성·자막은 수집하지 않는다.
+공용 Slack 앱에도 같은 Bot/User Token Scopes를 먼저 반영해야 하며, 파일의 매니페스트만 고치고 Slack 앱 설정을 갱신하지 않은 상태로 고객에게 재승인을 요청하지 않는다. 사용자 `canvases:read`, `files:read` 승인 후 OKRI는 허들 스레드의 `attached_file_ids`에 연결된 Huddle Canvas만 `files.info`로 읽는다. 사용자 토큰은 암호화해 저장하며 Canvas 읽기 외 메시지 발송이나 멤버 조회에는 사용하지 않는다. 일반 Canvas나 허들 음성·자막은 수집하지 않는다.
 
 ## 6. 장애 확인
 

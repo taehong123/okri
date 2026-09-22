@@ -63,9 +63,11 @@
   headings render as bold text instead of literal asterisks. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.
 - Slack bot conversations invoked in a Huddle thread now include a bounded plain
-  text copy of that Huddle's attached notes Canvas when the installed bot has
-  channel and `canvases:read` access. This does not read audio or transcripts and
-  does not change `/api/mobile/v1`, native contracts or native UI.
+  text copy of that Huddle's attached notes Canvas. Canvas reads use the encrypted,
+  read-only Slack user token granted by the installing Owner/Admin because bot
+  sharing alone does not guarantee Canvas body access. The token is not used for
+  messages or other bot calls. This does not read audio or transcripts and does
+  not change `/api/mobile/v1`, native contracts or native UI.
 - Slack Daily team summaries now update their existing channel message when a
   member submits or revises after the initial summary. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.

@@ -24,6 +24,14 @@ export async function POST(request: Request) {
     } catch {
       // Reservations are already canceled; token revocation can be best effort.
     }
+    if (connection.encryptedUserToken) {
+      try {
+        const token = await decryptSlackSecret(connection.encryptedUserToken, runtime.SLACK_TOKEN_ENCRYPTION_KEY!);
+        await revokeSlackToken(token);
+      } catch {
+        // The delegated Canvas token is also revoked on a best-effort basis.
+      }
+    }
   } else if (connection) return Response.json({ error: "Slack 서비스 설정을 확인한 뒤 연결 해제를 다시 시도해 주세요." }, { status: 503 });
 
   return Response.json({ disconnected: true });
