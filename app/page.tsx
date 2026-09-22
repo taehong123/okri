@@ -106,6 +106,7 @@ import { GuideDraft } from "./guide-draft";
 import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
 import { ClientManagementView, TicketClientEditor, TicketClientSummary, useTicketClients, type TicketClientLink } from "./ticket-clients";
+import { normalizeTeamRole } from "@/lib/team-role";
 
 function slackErrorMessage(error: unknown, fallback?: string) {
   return t(baseSlackErrorMessage(error, fallback));
@@ -8024,7 +8025,10 @@ function taskCompletionPatch(status: ItemStatus): Partial<OkriItem> { return { s
 function sourceLabel(source: string) { return { mcp: "MCP", codex: "Codex", slack: "Slack", discord: "Discord", telegram: "Telegram", web: "Web" }[source] ?? "Bot"; }
 function propertyTypeLabel(type: PropertyType) { return t({ text: "텍스트", number: "숫자", select: "선택", date: "날짜", checkbox: "체크박스", member: "멤버 1명", members: "멤버 여러 명" }[type]); }
 function propertySystemDefault(properties: PropertyDefinition[], systemKey: string, fallback: string) { const value = properties.find((property) => property.systemKey === systemKey && property.active)?.defaultValue; return typeof value === "string" ? value : fallback; }
-function teamRoleLabel(role: TeamRole) { return t({ owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[role]); }
+function teamRoleLabel(role: TeamRole | string | null | undefined) {
+  const normalized = normalizeTeamRole(role);
+  return t({ owner: "Owner", admin: "Admin", member: "Member", viewer: "Viewer" }[normalized]);
+}
 function workspaceDeletionLabel(value: string | null) {
   if (!value) return "";
   const date = new Date(value);

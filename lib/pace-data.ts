@@ -85,6 +85,9 @@ import {
   reserveEditorSeat,
   reserveProjectCreation,
 } from "@/lib/billing";
+import { normalizeTeamRole, TEAM_ROLES, type TeamRole } from "@/lib/team-role";
+
+export { normalizeTeamRole, TEAM_ROLES, type TeamRole } from "@/lib/team-role";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "ticket", "task"] as const;
 export const ITEM_STATUSES = ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
@@ -112,7 +115,6 @@ const LEGACY_SEED_ITEM_TITLES = [
   "모바일 가입 이탈 구간 확인",
 ];
 const LEGACY_SEED_ROUTINE_TITLES = ["오늘의 최우선 Task 정리", "주간 회고 작성"];
-export const TEAM_ROLES = ["owner", "admin", "member", "viewer"] as const;
 export const GROUP_COLORS = ["gray", "blue", "green", "yellow", "orange", "red", "purple"] as const;
 export const GROUP_VISIBILITIES = ["open", "private"] as const;
 export const GROUP_ROLES = ["lead", "member"] as const;
@@ -136,7 +138,6 @@ export type WorkspaceRuleInput = Partial<{
   reviewBeforeCreate: boolean;
   configured: boolean;
 }>;
-export type TeamRole = (typeof TEAM_ROLES)[number];
 export type InvitationDeliveryStatus = "not_sent" | "sent" | "failed" | "unavailable";
 export type InvitationStatus = "pending" | "expired" | "accepted" | "revoked";
 export type WorkspaceInvitationSummary = {
@@ -2656,7 +2657,7 @@ export async function authorizeRequest(
     if (!membership || membership.status !== "active" || (requested && membership.workspaceId !== requested)) {
       return Response.json({ error: "Workspace access denied" }, { status: 403 });
     }
-    const role = membership.role as TeamRole;
+    const role = normalizeTeamRole(membership.role);
     if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
       if (role === "viewer") return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
       if (!(await memberCanWrite(membership.workspaceId, identity.id, role))) return Response.json({ error: "Read-only access", code: "editor_read_only" }, { status: 403 });
@@ -2684,7 +2685,7 @@ export async function authorizeRequest(
       if (!membership) {
         return Response.json({ error: "This OKRI connection no longer has workspace access." }, { status: 403 });
       }
-      const role = membership.role as TeamRole;
+      const role = normalizeTeamRole(membership.role);
       const requiredScopes = options.requiredIntegrationScope
         ?? (["GET", "HEAD", "OPTIONS"].includes(request.method) ? "okri:read" : "okri:write");
       if (!(Array.isArray(requiredScopes) ? requiredScopes : [requiredScopes]).some((scope) => integrationTokenHasScope(token.scopes, scope))) {
@@ -2723,7 +2724,7 @@ export async function authorizeRequest(
   const hostname = new URL(request.url).hostname;
   if (hostname === "localhost" || hostname === "127.0.0.1") {
     const membership = await resolveWorkspaceMembership("local-user", "local@okri.ai", "Local Owner", requestedWorkspaceId(request));
-    return { ownerId: membership?.workspaceId ?? "local-user", userId: "local-user", email: "local@okri.ai", displayName: "Local Owner", role: (membership?.role as TeamRole | undefined) ?? "owner", apiToken: false };
+    return { ownerId: membership?.workspaceId ?? "local-user", userId: "local-user", email: "local@okri.ai", displayName: "Local Owner", role: normalizeTeamRole(membership?.role, "owner"), apiToken: false };
   }
 
   const googleSession = await readGoogleSession(request, (env as RuntimeEnv).GOOGLE_TOKEN_ENCRYPTION_KEY);
@@ -2734,7 +2735,7 @@ export async function authorizeRequest(
       if (!membership || membership.status !== "active") {
         return Response.json({ error: "This Google account is not an active workspace member." }, { status: 403 });
       }
-      const role = membership.role as TeamRole;
+      const role = normalizeTeamRole(membership.role);
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
       }
@@ -2874,7 +2875,7 @@ async function resolveWorkspaceMembership(userId: string, email: string | null, 
 
 async function activeWorkspaceMemberships(userId: string) {
   const rows = await getDb()
-    .select({ membership: workspaceMembers })
+    .select({ membership: workspaceMembers, ownerUserId: workspaces.ownerUserId })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(and(
@@ -2883,7 +2884,10 @@ async function activeWorkspaceMemberships(userId: string) {
       isNull(workspaces.scheduledDeletionAt),
     ))
     .orderBy(asc(workspaceMembers.createdAt));
-  return rows.map((row) => row.membership);
+  return rows.map(({ membership, ownerUserId }) => ({
+    ...membership,
+    role: normalizeTeamRole(membership.role, ownerUserId === userId ? "owner" : "viewer"),
+  }));
 }
 
 function requestedWorkspaceId(request: Request) {
@@ -2921,7 +2925,7 @@ export async function listUserWorkspaces(userId: string, currentWorkspaceId: str
     createdAt: workspace.createdAt,
     kind: workspace.kind as "personal" | "team",
     personal: workspace.kind === "personal",
-    role: membership.role as TeamRole,
+    role: normalizeTeamRole(membership.role, workspace.ownerUserId === userId ? "owner" : "viewer"),
     current: workspace.id === currentWorkspaceId && !workspace.scheduledDeletionAt,
     deletionRequestedAt: workspace.deletionRequestedAt,
     scheduledDeletionAt: workspace.scheduledDeletionAt,
@@ -3070,7 +3074,7 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
     createdAt: nextRow.workspace.createdAt,
     kind: nextRow.workspace.kind as "personal" | "team",
     personal: nextRow.workspace.kind === "personal",
-    role: nextRow.membership.role as TeamRole,
+    role: normalizeTeamRole(nextRow.membership.role, nextRow.workspace.ownerUserId === userId ? "owner" : "viewer"),
     current: true,
     deletionRequestedAt: null,
     scheduledDeletionAt: null,
@@ -3310,7 +3314,7 @@ export async function getTeam(ownerId: string, currentUserId: string) {
       avatarUrl: workspaceAvatarUrl(workspace.id, workspace.avatarKey, workspace.avatarUpdatedAt),
       avatarUpdatedAt: workspace.avatarUpdatedAt,
     },
-    members: members.map((member) => serializeTeamMember(member, currentUserId)),
+    members: members.map((member) => serializeTeamMember(member, currentUserId, member.userId === workspace.ownerUserId ? "owner" : "viewer")),
     invitations: invitations
       .filter((invitation) => invitation.status === "pending" || invitation.status === "expired")
       .map(serializeWorkspaceInvitation),
@@ -3544,12 +3548,12 @@ async function getWorkspaceMember(ownerId: string, memberId: string) {
   return member;
 }
 
-function serializeTeamMember(member: WorkspaceMember, currentUserId: string) {
+function serializeTeamMember(member: WorkspaceMember, currentUserId: string, fallbackRole: TeamRole = "viewer") {
   return {
     id: member.id,
     email: member.email ?? "",
     displayName: member.displayName || member.email?.split("@")[0] || "Member",
-    role: member.role as TeamRole,
+    role: normalizeTeamRole(member.role, fallbackRole),
     status: "active" as const,
     isCurrent: member.userId === currentUserId,
     createdAt: member.createdAt,
@@ -3957,7 +3961,7 @@ function serializeGroupMember(relation: WorkspaceGroupMember, member: WorkspaceM
     email: member.email ?? "",
     displayName: member.displayName || member.email?.split("@")[0] || "Member",
     status: member.status as "invited" | "active",
-    workspaceRole: member.role as TeamRole,
+    workspaceRole: normalizeTeamRole(member.role),
     groupRole: relation.role as GroupRole,
     isCurrent: member.userId === currentUserId,
     createdAt: relation.createdAt,

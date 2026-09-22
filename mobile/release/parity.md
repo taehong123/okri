@@ -76,6 +76,11 @@
 - The protected Sites-to-self-hosted transfer receiver and import unpacker are
   one-time infrastructure operations. They do not change `/api/mobile/v1`,
   native authentication, or any native UI.
+- Web and shared authorization now normalize persisted workspace roles before
+  rendering or permission checks. Unknown legacy roles fail closed as Viewer,
+  while the recorded workspace owner is restored as Owner. This prevents the
+  workspace switcher/settings crash without changing `/api/mobile/v1` response
+  shapes or adding a native UI claim.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

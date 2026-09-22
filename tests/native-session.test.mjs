@@ -133,15 +133,19 @@ test("account deletion rolls back if another member joined or ownership changed"
 test("native requests enforce live membership, workspace identity and editor permissions", async () => {
   const source = await read("lib/pace-data.ts"), ast = ts.createSourceFile("pace-data.ts", source, ts.ScriptTarget.Latest, true);
   const fn = ast.statements.find(node => ts.isFunctionDeclaration(node) && node.name?.text === "authorizeRequest").getText(ast);
+  const { normalizeTeamRole } = compileLanguageModule(await read("lib/team-role.ts"));
   let identity = { id: "u", email: "demo@example.test", displayName: "Demo" };
   let membership = { workspaceId: "w", status: "active", role: "member", displayName: "Demo" }, editor = true;
   const deps = { env: { DB: {} }, ensureSchema: async () => {}, ensureBillingSchema: async () => {},
-    requestedWorkspaceId: request => request.headers.get("x-okri-workspace-id"), resolveWorkspaceMembership: async () => membership, memberCanWrite: async () => editor };
+    requestedWorkspaceId: request => request.headers.get("x-okri-workspace-id"), resolveWorkspaceMembership: async () => membership, memberCanWrite: async () => editor, normalizeTeamRole };
   const { authorizeRequest } = compileLanguageModule(`const { ${Object.keys(deps).join(",")} } = require("deps");\n${fn}`, { deps, "@/lib/native-session": { readNativeIdentity: async () => identity } });
   const request = (method = "GET", workspace = "w") => new Request("https://okri.ai/api/items", { method, headers: { Authorization: "Bearer okri_native_mock", "x-okri-workspace-id": workspace } });
   assert.equal((await authorizeRequest(request())).ownerId, "w");
   assert.equal((await authorizeRequest(request("GET", "other"))).status, 403);
   membership = { ...membership, role: "viewer" };
+  assert.equal((await authorizeRequest(request("PATCH"))).status, 403);
+  assert.equal((await authorizeRequest(request())).role, "viewer");
+  membership = { ...membership, role: "legacy_admin" };
   assert.equal((await authorizeRequest(request("PATCH"))).status, 403);
   assert.equal((await authorizeRequest(request())).role, "viewer");
   membership = { ...membership, role: "member" }; editor = false;

@@ -105,7 +105,7 @@ export async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) });
 }
 
-export async function installApiMocks(page: Page, options: { withRoutine?: boolean; preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "admin" | "member" | "viewer"; teamWorkspace?: boolean; projectProperties?: { id: string; name: string; type: string; systemKey: string | null; active: boolean; options: string[]; defaultValue: null; sortOrder: number }[] } = {}) {
+export async function installApiMocks(page: Page, options: { withRoutine?: boolean; preserveStorage?: boolean; failItemCreate?: boolean; withoutTaskContainers?: boolean; slowRoutineRefresh?: boolean; skippedTeam?: boolean; slackState?: "service_unavailable" | "workspace_disconnected" | "setup_required" | "connected" | "reauthorization_required"; slackSetupComplete?: boolean; workspaceRole?: "owner" | "admin" | "member" | "viewer" | "legacy_admin"; teamWorkspace?: boolean; projectProperties?: { id: string; name: string; type: string; systemKey: string | null; active: boolean; options: string[]; defaultValue: null; sortOrder: number }[] } = {}) {
   let krDataConnections: Array<Record<string, unknown>> = [];
   let slackSetupComplete = options.slackSetupComplete ?? true;
   let slackAutomations: Array<Record<string, unknown>> = [];

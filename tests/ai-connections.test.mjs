@@ -16,6 +16,7 @@ function load(path, mocks = {}, override) {
   return loadedModule.exports;
 }
 const providers = load("lib/integration-providers.ts");
+const teamRoles = load("lib/team-role.ts");
 const schema = load("db/schema.ts");
 const authorization = { ownerId: "workspace-a", userId: "user-a", displayName: "<Owner>", email: "owner@example.com", role: "owner", apiToken: false };
 
@@ -83,10 +84,11 @@ function fixture() {
   }, "@/lib/integration-token-security": tokenSecurity };
   const authFunction = data.slice(data.indexOf("export async function authorizeRequest("), data.indexOf("async function canonicalUserIdForGoogle("));
   const canManage = data.slice(data.indexOf("export function canManageTeam("), data.indexOf("function workspaceAvatarUrl("));
-  const realAuth = load("lib/pace-data.ts", { ...common, "@/db": { getDb: () => drizzle(DB) }, "@/db/schema": schema }, `
+  const realAuth = load("lib/pace-data.ts", { ...common, "@/db": { getDb: () => drizzle(DB) }, "@/db/schema": schema, "@/lib/team-role": teamRoles }, `
     import { env } from 'cloudflare:workers'; import { and, desc, eq, isNull, inArray, sql } from 'drizzle-orm';
     import { getDb } from '@/db'; import { integrationTokens, workspaceMembers, workspaces } from '@/db/schema';
     import { effectiveIntegrationProvider } from '@/lib/integration-providers';
+    import { normalizeTeamRole } from '@/lib/team-role';
     const ensureSchema = async () => {}; const ensureBillingSchema = async () => {}; const readGoogleSession = async () => null;
     const memberCanWrite = async () => true;
     ${tokenFunctions} ${authFunction} ${canManage}`);

@@ -17,6 +17,25 @@ test("Google 인증 이메일 사용자는 전화 인증 없이 바로 시작한
 
 
 test.describe("개인 설정과 워크스페이스 관리 정보 구조", () => {
+  test("비정상적인 기존 권한값이 있어도 워크스페이스 전환과 설정을 열 수 있다", async ({ page, isMobile }) => {
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await installApiMocks(page, { teamWorkspace: true, workspaceRole: "legacy_admin" });
+    await page.goto("/?view=okr");
+
+    if (!isMobile) {
+      await page.locator(".workspace-switcher").click();
+      await expect(page.locator(".workspace-menu")).toBeVisible();
+      await expect(page.locator(".workspace-menu")).toContainText("Viewer");
+      await page.locator(".workspace-switcher").click();
+    }
+
+    await page.locator(isMobile ? ".workspace-topbar-settings" : ".workspace-settings-trigger").click();
+    await expect(page.locator(".workspace-settings-panel")).toBeVisible();
+    await expect(page.locator(".workspace-settings-header")).toContainText("Viewer");
+    expect(pageErrors).toEqual([]);
+  });
+
   test("데스크톱 사이드바는 워크스페이스 톱니바퀴와 개인 진입점만 제공한다", async ({ page, isMobile }) => {
     test.skip(isMobile);
     await installApiMocks(page, { teamWorkspace: true });
