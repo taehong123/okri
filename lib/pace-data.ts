@@ -2910,27 +2910,38 @@ function normalizeReturnTo(value: string) {
 export async function listUserWorkspaces(userId: string, currentWorkspaceId: string) {
   await purgeExpiredWorkspaces();
   const rows = await getDb()
-    .select({ workspace: workspaces, membership: workspaceMembers })
+    .select({
+      workspaceId: workspaces.id,
+      workspaceName: workspaces.name,
+      workspaceOwnerUserId: workspaces.ownerUserId,
+      workspaceCreatedAt: workspaces.createdAt,
+      workspaceKind: workspaces.kind,
+      workspaceDeletionRequestedAt: workspaces.deletionRequestedAt,
+      workspaceScheduledDeletionAt: workspaces.scheduledDeletionAt,
+      workspaceAvatarKey: workspaces.avatarKey,
+      workspaceAvatarUpdatedAt: workspaces.avatarUpdatedAt,
+      membershipRole: workspaceMembers.role,
+    })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(and(
       eq(workspaceMembers.userId, userId),
       eq(workspaceMembers.status, "active"),
-      or(isNull(workspaces.scheduledDeletionAt), eq(workspaceMembers.role, "owner")),
+      or(isNull(workspaces.scheduledDeletionAt), eq(workspaces.ownerUserId, userId), eq(workspaceMembers.role, "owner")),
     ))
     .orderBy(asc(workspaces.createdAt));
-  return rows.map(({ workspace, membership }) => ({
-    id: workspace.id,
-    name: workspace.name,
-    createdAt: workspace.createdAt,
-    kind: workspace.kind as "personal" | "team",
-    personal: workspace.kind === "personal",
-    role: normalizeTeamRole(membership.role, workspace.ownerUserId === userId ? "owner" : "viewer"),
-    current: workspace.id === currentWorkspaceId && !workspace.scheduledDeletionAt,
-    deletionRequestedAt: workspace.deletionRequestedAt,
-    scheduledDeletionAt: workspace.scheduledDeletionAt,
-    avatarUrl: workspaceAvatarUrl(workspace.id, workspace.avatarKey, workspace.avatarUpdatedAt),
-    avatarUpdatedAt: workspace.avatarUpdatedAt,
+  return rows.map((row) => ({
+    id: row.workspaceId,
+    name: row.workspaceName,
+    createdAt: row.workspaceCreatedAt,
+    kind: row.workspaceKind as "personal" | "team",
+    personal: row.workspaceKind === "personal",
+    role: normalizeTeamRole(row.membershipRole, row.workspaceOwnerUserId === userId ? "owner" : "viewer"),
+    current: row.workspaceId === currentWorkspaceId && !row.workspaceScheduledDeletionAt,
+    deletionRequestedAt: row.workspaceDeletionRequestedAt,
+    scheduledDeletionAt: row.workspaceScheduledDeletionAt,
+    avatarUrl: workspaceAvatarUrl(row.workspaceId, row.workspaceAvatarKey, row.workspaceAvatarUpdatedAt),
+    avatarUpdatedAt: row.workspaceAvatarUpdatedAt,
   }));
 }
 
@@ -2965,22 +2976,28 @@ export async function scheduleWorkspaceDeletionForUser(userId: string, workspace
   const id = workspaceId.trim();
   if (!id) throw new Error("workspaceId is required");
   const [row] = await getDb()
-    .select({ workspace: workspaces, membership: workspaceMembers })
+    .select({
+      workspaceOwnerUserId: workspaces.ownerUserId,
+      workspaceKind: workspaces.kind,
+      workspaceDeletionRequestedAt: workspaces.deletionRequestedAt,
+      workspaceScheduledDeletionAt: workspaces.scheduledDeletionAt,
+      membershipRole: workspaceMembers.role,
+    })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(and(eq(workspaceMembers.workspaceId, id), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
     .limit(1);
   if (!row) throw new Error("Workspace not found or access denied");
-  if (row.membership.role !== "owner") throw new Error("Only the workspace owner can delete a workspace");
-  if (row.workspace.kind === "personal") throw new Error("Personal workspace cannot be deleted");
+  if (normalizeTeamRole(row.membershipRole, row.workspaceOwnerUserId === userId ? "owner" : "viewer") !== "owner") throw new Error("Only the workspace owner can delete a workspace");
+  if (row.workspaceKind === "personal") throw new Error("Personal workspace cannot be deleted");
 
   const remaining = (await listUserWorkspaces(userId, id)).filter((workspace) => workspace.id !== id && !workspace.scheduledDeletionAt);
   if (!remaining.length) throw new Error("Create or keep another workspace before deleting this one");
   const nextWorkspace = remaining.find((workspace) => workspace.personal) ?? remaining[0];
   await cancelSubscription(id);
   const now = new Date().toISOString();
-  const scheduledDeletionAt = row.workspace.scheduledDeletionAt ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
-  const deletionRequestedAt = row.workspace.deletionRequestedAt ?? now;
+  const scheduledDeletionAt = row.workspaceScheduledDeletionAt ?? new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const deletionRequestedAt = row.workspaceDeletionRequestedAt ?? now;
   await getDb().update(workspaces).set({
     deletionRequestedAt,
     scheduledDeletionAt,
@@ -3006,14 +3023,22 @@ export async function restoreWorkspaceForUser(userId: string, workspaceId: strin
   const id = workspaceId.trim();
   if (!id) throw new Error("workspaceId is required");
   const [row] = await getDb()
-    .select({ workspace: workspaces, membership: workspaceMembers })
+    .select({
+      workspaceId: workspaces.id,
+      workspaceName: workspaces.name,
+      workspaceOwnerUserId: workspaces.ownerUserId,
+      workspaceScheduledDeletionAt: workspaces.scheduledDeletionAt,
+      workspaceAvatarKey: workspaces.avatarKey,
+      workspaceAvatarUpdatedAt: workspaces.avatarUpdatedAt,
+      membershipRole: workspaceMembers.role,
+    })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(and(eq(workspaceMembers.workspaceId, id), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
     .limit(1);
   if (!row) throw new Error("Workspace not found or access denied");
-  if (row.membership.role !== "owner") throw new Error("Only the workspace owner can restore a workspace");
-  if (!row.workspace.scheduledDeletionAt) throw new Error("Workspace is not scheduled for deletion");
+  if (normalizeTeamRole(row.membershipRole, row.workspaceOwnerUserId === userId ? "owner" : "viewer") !== "owner") throw new Error("Only the workspace owner can restore a workspace");
+  if (!row.workspaceScheduledDeletionAt) throw new Error("Workspace is not scheduled for deletion");
   const now = new Date().toISOString();
   await getDb().update(workspaces).set({
     deletionRequestedAt: null,
@@ -3024,16 +3049,16 @@ export async function restoreWorkspaceForUser(userId: string, workspaceId: strin
   return {
     restored: true,
     workspace: {
-      id: row.workspace.id,
-      name: row.workspace.name,
+      id: row.workspaceId,
+      name: row.workspaceName,
       kind: "team" as const,
       personal: false,
       role: "owner" as TeamRole,
       current: false,
       deletionRequestedAt: null,
       scheduledDeletionAt: null,
-      avatarUrl: workspaceAvatarUrl(row.workspace.id, row.workspace.avatarKey, row.workspace.avatarUpdatedAt),
-      avatarUpdatedAt: row.workspace.avatarUpdatedAt,
+      avatarUrl: workspaceAvatarUrl(row.workspaceId, row.workspaceAvatarKey, row.workspaceAvatarUpdatedAt),
+      avatarUpdatedAt: row.workspaceAvatarUpdatedAt,
     },
   };
 }
@@ -3043,19 +3068,34 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
   const id = workspaceId.trim();
   if (!id) throw new Error("workspaceId is required");
   const [row] = await getDb()
-    .select({ workspace: workspaces, membership: workspaceMembers })
+    .select({
+      workspaceName: workspaces.name,
+      workspaceOwnerUserId: workspaces.ownerUserId,
+      workspaceKind: workspaces.kind,
+      workspaceScheduledDeletionAt: workspaces.scheduledDeletionAt,
+      membershipRole: workspaceMembers.role,
+    })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(and(eq(workspaceMembers.workspaceId, id), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active")))
     .limit(1);
   if (!row) throw new Error("Workspace not found or access denied");
-  if (row.membership.role !== "owner") throw new Error("Only the workspace owner can permanently delete a workspace");
-  if (row.workspace.kind === "personal") throw new Error("Personal workspace cannot be deleted");
-  if (!row.workspace.scheduledDeletionAt) throw new Error("Workspace must be scheduled for deletion first");
-  if (confirmationName !== row.workspace.name) throw new Error("Workspace name confirmation does not match");
+  if (normalizeTeamRole(row.membershipRole, row.workspaceOwnerUserId === userId ? "owner" : "viewer") !== "owner") throw new Error("Only the workspace owner can permanently delete a workspace");
+  if (row.workspaceKind === "personal") throw new Error("Personal workspace cannot be deleted");
+  if (!row.workspaceScheduledDeletionAt) throw new Error("Workspace must be scheduled for deletion first");
+  if (confirmationName !== row.workspaceName) throw new Error("Workspace name confirmation does not match");
 
   const remainingRows = await getDb()
-    .select({ workspace: workspaces, membership: workspaceMembers })
+    .select({
+      workspaceId: workspaces.id,
+      workspaceName: workspaces.name,
+      workspaceOwnerUserId: workspaces.ownerUserId,
+      workspaceCreatedAt: workspaces.createdAt,
+      workspaceKind: workspaces.kind,
+      workspaceAvatarKey: workspaces.avatarKey,
+      workspaceAvatarUpdatedAt: workspaces.avatarUpdatedAt,
+      membershipRole: workspaceMembers.role,
+    })
     .from(workspaceMembers)
     .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
     .where(and(
@@ -3064,22 +3104,22 @@ export async function permanentlyDeleteWorkspaceForUser(userId: string, workspac
       isNull(workspaces.scheduledDeletionAt),
     ))
     .orderBy(asc(workspaces.createdAt));
-  const nextRow = remainingRows.find((entry) => entry.workspace.kind === "personal") ?? remainingRows[0];
+  const nextRow = remainingRows.find((entry) => entry.workspaceKind === "personal") ?? remainingRows[0];
   if (!nextRow) throw new Error("Keep another workspace before permanently deleting this one");
 
   await permanentlyDeleteWorkspace(id);
   const nextWorkspace = {
-    id: nextRow.workspace.id,
-    name: nextRow.workspace.name,
-    createdAt: nextRow.workspace.createdAt,
-    kind: nextRow.workspace.kind as "personal" | "team",
-    personal: nextRow.workspace.kind === "personal",
-    role: normalizeTeamRole(nextRow.membership.role, nextRow.workspace.ownerUserId === userId ? "owner" : "viewer"),
+    id: nextRow.workspaceId,
+    name: nextRow.workspaceName,
+    createdAt: nextRow.workspaceCreatedAt,
+    kind: nextRow.workspaceKind as "personal" | "team",
+    personal: nextRow.workspaceKind === "personal",
+    role: normalizeTeamRole(nextRow.membershipRole, nextRow.workspaceOwnerUserId === userId ? "owner" : "viewer"),
     current: true,
     deletionRequestedAt: null,
     scheduledDeletionAt: null,
-    avatarUrl: workspaceAvatarUrl(nextRow.workspace.id, nextRow.workspace.avatarKey, nextRow.workspace.avatarUpdatedAt),
-    avatarUpdatedAt: nextRow.workspace.avatarUpdatedAt,
+    avatarUrl: workspaceAvatarUrl(nextRow.workspaceId, nextRow.workspaceAvatarKey, nextRow.workspaceAvatarUpdatedAt),
+    avatarUpdatedAt: nextRow.workspaceAvatarUpdatedAt,
   };
   await setActiveWorkspace(userId, nextWorkspace.id);
   return { deleted: true, id, nextWorkspaceId: nextWorkspace.id, nextWorkspace };
