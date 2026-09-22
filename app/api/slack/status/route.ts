@@ -28,7 +28,7 @@ export async function GET(request: Request) {
     : state === "workspace_disconnected"
       ? "Owner 또는 Admin이 이 OKRI 워크스페이스에 사용할 Slack을 연결할 수 있습니다."
       : state === "reauthorization_required"
-        ? "데일리 기능에 필요한 Slack 권한을 다시 승인해 주세요."
+        ? "새 봇 기능에 필요한 Slack 권한을 다시 승인해 주세요."
         : state === "setup_required"
           ? "OKRI 연결이 완료되었습니다. 데일리 발송 설정을 완료해 주세요."
           : "OKRI 연결이 완료되었습니다.";

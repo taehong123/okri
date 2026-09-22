@@ -2586,6 +2586,10 @@ const messages = {
 "워크스페이스: {value1}": "Workspace: {value1}",
 "권한: {value1}": "Access: {value1}",
 "이 키는 현재 사용자와 워크스페이스에만 사용합니다.": "Use this key only for the current user and workspace.",
+"새 봇 기능에 필요한 Slack 권한을 다시 승인해 주세요.": "Approve the Slack permissions required for new bot features again.",
+"허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.": "Reading the Huddle notes Canvas requires updated Slack permissions. Ask an Owner or Admin to update permissions in OKRI App integrations, then call the bot again in the same thread.",
+"허들 메모 Canvas를 읽지 못했습니다. OKRI가 해당 채널에 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요.": "The Huddle notes Canvas could not be read. Make sure OKRI is in the channel, then call the bot again in the same thread.",
+"허들 메모 Canvas의 본문을 불러오지 못했습니다. Slack 권한을 업데이트한 뒤 같은 스레드에서 다시 불러 주세요.": "The Huddle notes Canvas content could not be loaded. Update Slack permissions, then call the bot again in the same thread.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

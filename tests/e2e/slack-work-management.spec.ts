@@ -31,7 +31,7 @@ test("과거 Task 상태 규칙은 보존하지만 비활성 상태로만 표시
   await expect(rule.getByRole("button", { name: "수정" })).toBeEnabled();
 });
 
-test("기존 Slack 연결은 새 채널 메시지 권한이 없으면 재연결을 안내한다", async ({ page }) => {
+test("기존 Slack 연결은 허들 Canvas 권한이 없으면 재연결을 안내한다", async ({ page }) => {
   await installApiMocks(page, { slackState: "reauthorization_required", teamWorkspace: true });
   await page.goto("/?settings=workspace&tab=integrations&bot=work");
   await expect(page.getByRole("button", { name: /^업무 생성 관리 봇/ })).toContainText("권한 업데이트 필요");

@@ -57,6 +57,7 @@ export const slackScopes = [
   "mpim:history",
   "app_mentions:read",
   "files:read",
+  "canvases:read",
 ];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {

@@ -67,6 +67,90 @@ test("Slack thread reading keeps image-only messages as bounded Project attachme
   assert.equal(thread.messages[0].text, "이 화면 오류 해결");
 });
 
+test("Slack thread reading includes the attached Huddle notes Canvas once", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    if (method === "files.info") {
+      return { file: {
+        id: "canvas-1", title: "주간 허들 메모", is_huddle_canvas: true,
+        canvas_metadata: { originating_huddle_id: "huddle-1" },
+        plain_text: "결제 오류를 재현하고 오늘 수정한다.\n담당자: 박태홍",
+      } };
+    }
+    return { messages: [{
+      user: "member-a", text: "허들 스레드", ts: "1.0", subtype: "huddle_thread",
+      room: { call_family: "huddle", created_by: "member-b", attached_file_ids: ["canvas-1", "canvas-1"] },
+      files: [{ id: "canvas-1", is_huddle_canvas: true }],
+    }] };
+  });
+
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "<@BOT> 정리해 줘", ts: "1.2", threadTs: "1.0",
+  });
+
+  assert.deepEqual(requests.map((request) => request.method), ["conversations.replies", "files.info"]);
+  assert.deepEqual(requests[1].body, { file: "canvas-1" });
+  assert.equal(thread.messages.filter((message) => message.text.includes("허들 메모 Canvas")).length, 1);
+  assert.match(thread.messages.at(-1).text, /^\[허들 메모 Canvas: 주간 허들 메모\]/);
+  assert.match(thread.messages.at(-1).text, /결제 오류를 재현하고 오늘 수정한다/);
+  assert.equal(thread.messages.at(-1).user, "member-b");
+});
+
+test("Slack thread reading ignores non-Huddle attachments and empty Huddle canvases", async () => {
+  const requests = [];
+  const { readSlackThread } = load(async (_token, method, body) => {
+    requests.push({ method, body });
+    if (method === "files.info") return body.file === "canvas-1"
+      ? { file: { id: "canvas-1", title: "빈 메모", is_huddle_canvas: true, plain_text: "  " } }
+      : { file: { id: "document-1", title: "일반 파일", filetype: "pdf" } };
+    return { messages: [{
+      user: "member-a", text: "허들 스레드", ts: "1.0", subtype: "huddle_thread",
+      room: { attached_file_ids: ["canvas-1", "document-1"] },
+    }] };
+  });
+
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "<@BOT> 정리해 줘", ts: "1.2", threadTs: "1.0",
+  });
+
+  assert.deepEqual(requests.filter((request) => request.method === "files.info").map((request) => request.body.file), ["canvas-1", "document-1"]);
+  assert.deepEqual(thread.messages.map((message) => message.text), ["허들 스레드"]);
+});
+
+test("Slack thread reading explains when Huddle Canvas permission must be updated", async () => {
+  const { readSlackThread, SlackWorkIntakeError } = load(async (_token, method) => {
+    if (method === "files.info") throw Object.assign(new Error("missing_scope"), { code: "missing_scope" });
+    return { messages: [{
+      user: "member-a", text: "허들 스레드", ts: "1.0", subtype: "huddle_thread",
+      room: { attached_file_ids: ["canvas-1"] },
+    }] };
+  });
+
+  await assert.rejects(() => readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "<@BOT> 읽어 줘", ts: "1.2", threadTs: "1.0",
+  }), (error) => error instanceof SlackWorkIntakeError
+    && error.code === "slack_canvas_scope_required"
+    && error.message.includes("권한 업데이트"));
+});
+
+test("Slack thread reading bounds Huddle Canvas text and marks the context truncated", async () => {
+  const { readSlackThread } = load(async (_token, method) => method === "files.info"
+    ? { file: { id: "canvas-1", title: "긴 메모", is_huddle_canvas: true, plain_text: "가".repeat(30_000) } }
+    : { messages: [{
+      user: "member-a", text: "나".repeat(12_000), ts: "1.0", subtype: "huddle_thread",
+      room: { attached_file_ids: ["canvas-1"] },
+    }] });
+
+  const thread = await readSlackThread("token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "<@BOT> 읽어 줘", ts: "1.2", threadTs: "1.0",
+  });
+
+  assert.equal(thread.truncated, true);
+  assert.ok(thread.messages.reduce((sum, message) => sum + message.text.length, 0) <= 24_000);
+  assert.equal(thread.messages.at(-1).text.match(/가/g)?.length, 16_000);
+});
+
 test("Slack work draft stops before AI when thread history cannot be read", async () => {
   let modelCalled = false;
   const originalFetch = globalThis.fetch;

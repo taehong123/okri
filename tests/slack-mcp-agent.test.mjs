@@ -80,6 +80,8 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /tool_choice: mustProgressCreation \? "required" : "auto"/);
   assert.match(agent, /never ask the user to repeat a title or work description/);
   assert.match(agent, /Slack MCP thread read failed/);
+  assert.match(agent, /SlackWorkIntakeError/);
+  assert.match(agent, /readError/);
   assert.match(agent, /formatSlackMrkdwn/);
   assert.match(agent, /mrkdwn: true/);
   assert.match(agent, /chat\.update[\s\S]{0,200}mrkdwn: true/);
@@ -95,7 +97,7 @@ test("Slack MCP OAuth covers public, private, direct, and group-direct thread hi
     readFile(new URL("../lib/slack-oauth.ts", import.meta.url), "utf8"),
     readFile(new URL("../slack-app-manifest.yml", import.meta.url), "utf8"),
   ]);
-  for (const scope of ["channels:history", "groups:history", "im:history", "mpim:history"]) {
+  for (const scope of ["channels:history", "groups:history", "im:history", "mpim:history", "canvases:read"]) {
     assert.match(oauth, new RegExp(scope));
     assert.match(manifest, new RegExp(scope));
   }

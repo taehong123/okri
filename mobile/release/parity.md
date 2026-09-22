@@ -62,6 +62,10 @@
 - Slack MCP answers now convert escaped/CommonMark emphasis to Slack mrkdwn so
   headings render as bold text instead of literal asterisks. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.
+- Slack bot conversations invoked in a Huddle thread now include a bounded plain
+  text copy of that Huddle's attached notes Canvas when the installed bot has
+  channel and `canvases:read` access. This does not read audio or transcripts and
+  does not change `/api/mobile/v1`, native contracts or native UI.
 - Slack Daily team summaries now update their existing channel message when a
   member submits or revises after the initial summary. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.

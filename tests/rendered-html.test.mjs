@@ -982,7 +982,7 @@ test("implements personal daily drafts and the managed Slack daily bot contract"
   assert.match(skipMigration, /skip_note/);
   assert.match(isolationMigration, /CREATE UNIQUE INDEX `idx_slack_connections_owner`/);
   assert.match(schema, /onboardingCompletedAt: text\("onboarding_completed_at"\)/);
-  for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "channels:join", "groups:read", "files:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
+  for (const scope of ["im:write", "im:history", "users:read.email", "channels:read", "channels:join", "groups:read", "files:read", "canvases:read"]) assert.match(oauth, new RegExp(scope.replace(".", "\\.")));
   assert.match(interactions, /view_submission/);
   assert.match(interactions, /skip_reason/);
   assert.match(slackDaily, /오늘 데일리 스킵/);

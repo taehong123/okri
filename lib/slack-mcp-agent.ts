@@ -19,7 +19,7 @@ import {
   referencesSlackThreadSource,
   slackThreadSourceMessages,
 } from "@/lib/slack-mcp-context";
-import { readSlackThread, type SlackWorkIntakeEvent } from "@/lib/slack-work-intake";
+import { readSlackThread, SlackWorkIntakeError, type SlackWorkIntakeEvent } from "@/lib/slack-work-intake";
 import { readSlackImagesForAgent, saveSlackProjectImages } from "@/lib/project-images";
 import {
   isExplicitProjectApproval,
@@ -130,17 +130,20 @@ async function runMcpAgent(input: {
 }) {
   const runtime = env as RuntimeEnv;
   const [thread, authors, session] = await Promise.all([
-    readSlackThread(input.token, input.event).then((value) => ({ ...value, readFailed: false })).catch((error) => {
+    readSlackThread(input.token, input.event).then((value) => ({ ...value, readFailed: false as const, readError: null })).catch((error) => {
       console.error("Slack MCP thread read failed", safeError(error));
       return {
         messages: [{ user: input.event.user, text: cleanSlack(input.query) }], truncated: true,
-        imageFiles: [], imagesTruncated: false, readFailed: true,
+        imageFiles: [], imagesTruncated: false, readFailed: true as const, readError: error,
       };
     }),
     linkedAuthors(input.authorization.ownerId),
     loadSession(input.authorization, input.teamId, input.event),
   ]);
   if (thread.readFailed) {
+    if (thread.readError instanceof SlackWorkIntakeError) {
+      throw new SlackMcpAgentError(thread.readError.message, thread.readError.code);
+    }
     throw new SlackMcpAgentError(missingSlackThreadSourceMessage(Boolean(input.event.threadTs)), "slack_thread_unavailable");
   }
   const threadImages = thread.imageFiles.length

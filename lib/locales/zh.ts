@@ -2587,5 +2587,9 @@ const messages = {
 "워크스페이스: {value1}": "工作区：{value1}",
 "권한: {value1}": "权限：{value1}",
 "이 키는 현재 사용자와 워크스페이스에만 사용합니다.": "此密钥仅用于当前用户和工作区。",
+"새 봇 기능에 필요한 Slack 권한을 다시 승인해 주세요.": "请重新批准新机器人功能所需的 Slack 权限。",
+"허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.": "读取 Huddle 备注 Canvas 需要更新 Slack 权限。请让 Owner 或 Admin 在 OKRI 的应用集成中完成权限更新，然后在同一线程中再次调用机器人。",
+"허들 메모 Canvas를 읽지 못했습니다. OKRI가 해당 채널에 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요.": "无法读取 Huddle 备注 Canvas。请确认 OKRI 已加入该频道，然后在同一线程中再次调用机器人。",
+"허들 메모 Canvas의 본문을 불러오지 못했습니다. Slack 권한을 업데이트한 뒤 같은 스레드에서 다시 불러 주세요.": "无法加载 Huddle 备注 Canvas 的正文。请更新 Slack 权限，然后在同一线程中再次调用机器人。",
 } satisfies Catalog;
 export default messages;

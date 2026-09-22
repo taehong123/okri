@@ -78,31 +78,50 @@ type ModelDraft = {
   typeReason: string;
 };
 
+type SlackThreadFile = {
+  id?: string;
+  name?: string;
+  title?: string;
+  filetype?: string;
+  mimetype?: string;
+  size?: number;
+  url_private?: string;
+  url_private_download?: string;
+  plain_text?: string;
+  is_huddle_canvas?: boolean;
+  canvas_readtime?: number;
+  canvas_metadata?: { originating_huddle_id?: string };
+};
+
+type SlackThreadMessage = {
+  user?: string;
+  text?: string;
+  bot_id?: string;
+  ts?: string;
+  subtype?: string;
+  room?: {
+    call_family?: string;
+    created_by?: string;
+    attached_file_ids?: string[];
+  };
+  files?: SlackThreadFile[];
+};
+
 type SlackThreadResult = {
   ok?: boolean;
-  messages?: Array<{
-    user?: string;
-    text?: string;
-    bot_id?: string;
-    ts?: string;
-    files?: Array<{
-      id?: string;
-      name?: string;
-      title?: string;
-      mimetype?: string;
-      size?: number;
-      url_private?: string;
-      url_private_download?: string;
-    }>;
-  }>;
+  messages?: SlackThreadMessage[];
   response_metadata?: { next_cursor?: string; messages?: string[] };
 } & Record<string, unknown>;
+
+type SlackFileInfoResult = { ok?: boolean; file?: SlackThreadFile } & Record<string, unknown>;
 
 const maxOutputTokens = 900;
 // Slack caps this method at 15 messages for new commercially distributed apps.
 const maxThreadMessages = 15;
 const maxThreadChars = 24_000;
 const maxThreadImages = 10;
+const maxHuddleCanvasCandidates = 4;
+const maxHuddleCanvasChars = 16_000;
 
 const draftSchema = {
   type: "object",
@@ -153,6 +172,7 @@ export async function prepareSlackWorkDraft(input: {
   const [thread, context, rules, language, authors] = await Promise.all([
     readSlackThread(input.token, input.event).catch((error) => {
       logPreparationFailure("thread", error);
+      if (error instanceof SlackWorkIntakeError) throw error;
       throw new SlackWorkIntakeError(missingSlackThreadSourceMessage(Boolean(input.event.threadTs)), "slack_thread_unavailable");
     }),
     readWorkContext(env.DB, input.authorization.ownerId, input.authorization.userId, { kind: "unsure", limit: 12 }),
@@ -361,6 +381,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   const collected: Array<{ user: string; text: string; botId?: string; ts?: string }> = [];
   const imageFiles: SlackImageFile[] = [];
   const imageIds = new Set<string>();
+  const huddleCanvasCandidates = new Map<string, { id: string; user: string }>();
   let cursor = "";
   let truncated = false;
   let imagesTruncated = false;
@@ -381,6 +402,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       break;
     }
     for (const message of result.messages ?? []) {
+      collectHuddleCanvasCandidates(message, huddleCanvasCandidates);
       for (const file of message.files ?? []) {
         if (!file.id || imageIds.has(file.id) || !String(file.mimetype ?? "").startsWith("image/")) continue;
         imageIds.add(file.id);
@@ -417,6 +439,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       });
       const root = rootResult.messages?.find((message) => message.ts === event.threadTs) ?? rootResult.messages?.[0];
       if (root) {
+        collectHuddleCanvasCandidates(root, huddleCanvasCandidates);
         for (const file of root.files ?? []) {
           if (!file.id || imageIds.has(file.id) || !String(file.mimetype ?? "").startsWith("image/")) continue;
           imageIds.add(file.id);
@@ -441,6 +464,12 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       if (!threadReadError) threadReadError = error;
     }
   }
+  if (huddleCanvasCandidates.size) {
+    const canvasResults = await Promise.all([...huddleCanvasCandidates.values()].slice(0, maxHuddleCanvasCandidates)
+      .map((candidate) => readSlackHuddleCanvasMessage(token, candidate)));
+    collected.push(...canvasResults.flatMap((result) => result?.message ? [result.message] : []));
+    if (huddleCanvasCandidates.size > maxHuddleCanvasCandidates || canvasResults.some((result) => result?.truncated)) truncated = true;
+  }
   if (threadReadError && !collected.length && !imageFiles.length) {
     const channelMainText = event.threadTs ? "" : cleanSlackText(event.text);
     if (channelMainText) {
@@ -462,6 +491,47 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     if (text.length < message.text.length) truncated = true;
   }
   return { messages: bounded.reverse(), truncated, imageFiles, imagesTruncated };
+}
+
+function collectHuddleCanvasCandidates(message: SlackThreadMessage, target: Map<string, { id: string; user: string }>) {
+  const huddle = message.subtype === "huddle_thread" || message.room?.call_family === "huddle";
+  if (!huddle) return;
+  const user = message.room?.created_by || message.user || "";
+  for (const id of message.room?.attached_file_ids ?? []) {
+    if (id && !target.has(id)) target.set(id, { id, user });
+  }
+  for (const file of message.files ?? []) {
+    if (!file.id || (!file.is_huddle_canvas && !file.canvas_metadata?.originating_huddle_id)) continue;
+    if (!target.has(file.id)) target.set(file.id, { id: file.id, user });
+  }
+}
+
+async function readSlackHuddleCanvasMessage(token: string, candidate: { id: string; user: string }) {
+  let result: SlackFileInfoResult;
+  try {
+    result = await slackApi<SlackFileInfoResult>(token, "files.info", { file: candidate.id });
+  } catch (error) {
+    const code = error && typeof error === "object" && "code" in error && typeof error.code === "string" ? error.code : "";
+    if (code === "missing_scope") {
+      throw new SlackWorkIntakeError("허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_scope_required");
+    }
+    throw new SlackWorkIntakeError("허들 메모 Canvas를 읽지 못했습니다. OKRI가 해당 채널에 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_unavailable");
+  }
+  const file = result.file;
+  if (!file?.id || (!file.is_huddle_canvas && !file.canvas_metadata?.originating_huddle_id)) return null;
+  const rawText = file.plain_text ?? "";
+  const text = cleanHuddleCanvasText(rawText);
+  if (!text) {
+    if (Number(file.canvas_readtime) > 0) {
+      throw new SlackWorkIntakeError("허들 메모 Canvas의 본문을 불러오지 못했습니다. Slack 권한을 업데이트한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_content_unavailable");
+    }
+    return null;
+  }
+  const title = clean(file.title || file.name || "허들 메모", 160);
+  return {
+    message: { user: candidate.user, text: `[허들 메모 Canvas: ${title}]\n${text}` },
+    truncated: rawText.length > maxHuddleCanvasChars,
+  };
 }
 
 export function normalizeSlackWorkDraft(
@@ -545,6 +615,19 @@ async function linkedSlackAuthors(ownerId: string) {
 
 function cleanSlackText(value: string) {
   return value.replace(/<@[A-Z0-9]+>/gi, "").replace(/\s+/g, " ").trim().slice(0, 4000);
+}
+
+function cleanHuddleCanvasText(value: string) {
+  return value.normalize("NFC")
+    .replace(/\r\n?/g, "\n")
+    .split("").filter((character) => {
+      const code = character.charCodeAt(0);
+      return code === 9 || code === 10 || (code >= 32 && code !== 127);
+    }).join("")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim()
+    .slice(0, maxHuddleCanvasChars);
 }
 
 function clean(value: unknown, max: number) {
