@@ -2,6 +2,8 @@
 
 앱의 **AI 연결**에서 ChatGPT / Claude / Claude Code를 선택합니다. 모바일에서는 **더보기 → AI 연결**입니다. 별도 Claude API 키나 고객별 앱을 만들 필요가 없습니다.
 
+Ticket의 **클라이언트 관리 → 외부 연동**은 고객 시스템 push와 OAuth 미지원 MCP 도구를 위한 별도 화면입니다. 고객 API 키는 `okri:clients:write`만 가지며 고객 upsert 외의 조회, 일반 수정, MCP 호출에는 사용할 수 없습니다. 개인 MCP 키는 현재 사용자와 워크스페이스에 묶이고 `okri:read` 또는 `okri:read okri:write`를 사용합니다. 두 키 모두 원문은 생성 직후 한 번만 표시되며 목록에는 prefix, 생성 시각, 최근 사용 시각만 남습니다.
+
 ## ChatGPT
 
 1. **ChatGPT 연결 문구 복사**를 누릅니다.

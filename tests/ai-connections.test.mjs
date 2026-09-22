@@ -72,13 +72,15 @@ function fixture() {
     const ensureSchema = async () => {}; ${tokenFunctions}`);
   const common = { "cloudflare:workers": { env: { DB } }, "@/lib/pace-data": tokens, "@/lib/integration-providers": providers, "@/lib/themes": load("lib/themes.ts"),
     "@/lib/mcp-oauth-metadata": load("lib/mcp-oauth-metadata.ts"), "@/lib/brand-artwork": load("lib/brand-artwork.ts") };
+  const tokenSecurity = load("lib/integration-token-security.ts");
   const oauth = load("lib/mcp-oauth.ts", common);
   const approval = load("lib/mcp-oauth-approval.ts", common);
   const routes = { ...common, "@/lib/mcp-oauth": oauth, "@/lib/mcp-oauth-approval": approval, "@/lib/pace-data": {
     ...tokens,
     authorizeRequest: async (request) => ({ ...authorization, userId: request.headers.get("x-test-user") ?? authorization.userId, ownerId: request.headers.get("x-test-workspace") ?? authorization.ownerId, role: request.headers.get("x-test-role") ?? authorization.role, apiToken: request.headers.has("authorization") }),
+    canManageTeam: (auth) => auth.role === "owner" || auth.role === "admin",
     getTeam: async () => ({ workspace: { name: '<Workspace "A">' } }),
-  } };
+  }, "@/lib/integration-token-security": tokenSecurity };
   const authFunction = data.slice(data.indexOf("export async function authorizeRequest("), data.indexOf("async function canonicalUserIdForGoogle("));
   const canManage = data.slice(data.indexOf("export function canManageTeam("), data.indexOf("function workspaceAvatarUrl("));
   const realAuth = load("lib/pace-data.ts", { ...common, "@/db": { getDb: () => drizzle(DB) }, "@/db/schema": schema }, `
@@ -89,6 +91,7 @@ function fixture() {
     const memberCanWrite = async () => true;
     ${tokenFunctions} ${authFunction} ${canManage}`);
   return { sql, tokens, oauth, approval, realAuth, authorize: load("app/oauth/authorize/route.ts", routes), register: load("app/oauth/register/route.ts", routes), api: load("app/api/integration-tokens/route.ts", routes),
+    clientKeysApi: load("app/api/integration-tokens/clients/route.ts", routes), personalMcpApi: load("app/api/integration-tokens/personal-mcp/route.ts", routes),
     bearerApi: load("app/api/integration-tokens/route.ts", { ...routes, "@/lib/pace-data": { ...routes["@/lib/pace-data"], authorizeRequest: realAuth.authorizeRequest } }) };
 }
 const verifier = "a".repeat(64);
@@ -219,7 +222,7 @@ test("OAuth bearer access stays workspace-bound, revocable, and limited by scope
     const { token } = await f.tokens.createIntegrationToken(authorization, "Claude OAuth", "claude", "okri:read");
     const request = (method = "POST") => new Request("https://okri.ai/api/mcp?workspaceId=workspace-b", { method, headers: { authorization: `Bearer ${token}`, "x-okri-workspace-id": "workspace-b" } });
     assert.equal((await f.realAuth.authorizeRequest(request())).status, 403);
-    const read = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "list_items" } }) });
+    const read = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "list_items" } }), requiredIntegrationScope: "okri:read" });
     assert.equal(read.ownerId, "workspace-a"); assert.equal(read.userId, "user-a");
     assert.equal(policy.isReadOnlyMcpRequest({ method: "tools/call", params: { name: "create_item" } }), false);
     assert.equal(policy.isReadOnlyMcpRequest([{ method: "tools/list" }]), false);
@@ -227,12 +230,84 @@ test("OAuth bearer access stays workspace-bound, revocable, and limited by scope
     f.sql.exec("UPDATE workspace_members SET role='member'");
     assert.equal(f.realAuth.canManageTeam(await f.realAuth.authorizeRequest(request("GET"))), false);
     f.sql.exec("UPDATE workspace_members SET role='viewer'");
-    const viewer = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/list" }) });
+    const viewer = await f.realAuth.authorizeRequest(request(), { allowViewerWrite: policy.isReadOnlyMcpRequest({ method: "tools/list" }), requiredIntegrationScope: "okri:read" });
     assert.equal(viewer.role, "viewer");
     f.sql.exec("UPDATE workspace_members SET status='removed'");
     assert.equal((await f.realAuth.authorizeRequest(request("GET"))).status, 403);
     await f.tokens.revokeIntegrationTokens(authorization, undefined, "claude");
     assert.equal((await f.realAuth.authorizeRequest(request("GET"))).status, 401);
+  } finally { f.sql.close(); }
+});
+
+test("client sync bearer is least-privilege and cannot read regular APIs or call MCP", async () => {
+  const f = fixture();
+  try {
+    const { token, connection } = await f.tokens.createIntegrationToken(authorization, "CRM push", "other", "okri:clients:write", true);
+    const request = (method = "POST") => new Request("https://okri.ai/api/items", { method, headers: { authorization: `Bearer ${token}` } });
+    for (const attempt of [
+      f.realAuth.authorizeRequest(request("GET")),
+      f.realAuth.authorizeRequest(request("POST")),
+      f.realAuth.authorizeRequest(request("POST"), { requiredIntegrationScope: "okri:read", allowViewerWrite: true }),
+      f.realAuth.authorizeRequest(request("POST"), { requiredIntegrationScope: "okri:write" }),
+    ]) {
+      const response = await attempt;
+      assert.ok(response instanceof Response);
+      assert.equal(response.status, 403);
+      assert.equal((await response.json()).code, "integration_scope_denied");
+    }
+    const accepted = await f.realAuth.authorizeRequest(request("POST"), { requiredIntegrationScope: "okri:clients:write" });
+    assert.equal(accepted.integrationTokenId, connection.id);
+    assert.equal(accepted.oauthScopes, "okri:clients:write");
+    assert.deepEqual((await f.tokens.listIntegrationTokensByScopes(authorization, ["okri:clients:write"])).map((entry) => entry.id), [connection.id]);
+    const legacy = await f.tokens.createIntegrationToken(authorization, "Existing integration", "other", "okri:read okri:write");
+    const legacyAccepted = await f.realAuth.authorizeRequest(new Request("https://okri.ai/api/integrations/clients/upsert", { method: "POST", headers: { authorization: `Bearer ${legacy.token}` } }), { requiredIntegrationScope: ["okri:clients:write", "okri:write"] });
+    assert.equal(legacyAccepted.integrationTokenId, legacy.connection.id);
+  } finally { f.sql.close(); }
+});
+
+test("purpose key routes require browser same-origin access and isolate individual users and keys", async () => {
+  const f = fixture();
+  const write = (url, body, headers = {}) => new Request(url, { method: "POST", headers: {
+    origin: "https://okri.ai", "sec-fetch-site": "same-origin", "content-type": "application/json", ...headers,
+  }, body: JSON.stringify(body) });
+  try {
+    assert.equal((await f.clientKeysApi.POST(new Request("https://okri.ai/api/integration-tokens/clients", { method: "POST", body: "{}" }))).status, 403);
+    assert.equal((await f.clientKeysApi.POST(write("https://okri.ai/api/integration-tokens/clients", { name: "CRM" }, { origin: "https://evil.test" }))).status, 403);
+    assert.equal((await f.clientKeysApi.POST(write("https://okri.ai/api/integration-tokens/clients", { name: "CRM" }, { authorization: "Bearer forbidden" }))).status, 403);
+    assert.equal((await f.clientKeysApi.POST(write("https://okri.ai/api/integration-tokens/clients", { name: "CRM" }, { "x-test-role": "member" }))).status, 403);
+
+    const createdResponse = await f.clientKeysApi.POST(write("https://okri.ai/api/integration-tokens/clients", { name: "CRM 고객 동기화" }));
+    assert.equal(createdResponse.status, 201);
+    assert.match(createdResponse.headers.get("cache-control"), /no-store/);
+    const created = await createdResponse.json();
+    assert.match(created.token, /^okri_/);
+    assert.equal(created.connection.name, "CRM 고객 동기화");
+    const listed = await f.clientKeysApi.GET(new Request("https://okri.ai/api/integration-tokens/clients", { headers: { "sec-fetch-site": "same-origin" } }));
+    const listedText = await listed.text();
+    assert.equal(listed.status, 200);
+    assert.equal(JSON.parse(listedText).keys.length, 1);
+    assert.equal(listedText.includes(created.token), false);
+    const otherUser = await f.clientKeysApi.GET(new Request("https://okri.ai/api/integration-tokens/clients", { headers: { "sec-fetch-site": "same-origin", "x-test-user": "user-b" } }));
+    assert.equal((await otherUser.json()).keys.length, 0);
+
+    const viewerWrite = await f.personalMcpApi.POST(write("https://okri.ai/api/integration-tokens/personal-mcp", { name: "Viewer MCP", access: "read_write" }, { "x-test-role": "viewer" }));
+    assert.equal(viewerWrite.status, 403);
+    const viewerRead = await f.personalMcpApi.POST(write("https://okri.ai/api/integration-tokens/personal-mcp", { name: "Viewer MCP", access: "read" }, { "x-test-role": "viewer" }));
+    assert.equal(viewerRead.status, 201);
+    const readKey = await viewerRead.json();
+    assert.match(readKey.token, /^okri_/);
+    const mcpList = await f.personalMcpApi.GET(new Request("https://okri.ai/api/integration-tokens/personal-mcp", { headers: { "sec-fetch-site": "same-origin" } }));
+    const mcpText = await mcpList.text();
+    assert.equal(mcpText.includes(readKey.token), false);
+    assert.equal(JSON.parse(mcpText).keys[0].access, "read");
+
+    const crossOriginDelete = await f.clientKeysApi.DELETE(new Request(`https://okri.ai/api/integration-tokens/clients?id=${created.connection.id}`, { method: "DELETE", headers: { origin: "https://evil.test" } }));
+    assert.equal(crossOriginDelete.status, 403);
+    const otherDelete = await f.clientKeysApi.DELETE(new Request(`https://okri.ai/api/integration-tokens/clients?id=${created.connection.id}`, { method: "DELETE", headers: { origin: "https://okri.ai", "sec-fetch-site": "same-origin", "x-test-user": "user-b" } }));
+    assert.equal(otherDelete.status, 404);
+    const deleted = await f.clientKeysApi.DELETE(new Request(`https://okri.ai/api/integration-tokens/clients?id=${created.connection.id}`, { method: "DELETE", headers: { origin: "https://okri.ai", "sec-fetch-site": "same-origin" } }));
+    assert.equal(deleted.status, 200);
+    assert.equal((await f.personalMcpApi.GET(new Request("https://okri.ai/api/integration-tokens/personal-mcp", { headers: { "sec-fetch-site": "same-origin" } }))).status, 200);
   } finally { f.sql.close(); }
 });
 
@@ -275,7 +350,7 @@ test("viewer consent permanently bounds scope even after promotion; demotion at 
       f.sql.exec("UPDATE workspace_members SET role='member'");
       const headers = { authorization: `Bearer ${issued.accessToken}` };
       assert.equal((await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }))).status, 403);
-      const read = await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }), { allowViewerWrite: true });
+      const read = await f.realAuth.authorizeRequest(new Request(resource, { method: "POST", headers }), { allowViewerWrite: true, requiredIntegrationScope: "okri:read" });
       assert.equal(read.role, "member");
       assert.equal(read.oauthScopes, "okri:read");
     }

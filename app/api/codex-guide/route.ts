@@ -2,7 +2,7 @@ import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/w
 
 const guide = {
   service: "OKRI Codex conversation API",
-  version: "1.8",
+  version: "1.9",
   quickStart: {
     classification: WORK_CLASSIFICATION,
     fields: WORK_FIELDS,
@@ -13,7 +13,7 @@ const guide = {
   },
   authentication: {
     header: "Authorization: Bearer <OKRI_ACCESS_TOKEN>",
-    note: "The token is scoped to one OKRI workspace. Never print or persist it in source files or logs.",
+    note: "The token is scoped to one OKRI workspace. OAuth MCP tokens use okri:read and optionally okri:write. Customer push keys use only okri:clients:write and cannot read other APIs or call MCP. Create and revoke keys in Ticket > Client directory > External integration. Never print or persist a token in source files, chats, screenshots or logs.",
   },
   hierarchy: "OKR: Objective > Key Result > Initiative > Project > Task. Ticket > Task and Routine > Task are independent execution structures outside the OKR hierarchy.",
   values: {
@@ -33,7 +33,7 @@ const guide = {
     { purpose: "List workspace clients and their products", method: "GET", path: "/api/clients?q=" },
     { purpose: "Create or update a client and repeatable product rows", method: "POST or PATCH", path: "/api/clients", body: "POST: name required; optional phone, email, products [{name}]. PATCH: id required plus changed fields. Existing Ticket links are optional." },
     { purpose: "Read or replace one Ticket's client and selected products", method: "GET or PUT", path: "/api/ticket-client-links?ticketId=<ticket-id>", body: "PUT: ticketId, clientId or null, and productIds belonging to that client" },
-    { purpose: "Push/upsert one client or a bulk clients array after the external system changes", method: "POST", path: "/api/integrations/clients/upsert", headers: "Authorization: Bearer <workspace integration token>; Idempotency-Key: <unique event or batch key>; Content-Type: application/json", body: "Required source_name, optional public HTTPS source_url. Single: external_customer_id, name, optional phone/email/products [{external_product_id,name}]. Bulk/full resend: clients [...], optional replace_products (default true). Maximum 50 clients, 100 products per client, 500 products and 1 MiB per request. Unknown fields are rejected. Missing clients are not deleted." },
+    { purpose: "Push/upsert one client or a bulk clients array after the external system changes", method: "POST", path: "/api/integrations/clients/upsert", headers: "Authorization: Bearer <customer API key with exact okri:clients:write scope>; Idempotency-Key: <unique event or batch key>; Content-Type: application/json", body: "Create the key in Ticket > Client directory > External integration. Required source_name, optional public HTTPS source_url. Single: external_customer_id, name, optional phone/email/products [{external_product_id,name}]. Bulk/full resend: clients [...], optional replace_products (default true). Maximum 50 clients, 100 products per client, 500 products and 1 MiB per request. Unknown fields are rejected. Missing clients are not deleted." },
     { purpose: "List OKR files/cycles", method: "GET", path: "/api/okr-cycles" },
     { purpose: "Create an OKR cycle", method: "POST", path: "/api/okr-cycles", body: "name, department, startDate, endDate, status" },
     { purpose: "Update an OKR cycle", method: "PATCH", path: "/api/okr-cycles", body: "id required plus changed fields" },
@@ -84,16 +84,18 @@ const guide = {
   ],
   clientIntegration: {
     direction: "push",
+    keyManagement: "Open Ticket > Client directory > External integration > Customer API. Only an Owner or Admin can create, list or revoke these keys. The full key is returned once at creation; later responses contain only its prefix, creation time and last-used time.",
+    scope: "Customer push keys have only okri:clients:write. They are rejected by regular GET/write APIs and MCP. OAuth or personal MCP keys keep separate okri:read / okri:write scopes.",
     recommendation: "Call the HTTPS POST endpoint immediately when a customer or product changes. Re-send the complete current client list in a bulk request when recovering missed events. OKRI does not poll the external system and does not require another inbound port.",
     idempotency: "Reuse the same Idempotency-Key only when retrying the identical request. A key reused with different content returns 409. The full batch and its receipt commit atomically.",
-    limits: "Workspace integration tokens only. Requests are rate-limited per workspace and hashed client address. The body is strict JSON up to 1 MiB, with up to 50 clients and 500 products. source_url must be a public HTTPS URL and is never inferred from Origin or Referer.",
+    limits: "Customer API keys only. Requests are rate-limited per workspace and hashed client address. The body is strict JSON up to 1 MiB, with up to 50 clients and 500 products. source_url must be a public HTTPS URL and is never inferred from Origin or Referer.",
     curl: `curl -X POST https://okri.ai/api/integrations/clients/upsert \\
-  -H "Authorization: Bearer <OKRI_ACCESS_TOKEN>" \\
+  -H "Authorization: Bearer <CUSTOMER_API_KEY>" \\
   -H "Idempotency-Key: customer-cus_1024-v7" \\
   -H "Content-Type: application/json" \\
   -d '{"source_name":"Example CRM","source_url":"https://crm.example.com/customers/cus_1024","external_customer_id":"cus_1024","name":"홍길동","phone":"010-1234-5678","email":"hong@example.com","products":[{"external_product_id":"prd_a","name":"Enterprise"}]}'`,
     bulkCurl: `curl -X POST https://okri.ai/api/integrations/clients/upsert \\
-  -H "Authorization: Bearer <OKRI_ACCESS_TOKEN>" \\
+  -H "Authorization: Bearer <CUSTOMER_API_KEY>" \\
   -H "Idempotency-Key: clients-full-2026-09-22T120000Z" \\
   -H "Content-Type: application/json" \\
   -d '{"source_name":"Example CRM","source_url":"https://crm.example.com/customers","replace_products":true,"clients":[{"external_customer_id":"cus_1024","name":"홍길동","products":["Enterprise"]}]}'`,

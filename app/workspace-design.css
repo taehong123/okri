@@ -132,6 +132,7 @@
 .app-shell .client-source-filter button[aria-pressed="true"] { background: var(--input-bg); color: var(--text-primary); box-shadow: var(--shadow-raised); }
 .app-shell .client-directory-toolbar > span { margin-left: auto; color: var(--text-secondary); font-size: var(--type-label); }
 .app-shell .client-create-button { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-3); border: 0; border-radius: var(--radius-control); background: var(--button-primary-bg); color: var(--button-primary-fg); font: inherit; font-size: var(--type-label); cursor: pointer; }
+.app-shell .client-integration-button { min-height: var(--control-height); display: inline-flex; align-items: center; gap: var(--space-1); padding: 0 var(--space-3); border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--button-secondary-bg); color: var(--button-secondary-fg); font: inherit; font-size: var(--type-label); cursor: pointer; }
 .app-shell .client-directory-row { min-width: 0; min-height: calc(var(--row-height) + var(--space-2)); display: grid; grid-template-columns: minmax(14rem, 1fr) minmax(9rem, .55fr) minmax(11rem, .7fr) minmax(10rem, .55fr) var(--control-height); align-items: center; gap: var(--space-3); border-bottom: 1px solid var(--border-default); }
 .app-shell .client-directory-open { min-width: 0; min-height: inherit; display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr); align-items: center; gap: var(--space-2); border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .app-shell .client-directory-open:hover { background: var(--bg-hover); }
@@ -443,6 +444,7 @@
   .app-shell .client-directory-toolbar > label { min-width: 100%; max-width: none; }
   .app-shell .client-source-filter { max-width: 100%; overflow-x: auto; }
   .app-shell .client-directory-toolbar > span { align-self: center; margin-left: 0; }
+  .app-shell .client-integration-button { margin-left: auto; }
   .app-shell .client-create-button { margin-left: auto; }
   .app-shell .client-directory-row { grid-template-columns: minmax(0, 1fr) var(--control-height); gap: var(--space-2); padding: var(--space-2) 0; }
   .app-shell .client-directory-open { grid-column: 1; grid-row: 1; }

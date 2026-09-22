@@ -2573,7 +2573,7 @@ function WorkspaceApp() {
               <button type="button" role="tab" aria-selected={ticketAreaTab === "tickets"} className={ticketAreaTab === "tickets" ? "active" : ""} onClick={() => setTicketAreaTab("tickets")}><TicketIcon size={14} />{t("Ticket")}</button>
               <button type="button" role="tab" aria-selected={ticketAreaTab === "clients"} className={ticketAreaTab === "clients" ? "active" : ""} onClick={() => setTicketAreaTab("clients")}><Users size={14} />{t("클라이언트 관리")}</button>
             </div>
-            {ticketAreaTab === "tickets" ? <TicketListView tickets={ticketItems} tasks={taskItems} links={ticketClientData.links} onOpenTicket={openTicketDetail} onNotice={showNotice} /> : <ClientManagementView clients={ticketClientData.clients} loading={ticketClientData.loading} error={ticketClientData.error} readOnly={!canWriteWorkspace} onRefresh={ticketClientData.refresh} onNotice={showNotice} />}
+            {ticketAreaTab === "tickets" ? <TicketListView tickets={ticketItems} tasks={taskItems} links={ticketClientData.links} onOpenTicket={openTicketDetail} onNotice={showNotice} /> : <ClientManagementView clients={ticketClientData.clients} loading={ticketClientData.loading} error={ticketClientData.error} readOnly={!canWriteWorkspace} workspaceName={currentWorkspace?.name ?? ""} canManageClientKeys={canDeleteRecords} canCreateMcpWriteKey={canWriteWorkspace} onRefresh={ticketClientData.refresh} onNotice={showNotice} />}
           </section>}
           {activeView === "work" && (
             <section className="project-workspace">

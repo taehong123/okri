@@ -51,6 +51,10 @@
   products, optional Ticket links, copy actions, MCP tools and a bearer-token
   push/upsert API. The frozen native v1 adapter still omits Ticket and client
   records entirely; native client-directory UI remains deferred with Ticket.
+- Web adds the client directory's external-integration guide, purpose-scoped
+  customer push keys and optional personal MCP keys. Key administration remains
+  web-only; `/api/mobile/v1` exposes no token secret or integration-management
+  route, so the frozen native client and its authentication semantics are unchanged.
 - Slack channel-main `@OKRI` invocations retain their own message as the
   creation source even when Slack thread lookup is unavailable, while threaded
   invocations keep excluding the live command. This is a Slack-only conversation

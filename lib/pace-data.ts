@@ -189,6 +189,7 @@ export type RequestAuthorization = {
 };
 
 export type IntegrationTokenSummary = Pick<IntegrationToken, "id" | "name" | "tokenPrefix" | "createdAt" | "lastUsedAt" | "revokedAt"> & { provider: IntegrationProvider };
+export type ScopedIntegrationTokenSummary = IntegrationTokenSummary & { scopes: string };
 
 const DEFAULT_PROJECT_EXECUTION_PROPERTIES: { name: string; type: PropertyType; systemKey?: string; options?: string[]; defaultValue?: PropertyValue }[] = [
   { name: "상위 Initiative", type: "text", systemKey: "parent_id" },
@@ -2522,6 +2523,7 @@ export async function createIntegrationToken(
   name = "Codex",
   provider: IntegrationProvider = "other",
   scopes = "okri:read okri:write",
+  isolateByScopes = false,
 ) {
   await ensureSchema();
   const token = `okri_${randomTokenPart(32)}`;
@@ -2542,6 +2544,7 @@ export async function createIntegrationToken(
     eq(integrationTokens.userId, authorization.userId),
     isNull(integrationTokens.revokedAt),
     integrationProviderCondition(provider),
+    isolateByScopes ? eq(integrationTokens.scopes, scopes) : undefined,
   )).orderBy(desc(integrationTokens.createdAt));
   const staleIds = activeTokens.slice(10).map((entry) => entry.id);
   if (staleIds.length) {
@@ -2575,6 +2578,34 @@ export async function revokeIntegrationTokens(authorization: RequestAuthorizatio
   return { revoked: revoked.length, ids: revoked.map((entry) => entry.id) };
 }
 
+export async function listIntegrationTokensByScopes(authorization: RequestAuthorization, scopes: string[]) {
+  await ensureSchema();
+  if (!scopes.length) return [];
+  const rows = await getDb().select().from(integrationTokens).where(and(
+    eq(integrationTokens.workspaceId, authorization.ownerId),
+    eq(integrationTokens.userId, authorization.userId),
+    isNull(integrationTokens.revokedAt),
+    inArray(integrationTokens.scopes, scopes),
+  )).orderBy(desc(integrationTokens.createdAt));
+  return rows.map((record): ScopedIntegrationTokenSummary => ({
+    ...serializeIntegrationToken(record),
+    scopes: record.scopes ?? "",
+  }));
+}
+
+export async function revokeIntegrationTokenByScopes(authorization: RequestAuthorization, id: string, scopes: string[]) {
+  await ensureSchema();
+  if (!id || !scopes.length) return { revoked: 0, ids: [] as string[] };
+  const revoked = await getDb().update(integrationTokens).set({ revokedAt: new Date().toISOString() }).where(and(
+    eq(integrationTokens.workspaceId, authorization.ownerId),
+    eq(integrationTokens.userId, authorization.userId),
+    eq(integrationTokens.id, id),
+    isNull(integrationTokens.revokedAt),
+    inArray(integrationTokens.scopes, scopes),
+  )).returning({ id: integrationTokens.id });
+  return { revoked: revoked.length, ids: revoked.map((entry) => entry.id) };
+}
+
 function serializeIntegrationToken(record: IntegrationToken): IntegrationTokenSummary {
   return {
     id: record.id,
@@ -2604,7 +2635,7 @@ async function hashIntegrationToken(token: string) {
 
 export async function authorizeRequest(
   request: Request,
-  options: { allowViewerWrite?: boolean } = {},
+  options: { allowViewerWrite?: boolean; requiredIntegrationScope?: string | string[] } = {},
 ): Promise<RequestAuthorization | Response> {
   // Run idempotent schema and account repairs before choosing an authentication
   // mechanism. This lets the first post-deploy session check complete the repair
@@ -2654,9 +2685,10 @@ export async function authorizeRequest(
         return Response.json({ error: "This OKRI connection no longer has workspace access." }, { status: 403 });
       }
       const role = membership.role as TeamRole;
-      if (!options.allowViewerWrite && !["GET", "HEAD", "OPTIONS"].includes(request.method) && token.scopes
-        && !token.scopes.split(" ").some((scope) => scope === "okri:write" || scope === "okrptr:write")) {
-        return Response.json({ error: "This connection only permits read access." }, { status: 403 });
+      const requiredScopes = options.requiredIntegrationScope
+        ?? (["GET", "HEAD", "OPTIONS"].includes(request.method) ? "okri:read" : "okri:write");
+      if (!(Array.isArray(requiredScopes) ? requiredScopes : [requiredScopes]).some((scope) => integrationTokenHasScope(token.scopes, scope))) {
+        return Response.json({ error: "This connection does not permit this operation.", code: "integration_scope_denied" }, { status: 403 });
       }
       if (!options.allowViewerWrite && role === "viewer" && !["GET", "HEAD", "OPTIONS"].includes(request.method)) {
         return Response.json({ error: "Viewer access is read-only." }, { status: 403 });
@@ -2721,6 +2753,14 @@ export async function authorizeRequest(
     { error: "Authentication required. Sign in or provide an OKRI API token." },
     { status: 401, headers: { "WWW-Authenticate": "Bearer" } },
   );
+}
+
+function integrationTokenHasScope(value: string | null, required: string) {
+  const scopes = new Set((value?.trim() || "okri:read okri:write").split(/\s+/).filter(Boolean));
+  if (scopes.has(required)) return true;
+  if (required === "okri:read") return scopes.has("okrptr:read");
+  if (required === "okri:write") return scopes.has("okrptr:write");
+  return false;
 }
 
 export async function canonicalUserIdForVerifiedIdentity(subject: string, emailInput: string, displayNameInput: string, request: Request, provider: "google" | "apple" = "google", issuedAt?: number) {

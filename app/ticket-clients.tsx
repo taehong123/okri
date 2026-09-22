@@ -8,6 +8,7 @@ import {
   Mail,
   Package,
   Phone,
+  Plug,
   Plus,
   Search,
   Trash2,
@@ -18,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } fro
 import type { ClientProductRecord, ClientRecord, TicketClientLink } from "@/lib/client-directory";
 import { apiError, messageValue, t } from "@/lib/client-language";
 import { OverlayDialog, useAppConfirm } from "./overlay-dialog";
+import { ClientIntegrationGuide } from "./client-integration-guide";
 
 type NoticeTone = "success" | "error" | "info";
 type Notice = (message: string, tone?: NoticeTone) => void;
@@ -72,17 +74,21 @@ export function useTicketClients(enabled: boolean, workspaceId: string) {
   };
 }
 
-export function ClientManagementView({ clients, loading, error, readOnly, onRefresh, onNotice }: {
+export function ClientManagementView({ clients, loading, error, readOnly, workspaceName, canManageClientKeys, canCreateMcpWriteKey, onRefresh, onNotice }: {
   clients: ClientRecord[];
   loading: boolean;
   error: string;
   readOnly: boolean;
+  workspaceName: string;
+  canManageClientKeys: boolean;
+  canCreateMcpWriteKey: boolean;
   onRefresh: () => Promise<void>;
   onNotice: Notice;
 }) {
   const [query, setQuery] = useState("");
   const [sourceFilter, setSourceFilter] = useState<"all" | "api" | "manual">("all");
   const [editorId, setEditorId] = useState<string | "new" | null>(null);
+  const [integrationOpen, setIntegrationOpen] = useState(false);
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visibleClients = useMemo(() => clients.filter((client) => {
     if (sourceFilter !== "all" && client.sourceType !== sourceFilter) return false;
@@ -104,6 +110,7 @@ export function ClientManagementView({ clients, loading, error, readOnly, onRefr
           {(["all", "api", "manual"] as const).map((value) => <button key={value} type="button" aria-pressed={sourceFilter === value} onClick={() => setSourceFilter(value)}>{value === "all" ? t("전체") : value === "api" ? t("API 연동") : t("수동 등록")}</button>)}
         </div>
         <span>{t("{count}개", { count: visibleClients.length })}</span>
+        <button type="button" className="client-integration-button" onClick={() => setIntegrationOpen(true)}><Plug size={14} />{t("외부 연동")}</button>
         {!readOnly && <button type="button" className="client-create-button" onClick={() => setEditorId("new")}><Plus size={14} />{t("클라이언트 추가")}</button>}
       </div>
       {loading && !clients.length ? <p className="client-directory-state">{t("클라이언트를 불러오는 중입니다.")}</p> : error && !clients.length ? (
@@ -124,6 +131,7 @@ export function ClientManagementView({ clients, loading, error, readOnly, onRefr
           onNotice={onNotice}
         />
       )}
+      {integrationOpen && <ClientIntegrationGuide workspaceName={workspaceName} canManageClientKeys={canManageClientKeys} canCreateMcpWriteKey={canCreateMcpWriteKey} onClose={() => setIntegrationOpen(false)} onNotice={onNotice} />}
     </section>
   );
 }

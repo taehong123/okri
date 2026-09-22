@@ -2135,7 +2135,11 @@ async function handleMcp(request: Request) {
 
   const startedAt = performance.now();
   const payload = request.method === "POST" ? await request.clone().json().catch(() => null) : null;
-  const authorization = await authorizeRequest(request, { allowViewerWrite: isReadOnlyMcpRequest(payload) });
+  const readOnlyRequest = isReadOnlyMcpRequest(payload);
+  const authorization = await authorizeRequest(request, {
+    allowViewerWrite: readOnlyRequest,
+    requiredIntegrationScope: readOnlyRequest ? "okri:read" : "okri:write",
+  });
   if (authorization instanceof Response) return withCors(withMcpAuthChallenge(authorization, request));
   const authorizedAt = performance.now();
 

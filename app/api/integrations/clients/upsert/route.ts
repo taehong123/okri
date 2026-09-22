@@ -21,7 +21,7 @@ const CLIENT_FIELDS = new Set(["external_customer_id", "externalCustomerId", "na
 const PRODUCT_FIELDS = new Set(["external_product_id", "externalProductId", "name"]);
 
 export async function POST(request: Request) {
-  const authorization = await authorizeRequest(request);
+  const authorization = await authorizeRequest(request, { requiredIntegrationScope: ["okri:clients:write", "okri:write"] });
   if (authorization instanceof Response) return secureResponse(authorization);
   if (!authorization.integrationTokenId) {
     return json({ error: "워크스페이스 integration token이 필요합니다.", code: "integration_token_required" }, 403);
