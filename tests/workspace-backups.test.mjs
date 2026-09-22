@@ -16,6 +16,7 @@ const dailyWorkMigration = await readFile(new URL("../drizzle/0045_daily_work_se
 const dailyYesterdayMigration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
 const dailyWorkStatusMigration = await readFile(new URL("../drizzle/0055_daily_work_status.sql", import.meta.url), "utf8");
 const workDocumentsMigration = await readFile(new URL("../drizzle/0057_work_documents.sql", import.meta.url), "utf8");
+const clientDirectoryMigration = await readFile(new URL("../drizzle/0065_client_directory.sql", import.meta.url), "utf8");
 
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
@@ -34,6 +35,7 @@ function fixture() {
   sqlite.exec(dailyYesterdayMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(dailyWorkStatusMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(workDocumentsMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(clientDirectoryMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -69,6 +71,10 @@ function fixture() {
       ('initiative','w','initiative','Initiative','cycle','kr',NULL), ('project','w','project','Project','cycle','initiative',NULL),
       ('task','w','task','Task',NULL,'project',NULL), ('routine-task','w','task','Routine task',NULL,NULL,'routine'),
       ('unrelated','other','project','Other workspace',NULL,NULL,NULL);
+    INSERT INTO clients (id,owner_id,name,phone,email) VALUES ('client','w','Customer','010-1234-5678','customer@example.com');
+    INSERT INTO client_products (id,owner_id,client_id,name) VALUES ('client-product','w','client','Product');
+    INSERT INTO ticket_clients (id,owner_id,ticket_id,client_id) VALUES ('ticket-client','w','project','client');
+    INSERT INTO ticket_client_products (id,owner_id,ticket_id,product_id) VALUES ('ticket-client-product','w','project','client-product');
     INSERT INTO property_definitions (id,owner_id,name,type) VALUES ('property','w','Priority','text');
     INSERT INTO item_property_values (id,owner_id,item_id,property_id,value) VALUES ('value','w','project','property','"high"');
     INSERT INTO project_hidden_properties (id,owner_id,project_id,property_id) VALUES ('hidden','w','project','property');
@@ -115,6 +121,12 @@ test("backups predating personal work selection restore with empty work arrays w
   const f = fixture();
   await backups.createWorkspaceBackup(f.ctx, "w", "daily");
   const old = JSON.parse([...f.objects.values()][0]);
+  for (const row of old.tables.clients) {
+    delete row.source_type;
+    delete row.source_name;
+    delete row.source_url;
+    delete row.source_updated_at;
+  }
   for (const row of old.tables.daily_scrums) { delete row.work_selection_json; delete row.yesterday_work_selection_json; }
   for (const row of old.tables.daily_submissions) { delete row.work_snapshot_json; delete row.yesterday_work_snapshot_json; delete row.request_id; }
   const validated = backups.validateSnapshot(old, "w");
@@ -123,6 +135,8 @@ test("backups predating personal work selection restore with empty work arrays w
   assert.equal(validated.tables.daily_submissions[0].work_snapshot_json, "[]");
   assert.equal(validated.tables.daily_submissions[0].yesterday_work_snapshot_json, "[]");
   assert.equal(validated.tables.daily_submissions[0].request_id, null);
+  assert.equal(validated.tables.clients[0].source_type, "manual");
+  assert.equal(validated.tables.clients[0].source_updated_at, validated.tables.clients[0].updated_at);
   assert.equal(validated.tables.routine_property_definitions.length, 1);
   f.sqlite.close();
 });
@@ -268,9 +282,15 @@ test("leases prevent duplicate work and invalid payloads are rejected", async ()
 
 test("revision triggers cover all restored tables and business changes do not alter other workspace revisions", () => {
   const f = fixture();
+  const clientColumns = {
+    clients: ["id", "owner_id", "external_customer_id", "name", "phone", "email", "source_type", "source_name", "source_url", "source_updated_at", "created_by_user_id", "created_at", "updated_at"],
+    client_products: ["id", "owner_id", "client_id", "external_product_id", "name", "source", "created_at", "updated_at"],
+    ticket_clients: ["id", "owner_id", "ticket_id", "client_id", "created_at", "updated_at"],
+    ticket_client_products: ["id", "owner_id", "ticket_id", "product_id", "created_at"],
+  };
   for (const name of backups.BACKUP_TABLES) {
     assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=?").get(name).n, 3, name);
-    const expectedColumns = Object.keys(currentSchema.tables[name].columns);
+    const expectedColumns = clientColumns[name] ? [...clientColumns[name]] : Object.keys(currentSchema.tables[name].columns);
     if (name === "daily_scrums") {
       expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");
       expectedColumns.push("yesterday_work_selection_json");

@@ -12,5 +12,12 @@
     "rollbackPlan": "Leave the native tables and indexes in place on application rollback. Do not delete sessions, alter previous migrations, or remove the account-deletion guard.",
     "dataPreservation": "Only CREATE TABLE/INDEX IF NOT EXISTS statements are executed. ON DELETE CASCADE is the existing user-owned session foreign-key policy, not a deletion command. No existing records are mutated.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-10"
+  },
+  "drizzle/0065_client_directory.sql": {
+    "sha256": "3daeb0fc062a81c02839ce28d5ffadccb9d2df9681449bedd0acb7defa03d0aa",
+    "v1Compatibility": "The migration only adds web-only client, product, Ticket-link, idempotency and rate-limit tables. Frozen mobile v1 payloads and existing item, Routine, Daily and authentication semantics are unchanged.",
+    "rollbackPlan": "Leave the additive tables and indexes in place when rolling application code back. Older web and native clients ignore them; do not drop tables or rewrite migration history.",
+    "dataPreservation": "Only new tables, indexes and backup-revision triggers are created. The UPDATE tokens occur inside additive ON CONFLICT trigger bodies; no existing business rows are deleted, rewritten or renamed.",
+    "reviewedBy": "Codex native compatibility integration review, 2026-09-22"
   }
 }

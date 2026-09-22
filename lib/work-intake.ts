@@ -161,7 +161,7 @@ export const READ_ONLY_MCP_TOOLS = new Set([
   "prepare_work", "get_project_review", "get_workspace_rules", "list_items", "review_period", "list_properties",
   "get_project_document", "list_project_templates", "list_checklist_items", "get_daily_scrum",
   "list_project_images", "read_project_image",
-  "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members",
+  "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members", "list_clients",
 ]);
 
 export function isReadOnlyMcpRequest(payload: unknown) {

@@ -254,6 +254,12 @@ function mcpFixture() {
   const serverModule = compile(`${mcpSource}\nexport { createOkriServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
+    "@/lib/client-directory": {
+      createClient: async () => { throw new Error("not used in this fixture"); },
+      listClients: async () => [],
+      setTicketClientLink: async () => null,
+      updateClient: async () => { throw new Error("not used in this fixture"); },
+    },
     "@/lib/routine-properties": routineProperties,
     "@/lib/project-images": {
       arrayBufferToBase64: () => "iVBORw==",

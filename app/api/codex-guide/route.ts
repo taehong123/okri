@@ -2,13 +2,13 @@ import { WORK_CLASSIFICATION, WORK_FIELDS, WORKFLOW_INSTRUCTIONS } from "@/lib/w
 
 const guide = {
   service: "OKRI Codex conversation API",
-  version: "1.6",
+  version: "1.8",
   quickStart: {
     classification: WORK_CLASSIFICATION,
     fields: WORK_FIELDS,
     workflow: WORKFLOW_INSTRUCTIONS,
     firstRead: "GET /api/work-context?kind=task|project|ticket|routine|objective|key_result|initiative|unsure&query=<short-parent-topic>&memberQuery=<person>",
-    mcp: "Project: use manage_project for proposal, explicit approval, creation, edits, recoverable deletion and restoration in the same conversation. Older tool lists can use create_item twice: the first call returns an internal same_tool_confirmation value and the second call reuses it only after approval. Ticket: use create_item; use trash_ticket and restore_ticket for its recoverable lifecycle. Task: use prepare_work once unless an exact Project/Ticket/Routine ID is already known; parentless Task writes return placement choices without saving. General requires general_confirmed=true after an explicit user choice, unless no active Project/Ticket/Routine exists. Routine: use create_routine.",
+    mcp: "Project: use manage_project for proposal, explicit approval, creation, edits, recoverable deletion and restoration in the same conversation. Older tool lists can use create_item twice: the first call returns an internal same_tool_confirmation value and the second call reuses it only after approval. Ticket: use create_item; use list_clients/manage_client and set_ticket_client for optional customer and product links; use trash_ticket and restore_ticket for its recoverable lifecycle. Task: use prepare_work once unless an exact Project/Ticket/Routine ID is already known; parentless Task writes return placement choices without saving. General requires general_confirmed=true after an explicit user choice, unless no active Project/Ticket/Routine exists. Routine: use create_routine.",
     note: "Keep review IDs and confirmation values internal. Never tell the user to open a new chat, reactivate or mention OKRI, paste an ID, or visit a browser approval page. No suitable Initiative means offer another search or defer; never choose an unrelated parent.",
   },
   authentication: {
@@ -30,6 +30,10 @@ const guide = {
     { purpose: "List or search active items", method: "GET", path: "/api/items?kind=&status=&cadence=&parentId=&q=&includeArchived=false" },
     { purpose: "Create a non-Project item; token-authenticated Project requests only stage a review (202), and parentless Task requests return placement choices without saving (409)", method: "POST", path: "/api/items", body: "title required; optional description, kind, cycleId, parentId, routineId, status, priority, cadence, progress, dueDate, driMemberId, workerMemberIds, assigneeMemberId, properties and Project-only templateId. Ticket is an independent container with no parent or cycle. For a Task, send an exact Project/Ticket parentId or routineId selected from work-context; send generalConfirmed=true only after the user explicitly selects General. For Projects, wait for direct selection/approval. Do not call the browser approval API with a token." },
     { purpose: "Update or link an item", method: "PATCH", path: "/api/items", body: "id required; include only fields to change, including parentId or routineId" },
+    { purpose: "List workspace clients and their products", method: "GET", path: "/api/clients?q=" },
+    { purpose: "Create or update a client and repeatable product rows", method: "POST or PATCH", path: "/api/clients", body: "POST: name required; optional phone, email, products [{name}]. PATCH: id required plus changed fields. Existing Ticket links are optional." },
+    { purpose: "Read or replace one Ticket's client and selected products", method: "GET or PUT", path: "/api/ticket-client-links?ticketId=<ticket-id>", body: "PUT: ticketId, clientId or null, and productIds belonging to that client" },
+    { purpose: "Push/upsert one client or a bulk clients array after the external system changes", method: "POST", path: "/api/integrations/clients/upsert", headers: "Authorization: Bearer <workspace integration token>; Idempotency-Key: <unique event or batch key>; Content-Type: application/json", body: "Required source_name, optional public HTTPS source_url. Single: external_customer_id, name, optional phone/email/products [{external_product_id,name}]. Bulk/full resend: clients [...], optional replace_products (default true). Maximum 50 clients, 100 products per client, 500 products and 1 MiB per request. Unknown fields are rejected. Missing clients are not deleted." },
     { purpose: "List OKR files/cycles", method: "GET", path: "/api/okr-cycles" },
     { purpose: "Create an OKR cycle", method: "POST", path: "/api/okr-cycles", body: "name, department, startDate, endDate, status" },
     { purpose: "Update an OKR cycle", method: "PATCH", path: "/api/okr-cycles", body: "id required plus changed fields" },
@@ -78,6 +82,22 @@ const guide = {
     "Do not delete cycles, routines, groups, members, or workspace data without immediate user confirmation.",
     "Return concise summaries instead of raw JSON unless raw data is requested.",
   ],
+  clientIntegration: {
+    direction: "push",
+    recommendation: "Call the HTTPS POST endpoint immediately when a customer or product changes. Re-send the complete current client list in a bulk request when recovering missed events. OKRI does not poll the external system and does not require another inbound port.",
+    idempotency: "Reuse the same Idempotency-Key only when retrying the identical request. A key reused with different content returns 409. The full batch and its receipt commit atomically.",
+    limits: "Workspace integration tokens only. Requests are rate-limited per workspace and hashed client address. The body is strict JSON up to 1 MiB, with up to 50 clients and 500 products. source_url must be a public HTTPS URL and is never inferred from Origin or Referer.",
+    curl: `curl -X POST https://okri.ai/api/integrations/clients/upsert \\
+  -H "Authorization: Bearer <OKRI_ACCESS_TOKEN>" \\
+  -H "Idempotency-Key: customer-cus_1024-v7" \\
+  -H "Content-Type: application/json" \\
+  -d '{"source_name":"Example CRM","source_url":"https://crm.example.com/customers/cus_1024","external_customer_id":"cus_1024","name":"홍길동","phone":"010-1234-5678","email":"hong@example.com","products":[{"external_product_id":"prd_a","name":"Enterprise"}]}'`,
+    bulkCurl: `curl -X POST https://okri.ai/api/integrations/clients/upsert \\
+  -H "Authorization: Bearer <OKRI_ACCESS_TOKEN>" \\
+  -H "Idempotency-Key: clients-full-2026-09-22T120000Z" \\
+  -H "Content-Type: application/json" \\
+  -d '{"source_name":"Example CRM","source_url":"https://crm.example.com/customers","replace_products":true,"clients":[{"external_customer_id":"cus_1024","name":"홍길동","products":["Enterprise"]}]}'`,
+  },
 };
 
 export function GET() {

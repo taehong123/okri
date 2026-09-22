@@ -3,6 +3,12 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { listRoutineProperties } from "@/lib/routine-properties";
+import {
+  createClient,
+  listClients,
+  setTicketClientLink,
+  updateClient,
+} from "@/lib/client-directory";
 import { arrayBufferToBase64, getProjectImage, getProjectImageCounts, listProjectImages } from "@/lib/project-images";
 import { assertConcreteWorkInput, isReadOnlyMcpRequest, readWorkContext, reviewTaskGeneralPlacement, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
@@ -162,6 +168,38 @@ const itemOutput = z.object({
   properties: z.record(z.string(), propertyValueSchema),
   assignments: z.array(itemAssignmentOutput),
   imageCount: z.number().optional(),
+});
+
+const clientProductOutput = z.object({
+  id: z.string(),
+  clientId: z.string(),
+  externalProductId: z.string().nullable(),
+  name: z.string(),
+  source: z.enum(["manual", "integration"]),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const clientOutput = z.object({
+  id: z.string(),
+  externalCustomerId: z.string().nullable(),
+  name: z.string(),
+  phone: z.string(),
+  email: z.string(),
+  sourceType: z.enum(["manual", "api"]),
+  sourceName: z.string().nullable(),
+  sourceUrl: z.string().nullable(),
+  sourceUpdatedAt: z.string(),
+  products: z.array(clientProductOutput),
+  createdAt: z.string(),
+  updatedAt: z.string(),
+});
+
+const ticketClientLinkOutput = z.object({
+  ticketId: z.string(),
+  clientId: z.string(),
+  productIds: z.array(z.string()),
+  client: clientOutput,
 });
 
 const checklistOutput = z.object({
@@ -359,13 +397,14 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okri", version: "0.9.2" },
+    { name: "okri", version: "0.10.0" },
     {
       instructions:
         [
           WORKFLOW_INSTRUCTIONS,
           "Use manage_project as the primary Project tool. Keep proposal, explicit approval, creation, edits, recoverable deletion, and restoration in the same conversation. Never ask the user to open a new chat, reactivate or mention OKRI, copy a review ID, or visit a browser approval page. Internal IDs stay internal. After the user approves the exact proposal, call manage_project again with action=confirm immediately.",
           "Task lifecycle is binary. Use set_task_completed to complete or reopen a Task; never apply Project workflow states or manual progress percentages to a Task.",
+          "Use list_clients and manage_client for the workspace client directory. A Ticket can reference at most one client and any number of that client's products through set_ticket_client.",
           `Workspace capture rule: ${rules.captureInstruction}`,
           `Workspace structure rule: ${rules.structureInstruction}`,
           `Workspace routine rule: ${rules.routineInstruction}`,
@@ -996,6 +1035,99 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       return {
         structuredContent: { trashed: true as const, title: task.title, taskCount: result.taskCount },
         content: [{ type: "text", text: `Moved Task "${task.title}" to trash. It can be restored from OKRI.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "list_clients",
+    {
+      title: "List workspace clients",
+      description: "Find clients and their products in the current workspace before linking one to a Ticket or updating the directory.",
+      inputSchema: {
+        query: z.string().trim().max(200).optional(),
+        limit: z.number().int().min(1).max(500).default(100),
+      },
+      outputSchema: { clients: z.array(clientOutput), count: z.number() },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      const clients = await listClients(ownerId, input.query, input.limit);
+      return {
+        structuredContent: { clients, count: clients.length },
+        content: [{ type: "text", text: `Found ${clients.length} clients.` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "manage_client",
+    {
+      title: "Create or update a workspace client",
+      description: "Create a client or update one exact existing client. Products are repeatable rows. On update, pass products only when replacing the full product list; preserve product IDs returned by list_clients for rows that remain.",
+      inputSchema: {
+        action: z.enum(["create", "update"]),
+        client_id: z.string().optional(),
+        name: z.string().trim().min(1).max(200).optional(),
+        phone: z.string().max(80).optional(),
+        email: z.string().max(254).optional(),
+        products: z.array(z.object({
+          id: z.string().optional(),
+          name: z.string().trim().min(1).max(200),
+        })).max(100).optional(),
+      },
+      outputSchema: { client: clientOutput },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      if (input.action === "create") {
+        if (!input.name) throw new Error("name is required when action=create");
+        const client = await createClient(ownerId, authorization.userId, {
+          name: input.name,
+          phone: input.phone,
+          email: input.email,
+          products: input.products,
+        });
+        return {
+          structuredContent: { client },
+          content: [{ type: "text", text: `Created client "${client.name}".` }],
+        };
+      }
+      if (!input.client_id) throw new Error("client_id is required when action=update");
+      if (input.name === undefined && input.phone === undefined && input.email === undefined && input.products === undefined) {
+        throw new Error("Pass at least one field to update.");
+      }
+      const client = await updateClient(ownerId, input.client_id, {
+        name: input.name,
+        phone: input.phone,
+        email: input.email,
+        products: input.products,
+      });
+      return {
+        structuredContent: { client },
+        content: [{ type: "text", text: `Updated client "${client.name}".` }],
+      };
+    },
+  );
+
+  server.registerTool(
+    "set_ticket_client",
+    {
+      title: "Set a Ticket client and products",
+      description: "Link one active Ticket to one workspace client and zero or more products belonging to that client. Set client_id to null with an empty product_ids list to unlink it.",
+      inputSchema: {
+        ticket_id: z.string(),
+        client_id: z.string().nullable(),
+        product_ids: z.array(z.string()).max(100).default([]),
+      },
+      outputSchema: { link: ticketClientLinkOutput.nullable() },
+      annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      const link = await setTicketClientLink(ownerId, input.ticket_id, input.client_id, input.product_ids);
+      return {
+        structuredContent: { link },
+        content: [{ type: "text", text: link ? `Linked Ticket to "${link.client.name}".` : "Removed the Ticket client link." }],
       };
     },
   );

@@ -184,6 +184,7 @@ export type RequestAuthorization = {
   displayName: string;
   role: TeamRole;
   apiToken: boolean;
+  integrationTokenId?: string;
   oauthScopes?: string;
 };
 
@@ -473,6 +474,76 @@ async function ensureSchema() {
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_status ON items(owner_id, status)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_parent ON items(owner_id, parent_id)"),
         d1.prepare("CREATE INDEX IF NOT EXISTS idx_items_owner_cadence ON items(owner_id, cadence)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS clients (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          external_customer_id TEXT,
+          name TEXT NOT NULL,
+          phone TEXT NOT NULL DEFAULT '',
+          email TEXT NOT NULL DEFAULT '',
+          source_type TEXT NOT NULL DEFAULT 'manual',
+          source_name TEXT,
+          source_url TEXT,
+          source_updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          created_by_user_id TEXT,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_owner_external ON clients(owner_id, external_customer_id) WHERE external_customer_id IS NOT NULL AND external_customer_id <> ''"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_clients_owner_name ON clients(owner_id, name)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS client_products (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          external_product_id TEXT,
+          name TEXT NOT NULL,
+          source TEXT NOT NULL DEFAULT 'manual',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_client_products_client_external ON client_products(client_id, external_product_id) WHERE external_product_id IS NOT NULL AND external_product_id <> ''"),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_client_products_client_name ON client_products(client_id, name)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_client_products_owner_client ON client_products(owner_id, client_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS ticket_clients (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          ticket_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_clients_ticket ON ticket_clients(owner_id, ticket_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_ticket_clients_client ON ticket_clients(owner_id, client_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS ticket_client_products (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          ticket_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+          product_id TEXT NOT NULL REFERENCES client_products(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_ticket_client_products_unique ON ticket_client_products(owner_id, ticket_id, product_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_ticket_client_products_ticket ON ticket_client_products(owner_id, ticket_id)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_ticket_client_products_product ON ticket_client_products(product_id)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS integration_client_upserts (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          idempotency_key TEXT NOT NULL,
+          request_hash TEXT NOT NULL,
+          response_json TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_client_upserts_key ON integration_client_upserts(owner_id, idempotency_key)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_integration_client_upserts_created ON integration_client_upserts(owner_id, created_at)"),
+        d1.prepare(`CREATE TABLE IF NOT EXISTS integration_client_rate_limits (
+          id TEXT PRIMARY KEY,
+          owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+          bucket_key TEXT NOT NULL,
+          window_start TEXT NOT NULL,
+          request_count INTEGER NOT NULL DEFAULT 1,
+          updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )`),
+        d1.prepare("CREATE UNIQUE INDEX IF NOT EXISTS idx_integration_client_rate_limit_bucket ON integration_client_rate_limits(owner_id, bucket_key, window_start)"),
+        d1.prepare("CREATE INDEX IF NOT EXISTS idx_integration_client_rate_limit_updated ON integration_client_rate_limits(updated_at)"),
         d1.prepare(`CREATE TABLE IF NOT EXISTS kr_data_connections (
           id TEXT PRIMARY KEY,
           owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -773,6 +844,11 @@ async function ensureSchema() {
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archived_from_status TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN archive_root_id TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE items ADD COLUMN created_by_user_id TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE clients ADD COLUMN source_type TEXT NOT NULL DEFAULT 'manual'");
+      await addColumnIfMissing(d1, "ALTER TABLE clients ADD COLUMN source_name TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE clients ADD COLUMN source_url TEXT");
+      await addColumnIfMissing(d1, "ALTER TABLE clients ADD COLUMN source_updated_at TEXT");
+      await d1.prepare("UPDATE clients SET source_updated_at = COALESCE(source_updated_at, updated_at, created_at, CURRENT_TIMESTAMP) WHERE source_updated_at IS NULL").run();
       await addColumnIfMissing(d1, "ALTER TABLE integration_tokens ADD COLUMN last_used_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN deletion_requested_at TEXT");
       await addColumnIfMissing(d1, "ALTER TABLE workspaces ADD COLUMN scheduled_deletion_at TEXT");
@@ -1003,6 +1079,11 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
       property.system_key,
       property.active,
       item.created_by_user_id,
+      client.source_type,
+      client.source_name,
+      client.source_url,
+      client.source_updated_at,
+      client_rate_limit.request_count,
       project_document.version,
       kr_data_connection.target_value,
       daily_scrum.member_id,
@@ -1022,6 +1103,8 @@ async function schemaIsCurrent(d1: RuntimeEnv["DB"]) {
     LEFT JOIN routines AS routine ON 1 = 0
     LEFT JOIN property_definitions AS property ON 1 = 0
     LEFT JOIN items AS item ON 1 = 0
+    LEFT JOIN clients AS client ON 1 = 0
+    LEFT JOIN integration_client_rate_limits AS client_rate_limit ON 1 = 0
     LEFT JOIN project_documents AS project_document ON 1 = 0
     LEFT JOIN kr_data_connections AS kr_data_connection ON 1 = 0
     LEFT JOIN daily_scrums AS daily_scrum ON 1 = 0
@@ -2589,6 +2672,7 @@ export async function authorizeRequest(
         displayName: membership.displayName,
         role,
         apiToken: true,
+        integrationTokenId: token.id,
         oauthScopes: token.scopes ?? "okri:read okri:write",
       };
     }

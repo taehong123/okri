@@ -10,6 +10,7 @@ export function accountDeletionStatements(db: D1Database, userId: string, ownedI
     .bind(guardId, userId, userId, userId, expected, expected, userId)];
   const ownerTables = ["google_calendar_events", "google_connections", "google_oauth_states", "slack_connections", "slack_oauth_states",
     "ai_usage_events", "activity_log", "routine_completions", "routine_property_definitions", "routines",
+    "integration_client_rate_limits", "integration_client_upserts", "ticket_client_products", "ticket_clients", "client_products", "clients",
     "checklist_items", "item_property_values", "item_assignments", "project_hidden_properties", "project_documents", "project_templates",
     "property_definitions", "trash_records", "items", "workspace_backup_state"];
   for (const id of ownedIds) {

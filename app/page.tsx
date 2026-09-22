@@ -105,6 +105,7 @@ import { LocalAgentLauncher } from "./local-agent-launcher";
 import { GuideDraft } from "./guide-draft";
 import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
+import { ClientManagementView, TicketClientEditor, TicketClientSummary, useTicketClients, type TicketClientLink } from "./ticket-clients";
 
 function slackErrorMessage(error: unknown, fallback?: string) {
   return t(baseSlackErrorMessage(error, fallback));
@@ -928,6 +929,7 @@ function WorkspaceApp() {
   const [searchNavigationId, setSearchNavigationId] = useState(0);
   const [, setVisibleOkrCycleIds] = useState<string[]>([]);
   const [activeView, setActiveView] = useState<View>(() => navigationFromLocation().view);
+  const [ticketAreaTab, setTicketAreaTab] = useState<"tickets" | "clients">("tickets");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"cards" | "table" | "board">("table");
   const [notice, setNotice] = useState<AppNotice | null>(null);
@@ -1303,6 +1305,7 @@ function WorkspaceApp() {
     return counts;
   }, new Map<string, number>());
   const currentWorkspace = activeWorkspaces.find((entry) => entry.current) ?? activeWorkspaces[0];
+  const ticketClientData = useTicketClients(activeView === "tickets" || Boolean(selectedTicket), currentWorkspace?.id ?? "");
   const currentTeamMember = teamMembers.find((member) => member.isCurrent && member.status === "active");
   const deletableItemIds = new Set(activeItems
     .filter((item) => canUserDeleteItem(item, currentTeamMember, authState.user?.id ?? null))
@@ -2493,7 +2496,7 @@ function WorkspaceApp() {
               <div className="page-create-actions"><button onClick={() => openTaskCreationChat()}><Bot size={14} />{t("AI 대화로 추가")}</button><button className="primary-action" onClick={() => openCreateItem("task", null)}><Plus size={14} />{t("직접 추가")}</button></div>
             ) : activeView === "work" ? (
               <div className="page-create-actions"><button onClick={() => openProjectCreationChat()}><Bot size={14} />{t("AI 대화로 추가")}</button><button className="primary-action" onClick={() => openCreateItem("project")}><Plus size={14} />{t("직접 추가")}</button></div>
-            ) : activeView === "tickets" ? (
+            ) : activeView === "tickets" && ticketAreaTab === "tickets" ? (
               <button className="primary-action" onClick={() => openCreateItem("ticket", null)}><Plus size={14} />{t("Ticket 추가")}</button>
             ) : activeView === "routines" ? (
               <div className="page-create-actions"><button onClick={() => openRoutineCreationChat()}><Bot size={14} />{t("AI 대화로 추가")}</button><button className="primary-action" onClick={() => setRoutineCreateOpen(true)}><Plus size={14} />{t("직접 추가")}</button></div>
@@ -2565,7 +2568,13 @@ function WorkspaceApp() {
             <>
           {activeView === "my_work" && <MyWorkView key={`${currentWorkspace?.id ?? ""}:${currentTeamMember?.id ?? ""}`} workspaceId={currentWorkspace?.id ?? ""} items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDeleteItem={(item) => deletableItemIds.has(item.id)} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} onClearItems={removeDeleteItems} onTrashSelected={() => void moveSelectedItemsToTrash()} trashing={trashingItems} />}
-          {activeView === "tickets" && <TicketListView tickets={ticketItems} tasks={taskItems} onOpenTicket={openTicketDetail} />}
+          {activeView === "tickets" && <section className="ticket-area">
+            <div className="view-tabs ticket-area-tabs" role="tablist" aria-label={t("Ticket 화면")}>
+              <button type="button" role="tab" aria-selected={ticketAreaTab === "tickets"} className={ticketAreaTab === "tickets" ? "active" : ""} onClick={() => setTicketAreaTab("tickets")}><TicketIcon size={14} />{t("Ticket")}</button>
+              <button type="button" role="tab" aria-selected={ticketAreaTab === "clients"} className={ticketAreaTab === "clients" ? "active" : ""} onClick={() => setTicketAreaTab("clients")}><Users size={14} />{t("클라이언트 관리")}</button>
+            </div>
+            {ticketAreaTab === "tickets" ? <TicketListView tickets={ticketItems} tasks={taskItems} links={ticketClientData.links} onOpenTicket={openTicketDetail} onNotice={showNotice} /> : <ClientManagementView clients={ticketClientData.clients} loading={ticketClientData.loading} error={ticketClientData.error} readOnly={!canWriteWorkspace} onRefresh={ticketClientData.refresh} onNotice={showNotice} />}
+          </section>}
           {activeView === "work" && (
             <section className="project-workspace">
               <TaskDatabase
@@ -2824,6 +2833,11 @@ function WorkspaceApp() {
           onOpenTask={openTaskDetail}
           onTrash={() => void trashTicketItem(selectedTicket)}
           onNotice={showNotice}
+          clients={ticketClientData.clients}
+          clientLink={ticketClientData.links.find((link) => link.ticketId === selectedTicket.id)}
+          clientsLoading={ticketClientData.loading}
+          clientsError={ticketClientData.error}
+          onClientsRefresh={ticketClientData.refresh}
         />
       )}
       {currentWorkspace && authState.user && <WorkspaceSearch key={`${authState.user.id}:${currentWorkspace.id}`} open={searchOpen} identity={authState.user.id} workspaceId={currentWorkspace.id} workspaceName={currentWorkspace.name} personal={currentWorkspace.personal} members={teamMembers} cycles={okrCycles} refreshKey={searchDataRevision} onClose={closeSearch} onNavigate={navigateSearch} />}
@@ -5790,14 +5804,16 @@ function BoardView({ items, onOpenItem, canDeleteItem, selectedItemIds, onToggle
   return <div className="board">{columns.map((column) => { const rows = items.filter((entry) => entry.status === column.status); return <section className="board-column" key={column.status}><header><span className={`status-dot status-${column.status}`} /><b>{column.label}</b><em>{rows.length}</em></header><div>{rows.map((entry) => <article className={`board-selectable-item ${selectionMode ? "selection-mode" : ""}`} key={entry.id}>{selectionMode && canDeleteItem(entry) && <DeleteSelectCheckbox item={entry} selected={selectedItemIds.has(entry.id)} onToggle={onToggleSelect} />}<button className="board-item" onClick={() => onOpenItem(entry)}><b className={entry.kind === "project" ? "project-item-title" : undefined}>{entry.title}</b><span><CalendarDays size={13} />{dueLabel(entry.dueDate)}</span></button></article>)}{!rows.length && <span className="empty-column">{t("작업 없음")}</span>}</div></section>; })}</div>;
 }
 
-function TicketListView({ tickets, tasks, onOpenTicket }: { tickets: OkriItem[]; tasks: OkriItem[]; onOpenTicket: (id: string) => void }) {
+function TicketListView({ tickets, tasks, links, onOpenTicket, onNotice }: { tickets: OkriItem[]; tasks: OkriItem[]; links: TicketClientLink[]; onOpenTicket: (id: string) => void; onNotice: (message: string, tone?: NoticeTone) => void }) {
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"active" | "done" | "all">("active");
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const visible = tickets.filter((ticket) => {
     if (status === "active" && isCompletedStatus(ticket.status)) return false;
     if (status === "done" && !isCompletedStatus(ticket.status)) return false;
-    return !normalizedQuery || `${ticket.title} ${ticket.description}`.toLocaleLowerCase().includes(normalizedQuery);
+    const link = links.find((entry) => entry.ticketId === ticket.id);
+    const clientText = link ? `${link.client.name} ${link.client.phone} ${link.client.email} ${link.client.products.filter((product) => link.productIds.includes(product.id)).map((product) => product.name).join(" ")}` : "";
+    return !normalizedQuery || `${ticket.title} ${ticket.description} ${clientText}`.toLocaleLowerCase().includes(normalizedQuery);
   });
   const taskCounts = new Map<string, { total: number; done: number }>();
   for (const task of tasks) {
@@ -5818,22 +5834,26 @@ function TicketListView({ tickets, tasks, onOpenTicket }: { tickets: OkriItem[];
     <div className="ticket-list">
       {visible.map((ticket) => {
         const count = taskCounts.get(ticket.id) ?? { total: 0, done: 0 };
-        return <button type="button" className="ticket-row" key={ticket.id} onClick={() => onOpenTicket(ticket.id)}>
-          <span className={`status-dot status-${ticket.status}`} aria-hidden="true" />
-          <span className="ticket-row-copy"><b>{ticket.title}</b><small>{ticket.description || t("설명 없음")}</small></span>
-          <span className="ticket-row-status">{ticketStatusLabel(ticket.status)}</span>
-          <span className={`ticket-row-priority priority-${ticket.priority}`}>{priorityLabels[ticket.priority]}</span>
-          <span className="ticket-row-tasks"><ListChecks size={13} />{count.done}/{count.total}</span>
-          <span className="ticket-row-due">{dueLabel(ticket.dueDate)}</span>
-          <ChevronRight size={15} aria-hidden="true" />
-        </button>;
+        const link = links.find((entry) => entry.ticketId === ticket.id);
+        return <article className="ticket-row" key={ticket.id}>
+          <button type="button" className="ticket-row-open" onClick={() => onOpenTicket(ticket.id)}>
+            <span className={`status-dot status-${ticket.status}`} aria-hidden="true" />
+            <span className="ticket-row-copy"><b>{ticket.title}</b><small>{ticket.description || t("설명 없음")}</small></span>
+            <span className="ticket-row-status">{ticketStatusLabel(ticket.status)}</span>
+            <span className={`ticket-row-priority priority-${ticket.priority}`}>{priorityLabels[ticket.priority]}</span>
+            <span className="ticket-row-tasks"><ListChecks size={13} />{count.done}/{count.total}</span>
+            <span className="ticket-row-due">{dueLabel(ticket.dueDate)}</span>
+            <ChevronRight size={15} aria-hidden="true" />
+          </button>
+          <TicketClientSummary link={link} compact onNotice={onNotice} />
+        </article>;
       })}
       {!visible.length && <EmptyState icon={TicketIcon} title={normalizedQuery || status !== "active" ? t("조건에 맞는 Ticket이 없습니다") : t("Ticket이 없습니다")} />}
     </div>
   </section>;
 }
 
-function TicketDetailPanel({ ticket, tasks, teamMembers, readOnly, canDelete, onClose, onPatch, onTaskCreated, onOpenTask, onTrash, onNotice }: {
+function TicketDetailPanel({ ticket, tasks, teamMembers, readOnly, canDelete, onClose, onPatch, onTaskCreated, onOpenTask, onTrash, onNotice, clients, clientLink, clientsLoading, clientsError, onClientsRefresh }: {
   ticket: OkriItem;
   tasks: OkriItem[];
   teamMembers: TeamMember[];
@@ -5845,6 +5865,11 @@ function TicketDetailPanel({ ticket, tasks, teamMembers, readOnly, canDelete, on
   onOpenTask: (id: string) => void;
   onTrash: () => void;
   onNotice: (message: string, tone?: NoticeTone) => void;
+  clients: import("@/lib/client-directory").ClientRecord[];
+  clientLink?: TicketClientLink;
+  clientsLoading: boolean;
+  clientsError: string;
+  onClientsRefresh: () => Promise<void>;
 }) {
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [assigneeId, setAssigneeId] = useState(() => teamMembers.find((member) => member.isCurrent)?.id ?? "");
@@ -5893,6 +5918,7 @@ function TicketDetailPanel({ ticket, tasks, teamMembers, readOnly, canDelete, on
           <label><span>{t("기한")}</span><input disabled={readOnly} type="date" value={ticket.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
         </div>
       </div>}</DocumentProperties>
+      <TicketClientEditor key={`${ticket.id}:${clientLink?.clientId ?? "none"}:${clientLink?.productIds.join(",") ?? ""}`} ticketId={ticket.id} clients={clients} link={clientLink} readOnly={readOnly} loading={clientsLoading} error={clientsError} onRefresh={onClientsRefresh} onNotice={onNotice} />
       <section className="ticket-linked-tasks">
         <header><div><b>{t("연결된 Task")}</b><span>{completedTasks}/{linkedTasks.length}</span></div></header>
         {!readOnly && <form className="ticket-task-create" onSubmit={(event) => void createTask(event)}><input aria-label={t("새 Task 제목")} value={newTaskTitle} onChange={(event) => setNewTaskTitle(event.target.value)} maxLength={500} placeholder={t("실행할 Task 추가")} /><select aria-label={t("담당자")} value={assigneeId} onChange={(event) => setAssigneeId(event.target.value)}><option value="">{t("미지정")}</option>{teamMembers.map((member) => <option key={member.id} value={member.id}>{member.displayName}</option>)}</select><button type="submit" disabled={!newTaskTitle.trim() || savingTask}><Plus size={14} />{savingTask ? t("저장 중") : t("추가")}</button></form>}

@@ -482,6 +482,116 @@ export const items = sqliteTable(
   ],
 );
 
+export const clients = sqliteTable(
+  "clients",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    externalCustomerId: text("external_customer_id"),
+    name: text("name").notNull(),
+    phone: text("phone").notNull().default(""),
+    email: text("email").notNull().default(""),
+    sourceType: text("source_type").notNull().default("manual"),
+    sourceName: text("source_name"),
+    sourceUrl: text("source_url"),
+    sourceUpdatedAt: text("source_updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdByUserId: text("created_by_user_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_clients_owner_external")
+      .on(table.ownerId, table.externalCustomerId)
+      .where(sql`${table.externalCustomerId} IS NOT NULL AND ${table.externalCustomerId} <> ''`),
+    index("idx_clients_owner_name").on(table.ownerId, table.name),
+  ],
+);
+
+export const clientProducts = sqliteTable(
+  "client_products",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    externalProductId: text("external_product_id"),
+    name: text("name").notNull(),
+    source: text("source").notNull().default("manual"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_client_products_client_external")
+      .on(table.clientId, table.externalProductId)
+      .where(sql`${table.externalProductId} IS NOT NULL AND ${table.externalProductId} <> ''`),
+    uniqueIndex("idx_client_products_client_name").on(table.clientId, table.name),
+    index("idx_client_products_owner_client").on(table.ownerId, table.clientId),
+  ],
+);
+
+export const ticketClients = sqliteTable(
+  "ticket_clients",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    ticketId: text("ticket_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    clientId: text("client_id").notNull().references(() => clients.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_ticket_clients_ticket").on(table.ownerId, table.ticketId),
+    index("idx_ticket_clients_client").on(table.ownerId, table.clientId),
+  ],
+);
+
+export const ticketClientProducts = sqliteTable(
+  "ticket_client_products",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    ticketId: text("ticket_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+    productId: text("product_id").notNull().references(() => clientProducts.id, { onDelete: "cascade" }),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_ticket_client_products_unique").on(table.ownerId, table.ticketId, table.productId),
+    index("idx_ticket_client_products_ticket").on(table.ownerId, table.ticketId),
+    index("idx_ticket_client_products_product").on(table.productId),
+  ],
+);
+
+export const integrationClientUpserts = sqliteTable(
+  "integration_client_upserts",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    idempotencyKey: text("idempotency_key").notNull(),
+    requestHash: text("request_hash").notNull(),
+    responseJson: text("response_json").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_integration_client_upserts_key").on(table.ownerId, table.idempotencyKey),
+    index("idx_integration_client_upserts_created").on(table.ownerId, table.createdAt),
+  ],
+);
+
+export const integrationClientRateLimits = sqliteTable(
+  "integration_client_rate_limits",
+  {
+    id: text("id").primaryKey(),
+    ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+    bucketKey: text("bucket_key").notNull(),
+    windowStart: text("window_start").notNull(),
+    requestCount: integer("request_count").notNull().default(1),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    uniqueIndex("idx_integration_client_rate_limit_bucket").on(table.ownerId, table.bucketKey, table.windowStart),
+    index("idx_integration_client_rate_limit_updated").on(table.updatedAt),
+  ],
+);
+
 export const itemAssignments = sqliteTable(
   "item_assignments",
   {
@@ -1535,6 +1645,10 @@ export const trashRecords = sqliteTable(
 
 export type PaceItem = typeof items.$inferSelect;
 export type NewPaceItem = typeof items.$inferInsert;
+export type Client = typeof clients.$inferSelect;
+export type ClientProduct = typeof clientProducts.$inferSelect;
+export type TicketClient = typeof ticketClients.$inferSelect;
+export type TicketClientProduct = typeof ticketClientProducts.$inferSelect;
 export type ItemAssignment = typeof itemAssignments.$inferSelect;
 export type KrDataConnection = typeof krDataConnections.$inferSelect;
 export type PropertyDefinition = typeof propertyDefinitions.$inferSelect;

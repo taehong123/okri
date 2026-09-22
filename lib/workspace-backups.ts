@@ -4,6 +4,10 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   routine_property_definitions: "id,owner_id,name,type,options,default_value,active,sort_order,created_at,updated_at",
   routines: "id,owner_id,system_key,assignee_member_id,title,description,trigger_point,action_place,action_steps,document_content,document_plain_text,document_version,document_updated_at,properties_json,cadence,active,sort_order,created_at,updated_at",
   items: "id,owner_id,cycle_id,parent_id,routine_id,kind,title,description,status,priority,cadence,progress,due_date,source,source_ref,created_by_user_id,sort_order,archived_at,archived_from_status,archive_root_id,created_at,updated_at",
+  clients: "id,owner_id,external_customer_id,name,phone,email,source_type,source_name,source_url,source_updated_at,created_by_user_id,created_at,updated_at",
+  client_products: "id,owner_id,client_id,external_product_id,name,source,created_at,updated_at",
+  ticket_clients: "id,owner_id,ticket_id,client_id,created_at,updated_at",
+  ticket_client_products: "id,owner_id,ticket_id,product_id,created_at",
   property_definitions: "id,owner_id,name,type,options,default_value,system_key,active,sort_order,created_at,updated_at",
   project_templates: "id,owner_id,name,description,content,plain_text,created_by_user_id,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
@@ -144,6 +148,16 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
     data.tables.routine_property_definitions = [];
     if (Array.isArray(data.tables.routines)) data.tables.routines = data.tables.routines.map((row) => ({ properties_json: "{}", ...row }));
   }
+  for (const table of ["clients", "client_products", "ticket_clients", "ticket_client_products"]) {
+    if (!(table in data.tables)) data.tables[table] = [];
+  }
+  if (Array.isArray(data.tables.clients)) data.tables.clients = data.tables.clients.map((row) => ({
+    source_type: "manual",
+    source_name: null,
+    source_url: null,
+    source_updated_at: row.updated_at ?? row.created_at,
+    ...row,
+  }));
   if (Array.isArray(data.tables.routines)) {
     data.tables.routines = data.tables.routines.map((row) => ({
       document_content: "[]",

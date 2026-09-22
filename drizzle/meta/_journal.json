@@ -400,6 +400,13 @@
       "when": 1789014000000,
       "tag": "0064_store_review_feedback",
       "breakpoints": true
+    },
+    {
+      "idx": 57,
+      "version": "6",
+      "when": 1790058427633,
+      "tag": "0065_client_directory",
+      "breakpoints": true
     }
   ]
 }
