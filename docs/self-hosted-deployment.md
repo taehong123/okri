@@ -19,6 +19,11 @@ is on this delivery path.
 dedicated clone is `/srv/okri/source`; it is safe for the service to reset to
 GitHub because it is not a human working directory.
 
+The deployment builder runs as `okri-buildkit.service`. Install and enable it
+with the source-sync units so a host restart cannot leave the minute-by-minute
+deployment timer without a BuildKit socket. `okri-source-sync.service` requires
+the builder and waits for its socket before starting a build.
+
 ## Safety boundary
 
 Do **not** delete, detach, disable, or redirect the current Sites deployment

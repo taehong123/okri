@@ -1,0 +1,19 @@
+[Unit]
+Description=BuildKit daemon for OKRI deployments
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/buildkitd --addr unix:///run/buildkit/buildkitd.sock --oci-worker=true --containerd-worker=false --oci-worker-binary /usr/local/bin/buildkit-runc
+ExecStartPost=/bin/sh -c 'for i in $(seq 1 30); do test -S /run/buildkit/buildkitd.sock && exit 0; sleep 1; done; exit 1'
+Restart=always
+RestartSec=3s
+RuntimeDirectory=buildkit
+RuntimeDirectoryMode=0755
+Delegate=yes
+LimitNOFILE=1048576
+TasksMax=infinity
+
+[Install]
+WantedBy=multi-user.target
