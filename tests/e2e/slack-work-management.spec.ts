@@ -9,7 +9,7 @@ test("업무 생성 관리 봇은 생성 중심 흐름과 비공개 처리 정�
   await expect(rows).toHaveCount(4);
   await expect(rows.locator(".bot-accordion-copy > b")).toHaveText(["데일리 봇", "관리 봇", "업무 생성 관리 봇", "Task 변동 알림 봇"]);
   await expect(rows.nth(2).getByText(/요청자에게만 표시/)).toBeVisible();
-  for (const command of ["!업무생성", "@OKRI 만들 일 입력", "!도움말", "!내업무", "!프로젝트생성", "!프로젝트조회", "!프로젝트수정", "!프로젝트상태", "!테스크생성", "!테스크조회", "!테스크수정", "!테스크완료", "!테스크재열기"]) {
+  for (const command of ["!프로젝트 [이름]", "!루틴 [이름]", "!티켓 [이름]", "!테스크 [이름]", "@OKRI [요청]", "!도움말", "!내업무"]) {
     await expect(rows.nth(2).getByText(command, { exact: true })).toBeVisible();
   }
   await rows.nth(2).getByRole("button", { name: "최근 허들 메모 확인" }).click();
@@ -39,4 +39,24 @@ test("기존 Slack 연결은 허들 Canvas 권한이 없으면 재연결을 안�
   await expect(page.getByRole("button", { name: /^업무 생성 관리 봇/ })).toContainText("권한 업데이트 필요");
   await expect(page.getByText("Slack 권한 업데이트가 필요합니다", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "권한 업데이트", exact: true })).toBeVisible();
+});
+
+test("업무 생성 양식 네 종류와 채널 매뉴얼 공유를 한곳에서 제공한다", async ({ page }) => {
+  await installApiMocks(page, { slackState: "connected", teamWorkspace: true });
+  await page.goto("/?settings=workspace&tab=integrations&bot=work");
+  const panel = page.locator(".slack-work-command-panel");
+  await expect(panel).toBeVisible();
+  for (const command of ["!프로젝트 [이름]", "!루틴 [이름]", "!티켓 [이름]", "!테스크 [이름]", "@OKRI [요청]"]) {
+    await expect(panel.getByText(command, { exact: true })).toBeVisible();
+  }
+  await expect(panel.getByText("DRI · 참여자", { exact: false })).toBeVisible();
+  await expect(panel.getByText("클라이언트 · 제품", { exact: false })).toBeVisible();
+  await expect(panel.getByText("담당자", { exact: false }).first()).toBeVisible();
+  const shareButton = panel.getByRole("button", { name: "매뉴얼 공유", exact: true });
+  await expect(shareButton).toBeEnabled();
+  const [request] = await Promise.all([
+    page.waitForRequest((candidate) => candidate.url().includes("/api/slack/work-guide") && candidate.method() === "POST"),
+    shareButton.click(),
+  ]);
+  expect(request.postDataJSON()).toEqual({ channelId: "C123" });
 });

@@ -4,6 +4,7 @@ import {
   ITEM_PRIORITIES,
   ITEM_STATUSES,
   createItem,
+  createRoutine,
   getItem,
   getItemAssignmentMap,
   getSlackConnection,
@@ -16,7 +17,9 @@ import {
   type ItemPriority,
   type ItemStatus,
   type RequestAuthorization,
+  type RoutineCadence,
 } from "@/lib/pace-data";
+import { getClient, listClients, setTicketClientLink } from "@/lib/client-directory";
 import { createSlackMemberLinkUrl, resolveSlackMemberForEvent, slackApi, slackCanvasTokenForConnection, slackTokenForConnection } from "@/lib/slack-daily";
 import { saveSlackProjectImages } from "@/lib/project-images";
 import { readLanguagePreferences, workspaceMessageLanguage } from "@/lib/language-preferences";
@@ -32,6 +35,7 @@ import {
   SlackWorkIntakeError,
   type SlackWorkDraft,
 } from "@/lib/slack-work-intake";
+import { slackWorkGuideText } from "@/lib/slack-work-command-guide";
 
 export { parseSlackWorkCommand } from "@/lib/slack-work-command-parser";
 
@@ -147,7 +151,7 @@ export async function handleSlackWorkCommandEvent(
   const label = commandLabel(parsed.command, t);
   await postPrivate(token, event, `${label}${parsed.query ? ` · ${parsed.query}` : ""}`, [
     { type: "section", text: { type: "mrkdwn", text: `*${label}*${parsed.query ? `\n${escapeSlack(parsed.query)}` : ""}` } },
-    { type: "actions", elements: [{ type: "button", action_id: "work_command_open", style: "primary", text: { type: "plain_text", text: t("작업 열기") }, value: JSON.stringify(metadata) }] },
+    { type: "actions", elements: [{ type: "button", action_id: "work_command_open", style: "primary", text: { type: "plain_text", text: t("양식 열기") }, value: JSON.stringify(metadata) }] },
   ]);
 }
 
@@ -179,6 +183,18 @@ export async function slackWorkCommandOptions(authorization: RequestAuthorizatio
     return { options: options.slice(0, 20) };
   }
   if (actionId === "work_initiative") return { options: await itemOptions(authorization.ownerId, "initiative", normalized) };
+  if (actionId === "work_ticket_client") {
+    const clients = await listClients(authorization.ownerId, normalized || undefined, 20);
+    return { options: clients.map((client) => option(client.name, client.id)) };
+  }
+  if (actionId === "work_ticket_products") {
+    const clients = await listClients(authorization.ownerId, undefined, 100);
+    const options = clients.flatMap((client) => client.products.map((product) => ({ client, product })))
+      .filter(({ client, product }) => !normalized || `${client.name} ${product.name}`.toLocaleLowerCase().includes(normalized))
+      .slice(0, 100)
+      .map(({ client, product }) => option(`${client.name} · ${product.name}`, product.id));
+    return { options };
+  }
   if (actionId === "work_target_project") return { options: await itemOptions(authorization.ownerId, "project", normalized) };
   if (actionId === "work_target_task_open") return { options: await taskOptions(authorization.ownerId, normalized, false) };
   if (actionId === "work_target_task_done") return { options: await taskOptions(authorization.ownerId, normalized, true) };
@@ -227,10 +243,59 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
     const imageNote = await attachSlackThreadImages(authorization, metadata, item.id, t);
     return { id: item.id, message: `${t("Project를 생성했습니다.")}\n${item.title}${imageNote}` };
   }
+  if (command === "routine_create") {
+    const title = textValue(state, "work_title").trim();
+    if (!title) throw new Error(t("Routine 이름을 입력해 주세요."));
+    const cadence = (selectedValue(state, "work_cadence") || "daily") as RoutineCadence;
+    const routine = await createRoutine(authorization.ownerId, {
+      title,
+      cadence,
+      triggerPoint: textValue(state, "work_trigger"),
+      actionPlace: textValue(state, "work_place"),
+      actionSteps: textValue(state, "work_steps"),
+      description: textValue(state, "work_description"),
+      assigneeMemberId: selectedValue(state, "work_assignee") || null,
+    });
+    return { id: routine.id, message: `${t("Routine을 생성했습니다.")}\n${routine.title}` };
+  }
+  if (command === "ticket_create") {
+    const title = textValue(state, "work_title").trim();
+    if (!title) throw new Error(t("Ticket 이름을 입력해 주세요."));
+    const clientId = selectedValue(state, "work_ticket_client");
+    const productIds = selectedValues(state, "work_ticket_products");
+    if (productIds.length && !clientId) throw new Error(t("제품을 연결하려면 클라이언트를 먼저 선택해 주세요."));
+    if (clientId) {
+      const client = await getClient(authorization.ownerId, clientId);
+      if (!client || productIds.some((id) => !client.products.some((product) => product.id === id))) {
+        throw new Error(t("선택한 제품과 클라이언트를 다시 확인해 주세요."));
+      }
+    }
+    const item = await createItem(authorization.ownerId, {
+      title,
+      description: textValue(state, "work_description"),
+      kind: "ticket",
+      status: selectedValue(state, "work_status") as ItemStatus || "backlog",
+      priority: selectedValue(state, "work_priority") as ItemPriority || "medium",
+      dueDate: dateValue(state, "work_due") || null,
+      source: "slack",
+      createdByUserId: authorization.userId,
+    });
+    if (clientId) {
+      try {
+        await setTicketClientLink(authorization.ownerId, item.id, clientId, productIds);
+      } catch (error) {
+        console.error("Slack Ticket client link failed", error);
+        return { id: item.id, message: `${t("Ticket은 생성했지만 클라이언트·제품 연결을 저장하지 못했습니다.")}\n${item.title}\n${t("사이트에서 Ticket 연결 정보를 다시 설정해 주세요.")}` };
+      }
+    }
+    return { id: item.id, message: `${t("Ticket을 생성했습니다.")}\n${item.title}` };
+  }
   if (command === "task_create") {
     const title = textValue(state, "work_title").trim();
-    const [parentKind, parentId = ""] = selectedValue(state, "work_parent").split(":", 2);
-    if (!title || !parentId || !["project", "ticket", "routine"].includes(parentKind)) throw new Error(t("제목과 상위 Project, Ticket 또는 Routine을 선택해 주세요."));
+    const parentValue = selectedValue(state, "work_parent");
+    const [parentKind = "", parentId = ""] = parentValue.split(":", 2);
+    if (!title) throw new Error(t("Task 이름을 입력해 주세요."));
+    if (parentValue && (!parentId || !["project", "ticket", "routine"].includes(parentKind))) throw new Error(t("연결할 Project, Ticket 또는 Routine을 다시 선택해 주세요."));
     const parent = parentKind === "project" || parentKind === "ticket" ? await getItem(authorization.ownerId, parentId) : null;
     const item = await createItem(authorization.ownerId, {
       title, description: textValue(state, "work_description"), kind: "task",
@@ -298,38 +363,64 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
   const memberOptions = members.map((member) => option(member.displayName || member.email, member.id));
   const actor = memberOptions.find((entry) => entry.value === metadata.memberId);
   const blocks: Record<string, unknown>[] = [];
-  const create = metadata.command === "project_create" || metadata.command === "task_create";
+  const create = isCreateCommand(metadata.command);
   const project = metadata.command.startsWith("project_");
   const draft = create ? metadata.draft : undefined;
   if (create) blocks.push(input("work_title", t("이름"), plainInput("work_title", draft?.title || metadata.query), false));
-  if (metadata.command === "project_create") blocks.push(input("work_initiative", t("상위 Initiative"), externalSelect(
-    "work_initiative",
-    t("Initiative 검색"),
-    draft?.parentKind === "initiative" && draft.parentId ? option(draft.parentLabel || "Initiative", draft.parentId) : undefined,
-  ), false));
-  if (metadata.command === "task_create") blocks.push(input("work_parent", t("상위 Project, Ticket 또는 Routine"), externalSelect(
-    "work_parent",
-    t("상위 업무 검색"),
-    draft?.parentId && ["project", "ticket", "routine"].includes(draft.parentKind)
-      ? option(draft.parentLabel || draft.parentKind, `${draft.parentKind}:${draft.parentId}`)
-      : undefined,
-  ), false));
+  if (metadata.command === "project_create") {
+    blocks.push(input("work_initiative", t("상위 Initiative"), externalSelect(
+      "work_initiative", t("Initiative 검색"),
+      draft?.parentKind === "initiative" && draft.parentId ? option(draft.parentLabel || "Initiative", draft.parentId) : undefined,
+    ), false));
+    blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), draft?.priority || "medium", t("선택")), false));
+    blocks.push(input("work_due", t("기한"), datepicker("work_due", t("기한 선택"), draft?.dueDate), true));
+    blocks.push(input("work_dri", t("DRI"), staticSelect("work_dri", memberOptions, draft?.responsibleMemberId || actor?.value, t("선택")), false));
+    const selected = new Set(draft?.participantMemberIds ?? []);
+    const initialOptions = memberOptions.filter((entry) => selected.has(entry.value));
+    blocks.push(input("work_workers", t("참여자"), multiStaticSelect("work_workers", memberOptions, t("참여자 선택"), initialOptions), true));
+    blocks.push(input("work_status", t("Project 상태"), staticSelect("work_status", projectStatusOptions(t), "in_progress", t("선택")), false));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", draft?.description ?? ""), multiline: true }, true));
+  }
+  if (metadata.command === "routine_create") {
+    blocks.push(input("work_cadence", t("반복 주기"), staticSelect("work_cadence", routineCadenceOptions(t), "daily", t("선택")), false));
+    blocks.push(input("work_trigger", t("트리거"), plainInput("work_trigger", ""), true));
+    blocks.push(input("work_place", t("장소"), plainInput("work_place", ""), true));
+    blocks.push(input("work_steps", t("실행 방법"), { ...plainInput("work_steps", ""), multiline: true }, true));
+    blocks.push(input("work_assignee", t("담당자"), staticSelect("work_assignee", memberOptions, undefined, t("담당자 선택")), true));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", ""), multiline: true }, true));
+  }
+  if (metadata.command === "ticket_create") {
+    blocks.push(input("work_ticket_client", t("클라이언트"), externalSelect("work_ticket_client", t("클라이언트 검색")), true));
+    blocks.push(input("work_ticket_products", t("제품"), externalMultiSelect("work_ticket_products", t("제품 검색")), true));
+    blocks.push(context(t("실행 담당자는 Ticket 아래 Task에서 지정합니다.")));
+    blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), "medium", t("선택")), false));
+    blocks.push(input("work_due", t("기한"), datepicker("work_due", t("기한 선택")), true));
+    blocks.push(input("work_status", t("Ticket 상태"), staticSelect("work_status", ticketStatusOptions(t), "backlog", t("선택")), false));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", ""), multiline: true }, true));
+  }
+  if (metadata.command === "task_create") {
+    blocks.push(input("work_parent", t("연결 대상 · 선택 사항"), externalSelect(
+      "work_parent", t("Project, Ticket 또는 Routine 검색"),
+      draft?.parentId && ["project", "ticket", "routine"].includes(draft.parentKind)
+        ? option(draft.parentLabel || draft.parentKind, `${draft.parentKind}:${draft.parentId}`)
+        : undefined,
+    ), true));
+    blocks.push(context(t("선택하지 않으면 General(기본)에 저장됩니다.")));
+    blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), draft?.priority || "medium", t("선택")), false));
+    blocks.push(input("work_due", t("기한"), datepicker("work_due", t("기한 선택"), draft?.dueDate), true));
+    blocks.push(input("work_assignee", t("담당자"), staticSelect("work_assignee", memberOptions, draft?.responsibleMemberId || actor?.value, t("선택")), false));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", draft?.description ?? ""), multiline: true }, true));
+  }
   if (!create) blocks.push(input("work_target", t("대상 업무"), externalSelect(targetAction(metadata.command), metadata.query || t("업무 검색")), false));
   if (metadata.command === "project_status") blocks.push(input("work_status", t("Project 상태"), staticSelect("work_status", projectStatusOptions(t), undefined, t("선택")), false));
-  if (create || metadata.command === "project_edit" || metadata.command === "task_edit") {
-    if (!create) blocks.push(input("work_title", t("새 이름"), plainInput("work_title", ""), true));
+  if (metadata.command === "project_edit" || metadata.command === "task_edit") {
+    blocks.push(input("work_title", t("새 이름"), plainInput("work_title", ""), true));
     if (metadata.command === "task_edit") blocks.push(input("work_parent", t("새 상위 업무"), externalSelect("work_parent", t("변경하지 않음")), true));
-    blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), create ? draft?.priority || "medium" : undefined, t("선택")), !create));
-    blocks.push(input("work_due", t("기한"), { type: "datepicker", action_id: "work_due", placeholder: { type: "plain_text", text: t(create ? "기한 선택" : "변경하지 않음") }, ...(draft?.dueDate ? { initial_date: draft.dueDate } : {}) }, true));
+    blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), undefined, t("선택")), true));
+    blocks.push(input("work_due", t("기한"), datepicker("work_due", t("변경하지 않음")), true));
     const memberAction = project ? "work_dri" : "work_assignee";
-    blocks.push(input(memberAction, project ? t("책임자") : t("담당자"), staticSelect(memberAction, memberOptions, create ? draft?.responsibleMemberId || actor?.value : undefined, t("선택")), !create));
-    if (metadata.command === "project_create") {
-      const selected = new Set(draft?.participantMemberIds ?? []);
-      const initialOptions = memberOptions.filter((entry) => selected.has(entry.value));
-      blocks.push(input("work_workers", t("참여자"), { type: "multi_static_select", action_id: "work_workers", options: memberOptions, placeholder: { type: "plain_text", text: t("참여자 선택") }, max_selected_items: 20, ...(initialOptions.length ? { initial_options: initialOptions } : {}) }, true));
-    }
-    if (project) blocks.push(input("work_status", t("Project 상태"), staticSelect("work_status", projectStatusOptions(t), create ? "in_progress" : undefined, t("선택")), !create));
-    if (create) blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", draft?.description ?? ""), multiline: true }, true));
+    blocks.push(input(memberAction, project ? t("책임자") : t("담당자"), staticSelect(memberAction, memberOptions, undefined, t("선택")), true));
+    if (project) blocks.push(input("work_status", t("Project 상태"), staticSelect("work_status", projectStatusOptions(t), undefined, t("선택")), true));
   }
   return {
     type: "modal", callback_id: "work_command_submit", private_metadata: JSON.stringify(metadata),
@@ -346,6 +437,18 @@ function plainInput(actionId: string, value: string) {
 }
 function externalSelect(actionId: string, placeholder: string, initialOption?: ReturnType<typeof option>) {
   return { type: "external_select", action_id: actionId, min_query_length: 0, placeholder: { type: "plain_text", text: placeholder.slice(0, 150) }, ...(initialOption ? { initial_option: initialOption } : {}) };
+}
+function externalMultiSelect(actionId: string, placeholder: string) {
+  return { type: "multi_external_select", action_id: actionId, min_query_length: 0, max_selected_items: 20, placeholder: { type: "plain_text", text: placeholder.slice(0, 150) } };
+}
+function multiStaticSelect(actionId: string, options: ReturnType<typeof option>[], placeholder: string, initialOptions: ReturnType<typeof option>[] = []) {
+  return { type: "multi_static_select", action_id: actionId, options, placeholder: { type: "plain_text", text: placeholder }, max_selected_items: 20, ...(initialOptions.length ? { initial_options: initialOptions } : {}) };
+}
+function datepicker(actionId: string, placeholder: string, initialDate?: string) {
+  return { type: "datepicker", action_id: actionId, placeholder: { type: "plain_text", text: placeholder }, ...(initialDate ? { initial_date: initialDate } : {}) };
+}
+function context(text: string) {
+  return { type: "context", elements: [{ type: "mrkdwn", text }] };
 }
 function staticSelect(actionId: string, options: ReturnType<typeof option>[], initialValue?: string, placeholder = "Select") {
   const initial = initialValue ? options.find((entry) => entry.value === initialValue) : undefined;
@@ -385,42 +488,20 @@ async function assignedWorkSummary(authorization: RequestAuthorization, memberId
 }
 
 function commandHelp(t: Translator) {
-  const row = (command: string, type: SlackWorkCommand) => `• \`${command}\` — ${commandLabel(type, t)}`;
   const slashHelp = t("사용법\n• `/okri daily` — 개인 데일리 작성\n• `/okri <문장>` — 문장을 General Task로 수집")
     .split("\n").slice(1).join("\n");
   return [
-    `*${t("업무 생성 관리 봇 명령")}*`,
+    slackWorkGuideText(t),
     "",
-    "*Daily*",
+    "*Daily / 빠른 수집*",
     slashHelp,
-    "",
-    `*${t("생성")}*`,
-    row("!업무생성 [만들 일] · !work create [request]", "work_create"),
-    "",
-    `*${t("내 업무")}*`,
-    row("!내 업무 · !my work", "my_work"),
-    "",
-    "*Project*",
-    row("!프로젝트 생성 [이름] · !project [name]", "project_create"),
-    row("!프로젝트 조회 [검색어] · !project view [query]", "project_view"),
-    row("!프로젝트 수정 [검색어] · !project edit [query]", "project_edit"),
-    row("!프로젝트 상태 [검색어] · !project status [query]", "project_status"),
-    "",
-    "*Task*",
-    row("!태스크 생성 [이름] · !task [name]", "task_create"),
-    row("!태스크 조회 [검색어] · !task view [query]", "task_view"),
-    row("!태스크 수정 [검색어] · !task edit [query]", "task_edit"),
-    row("!태스크 완료 [검색어] · !task complete [query]", "task_complete"),
-    row("!태스크 재열기 [검색어] · !task reopen [query]", "task_reopen"),
-    "",
-    "`!메뉴얼` · `!매뉴얼` · `!도움말` · `!help`",
   ].join("\n");
 }
 
 function commandLabel(command: SlackWorkCommand, t: Translator) {
   const labels: Record<SlackWorkCommand, string> = {
     help: "도움말", my_work: "내 업무", work_create: "업무 생성", project_create: "Project 생성", project_view: "Project 조회",
-    project_edit: "Project 수정", project_status: "Project 상태 변경", task_create: "Task 생성",
+    project_edit: "Project 수정", project_status: "Project 상태 변경", routine_create: "Routine 생성", ticket_create: "Ticket 생성", task_create: "Task 생성",
     task_view: "Task 조회", task_edit: "Task 수정", task_complete: "Task 완료", task_reopen: "Task 다시 열기",
   };
   return t(labels[command]);
@@ -441,6 +522,8 @@ function targetAction(command: SlackWorkCommand) {
 function isWriteCommand(command: SlackWorkCommand) { return !["help", "my_work", "project_view", "task_view"].includes(command); }
 function priorityOptions(t: Translator) { return ITEM_PRIORITIES.map((value) => option(t(({ low: "낮음", medium: "보통", high: "높음", urgent: "긴급" } as Record<string, string>)[value]), value)); }
 function projectStatusOptions(t: Translator) { return ITEM_STATUSES.filter((value) => value !== "archived").map((value) => option(t(projectStatusLabel(value)), value)); }
+function ticketStatusOptions(t: Translator) { return ["backlog", "policy_discussion", "in_progress", "done"].map((value) => option(t(projectStatusLabel(value)), value)); }
+function routineCadenceOptions(t: Translator) { return ["daily", "weekly", "monthly"].map((value) => option(t(({ daily: "매일", weekly: "매주", monthly: "매월" } as Record<string, string>)[value]), value)); }
 function textValue(state: SlackState, id: string) { return state[id]?.[id]?.value ?? ""; }
 function dateValue(state: SlackState, id: string) { return state[id]?.[id]?.selected_date ?? ""; }
 function selectedValue(state: SlackState, id: string, actionId = id) { return state[id]?.[actionId]?.selected_option?.value ?? ""; }
@@ -649,5 +732,5 @@ function sourceThread(event: WorkMessageEvent) {
 }
 
 function isCreateCommand(command: SlackWorkCommand) {
-  return command === "project_create" || command === "task_create";
+  return command === "project_create" || command === "routine_create" || command === "ticket_create" || command === "task_create";
 }

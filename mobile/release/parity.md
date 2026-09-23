@@ -1,5 +1,11 @@
 # Native parity ledger
 
+## 2026-09-23 — Slack 업무 양식과 매뉴얼 공유
+
+- Web/Slack 전용: `!프로젝트`, `!루틴`, `!티켓`, `!테스크` 양식과 `@OKRI` 대화 진입을 분리하고, 워크스페이스 관리자가 최신 명령 매뉴얼을 Slack 채널에 공유할 수 있게 했다.
+- Native UI 변경 없음: iOS/Android 앱의 화면과 배포 채널에는 변경이 없다.
+- `/api/mobile/v1` 및 기존 모바일 소비자 fixture/semantics 변경 없음.
+
 ## 1.0.0 candidate (not publicly released)
 
 - Shared: themes, five languages, authorized OKR/Project/Task/Routine data.

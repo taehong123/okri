@@ -244,7 +244,8 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
       return json(route, { setupComplete: true, admin: slackAdmin(), tests: { dm: { status: "skipped", memberId: "member-1" }, channels: [] }, schedules: [{ memberId: "member-1", status: "scheduled", postAt: 1788120000 }] });
     }
     if (url.pathname === "/api/slack/daily/settings") return json(route, slackAdmin());
-    if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: false }] });
+      if (url.pathname === "/api/slack/channels") return json(route, { channels: [{ id: "C123", name: "daily", isPrivate: false, isMember: false, isShared: false, isExternal: false }] });
+      if (url.pathname === "/api/slack/work-guide" && request.method() === "POST") return json(route, { sent: true, channel: { id: "C123", name: "daily" } });
     if (url.pathname === "/api/slack/automations") {
       if (request.method() === "POST") {
         const payload = request.postDataJSON() as Record<string, unknown>;

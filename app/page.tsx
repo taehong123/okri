@@ -107,6 +107,7 @@ import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
 import { ClientManagementView, TicketClientEditor, TicketClientSummary, useTicketClients, type TicketClientLink } from "./ticket-clients";
 import { normalizeTeamRole } from "@/lib/team-role";
+import { SLACK_WORK_GUIDE_GROUPS } from "@/lib/slack-work-command-guide";
 
 function slackErrorMessage(error: unknown, fallback?: string) {
   return t(baseSlackErrorMessage(error, fallback));
@@ -7231,13 +7232,6 @@ function WorkspaceManagementBot({ active, canManage, onSummary, onNotice }: { ac
 
 type WorkspaceBotId = "daily" | "management" | "work" | "automation";
 
-const slackWorkCommands = [
-  { label: "생성", commands: ["!업무생성", "@OKRI 만들 일 입력"] },
-  { label: "공통", commands: ["!도움말", "!내업무"] },
-  { label: "Project", commands: ["!프로젝트생성", "!프로젝트조회", "!프로젝트수정", "!프로젝트상태"] },
-  { label: "Task", commands: ["!테스크생성", "!테스크조회", "!테스크수정", "!테스크완료", "!테스크재열기"] },
-] as const;
-
 type SlackCanvasDiagnostic = {
   state: "readable" | "permission_required" | "content_unavailable" | "no_recent_request" | "disconnected";
   channelName?: string;
@@ -7286,13 +7280,48 @@ function SlackCanvasDiagnosticControl() {
   </div>;
 }
 
-function SlackWorkManagementBot({ connected, needsReauthorization, canManage }: { connected: boolean; needsReauthorization: boolean; canManage: boolean }) {
+function SlackWorkManagementBot({ connected, needsReauthorization, active, canManage, onNotice }: { connected: boolean; needsReauthorization: boolean; active: boolean; canManage: boolean; onNotice: (message: string) => void }) {
+  const { channels, loading: channelsLoading, error: channelLoadError, refresh: refreshChannels } = useLiveSlackChannels(active && connected && !needsReauthorization && canManage);
+  const [channelId, setChannelId] = useState("");
+  const [sharing, setSharing] = useState(false);
+  const [shareError, setShareError] = useState("");
+  const effectiveChannelId = channels.some((channel) => channel.id === channelId) ? channelId : channels[0]?.id ?? "";
+
+  async function shareGuide() {
+    if (!effectiveChannelId || sharing) return;
+    setSharing(true);
+    setShareError("");
+    try {
+      const response = await fetch("/api/slack/work-guide", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ channelId: effectiveChannelId }),
+      });
+      const data = await response.json() as { sent?: boolean; channel?: { name?: string }; error?: string };
+      if (!response.ok || !data.sent) throw new Error(data.error || t("Slack 매뉴얼을 공유하지 못했습니다."));
+      onNotice(t("#{value1} 채널에 최신 매뉴얼을 공유했습니다.", { value1: messageValue(data.channel?.name || effectiveChannelId) }));
+    } catch (error) {
+      setShareError(error instanceof Error ? error.message : t("Slack 매뉴얼을 공유하지 못했습니다."));
+    } finally {
+      setSharing(false);
+    }
+  }
+
   if (!connected) return <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t("Slack 연결 후 업무 생성 관리 봇을 사용할 수 있습니다")}</b><p>{t("DM과 봇이 참여한 채널에서 명령을 처리하려면 메시지 권한을 승인해 주세요.")}</p></div></div>;
   return <div className="slack-work-command-panel">
     {needsReauthorization ? <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t("Slack 권한 업데이트가 필요합니다")}</b><p>{t("허들 메모 Canvas 본문을 읽으려면 Owner 또는 Admin의 Slack 사용자 권한이 필요합니다.")}</p></div></div> : <>
-      <div className="slack-bot-note"><LockKeyhole size={15} /><p>{t("해당 Slack 스레드 내용을 AI 생성 초안에 사용하며, 결과와 입력 화면은 요청자에게만 표시됩니다.")}</p></div>
-      <div className="slack-work-command-groups">{slackWorkCommands.map((group) => <section key={group.label}><b>{t(group.label)}</b><div>{group.commands.map((command) => <code key={command}>{command}</code>)}</div></section>)}</div>
-      <p className="slack-channel-help">{t("스레드에서 @OKRI와 만들 일을 적거나 !업무생성을 입력하세요. AI 사용량에 포함되며 최종 생성 전 내용을 확인합니다.")}</p>
+    <div className="slack-bot-note"><LockKeyhole size={15} /><p>{t("해당 Slack 스레드 내용을 AI 생성 초안에 사용하며, 결과와 입력 화면은 요청자에게만 표시됩니다.")}</p></div>
+    <header className="slack-work-command-intro"><b>{t("양식은 느낌표, 대화는 @OKRI")}</b><p>{t("Project·Routine·Ticket·Task는 정해진 양식으로 빠르게 만들고, 맥락을 설명할 때만 @OKRI를 태그하세요.")}</p></header>
+    <div className="slack-work-command-groups">{SLACK_WORK_GUIDE_GROUPS.map((group) => <section key={group.label}><div className="slack-work-command-heading"><b>{t(group.label)}</b><p>{t(group.description)}</p></div><div className="slack-work-command-list">{group.entries.map((entry) => <div className="slack-work-command-row" key={entry.command}><code>{entry.command}</code><span><b>{t(entry.label)}</b>{entry.fields && <small>{t(entry.fields)}</small>}</span></div>)}</div></section>)}</div>
+    <p className="slack-channel-help">{t("Task에서 연결 대상을 고르지 않으면 General(기본)에 저장됩니다. Ticket의 실행 담당자는 하위 Task에서 지정합니다.")}</p>
+    <section className="slack-work-guide-share" aria-labelledby="slack-work-guide-share-title">
+      <div><b id="slack-work-guide-share-title">{t("팀 채널에 매뉴얼 공유")}</b><p>{t("위 사용법의 최신 버전을 선택한 채널에 한 번에 게시합니다.")}</p></div>
+      {canManage ? <>
+        <SlackChannelSyncStatus loading={channelsLoading} error={channelLoadError} onRefresh={() => void refreshChannels(false)} />
+        <div className="slack-work-guide-actions"><label><span>{t("공유 채널")}</span><select value={effectiveChannelId} disabled={sharing || channelsLoading} onChange={(event) => setChannelId(event.target.value)}><option value="">{channelsLoading ? t("채널 확인 중") : t("채널 선택")}</option>{channels.map((channel) => <option value={channel.id} key={channel.id}>{slackChannelOptionLabel(channel)}</option>)}</select></label><button type="button" disabled={!effectiveChannelId || sharing || channelLoadError} aria-busy={sharing} onClick={() => void shareGuide()}>{sharing ? <LoaderCircle className="spin" size={15} /> : <Send size={15} />}{sharing ? t("공유 중") : t("매뉴얼 공유")}</button></div>
+        {shareError && <p className="slack-work-guide-error" role="alert">{shareError}</p>}
+      </> : <div className="workspace-settings-note"><Eye size={16} /><p>{t("Owner 또는 Admin이 채널을 선택해 매뉴얼을 공유할 수 있습니다.")}</p></div>}
+    </section>
     </>}
     {canManage && <SlackCanvasDiagnosticControl />}
   </div>;
@@ -7395,7 +7424,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
       <div className="bot-accordion" aria-label={t("워크스페이스 봇 목록")}>
         <BotAccordionRow id="daily" icon={Bot} title={t("데일리 봇")} description={t("멤버별 데일리 DM과 공유 채널")} status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel key={`daily-${botRefreshAttempt}`} active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="management" icon={Activity} title={t("관리 봇")} description={t("누락 정보와 긴급 업무 리포트")} status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot key={`management-${botRefreshAttempt}`} active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
-        <BotAccordionRow id="work" icon={ListChecks} title={t("업무 생성 관리 봇")} description={t("Slack 스레드에서 Project와 Task 생성")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} canManage={canManageSlack} /></BotAccordionRow>
+        <BotAccordionRow id="work" icon={ListChecks} title={t("업무 생성 관리 봇")} description={t("Slack에서 Project·Routine·Ticket·Task 생성")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} active={openBot === "work"} canManage={canManageSlack} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="automation" icon={Zap} title={t("Task 변동 알림 봇")} description={t("Task의 모든 변경사항 알림")} status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager key={`automation-${botRefreshAttempt}`} active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
       </div>
     </div>
