@@ -123,6 +123,59 @@ test("Slack thread reading falls back to the delegated Canvas token", async () =
   assert.match(thread.messages.at(-1).text, /Decision: ship the payment fix today/);
 });
 
+test("Slack thread reading discovers and downloads a Huddle Canvas when files.info cannot resolve it", async (t) => {
+  const requests = [];
+  const downloads = [];
+  t.mock.method(globalThis, "fetch", async (url, init) => {
+    downloads.push({ url, authorization: init.headers.Authorization });
+    return new Response(`<!doctype html><html><body><h1>Weekly Huddle</h1><p>Decision &amp; owner</p><ul><li>Ship today</li></ul><script>secret()</script></body></html>`, {
+      headers: { "content-type": "text/html; charset=utf-8" },
+    });
+  });
+  const { readSlackThread } = load(async (token, method, body) => {
+    requests.push({ token, method, body });
+    if (method === "files.info") throw Object.assign(new Error("file_not_found"), { code: "file_not_found" });
+    if (method === "files.list") return token === "user-token" ? { files: [{
+      id: "canvas-1", title: "Weekly Huddle", mode: "quip", is_huddle_canvas: true,
+      canvas_metadata: { originating_huddle_id: "huddle-1" },
+      url_private_download: "https://files.slack.com/files-pri/T1-F1/download/notes.html",
+    }] } : { files: [] };
+    return { messages: [{
+      user: "member-a", text: "Huddle thread", ts: "1.0", subtype: "huddle_thread",
+      room: { id: "huddle-1", call_family: "huddle", attached_file_ids: ["canvas-1"] },
+    }] };
+  });
+
+  const thread = await readSlackThread("bot-token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "read this", ts: "1.2", threadTs: "1.0",
+  }, "user-token");
+
+  assert.deepEqual(requests.filter((request) => request.method === "files.list").map((request) => request.token), ["user-token"]);
+  assert.deepEqual(downloads, [{
+    url: "https://files.slack.com/files-pri/T1-F1/download/notes.html",
+    authorization: "Bearer user-token",
+  }]);
+  assert.match(thread.messages.at(-1).text, /Weekly Huddle/);
+  assert.match(thread.messages.at(-1).text, /Decision & owner/);
+  assert.match(thread.messages.at(-1).text, /- Ship today/);
+  assert.doesNotMatch(thread.messages.at(-1).text, /secret/);
+});
+
+test("Slack document mentions retain the Canvas excerpt when full lookup is unavailable", async () => {
+  const { readSlackThread } = load(async (_token, method) => {
+    if (method === "conversations.replies") throw Object.assign(new Error("thread_not_found"), { code: "thread_not_found" });
+    throw Object.assign(new Error("file_not_found"), { code: "file_not_found" });
+  });
+
+  const thread = await readSlackThread("bot-token", {
+    channel: "C1", channelType: "channel", user: "member-a", text: "@OKRI summarize this", ts: "1.2",
+    canvasFileId: "canvas-1", canvasExcerpt: "Decision: release on Friday.",
+  }, "user-token");
+
+  assert.match(thread.messages.at(-1).text, /\[Canvas excerpt\]/);
+  assert.match(thread.messages.at(-1).text, /Decision: release on Friday/);
+});
+
 test("Slack thread reading ignores non-Huddle attachments and empty Huddle canvases", async () => {
   const requests = [];
   const { readSlackThread } = load(async (_token, method, body) => {

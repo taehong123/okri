@@ -89,7 +89,7 @@ function harness() {
     },
     "@/lib/slack-mcp-agent": {
       async handleSlackMcpConversation(_request, connection, event, query) {
-        calls.push(["mcp-conversation", connection.ownerId, event.channel, event.user, query]);
+        calls.push(["mcp-conversation", connection.ownerId, event.channel, event.user, query, event.canvasFileId, event.canvasExcerpt]);
       },
     },
     "@/lib/slack-task-changes": { async runDueTaskChanges() { calls.push(["task-changes"]); } },
@@ -299,7 +299,30 @@ test("signed app mentions dispatch the public MCP conversation once", async () =
   await h.routes.events.POST(h.request("POST", event));
   await Promise.all(h.pending);
   assert.deepEqual(h.calls.filter((call) => call[0] === "mcp-conversation"), [[
-    "mcp-conversation", "workspace", "C-team", "U-member", "결제 오류를 수정하고 <@UOWNER123>에게 할당해줘",
+    "mcp-conversation", "workspace", "C-team", "U-member", "결제 오류를 수정하고 <@UOWNER123>에게 할당해줘", undefined, undefined,
+  ]]);
+});
+
+test("Canvas document mentions dispatch the exact file and bounded excerpt", async () => {
+  const h = harness();
+  h.state.target = h.old;
+  const event = { event_id: "canvas-mention", team_id: "T-old", event: {
+    type: "app_mention", subtype: "document_mention", channel_type: "channel", channel: "C-team",
+    user: "U-member", ts: "2.3", file_id: "F-canvas", text: "",
+    blocks: [{ type: "rich_text", elements: [{ type: "rich_text_section", elements: [
+      { type: "text", text: "Payment decision " },
+      { type: "user", user_id: "UBOT123" },
+      { type: "text", text: " summarize the owner and due date" },
+    ] }] }],
+  } };
+
+  await h.routes.events.POST(h.request("POST", event));
+  await Promise.all(h.pending);
+
+  assert.deepEqual(h.calls.filter((call) => call[0] === "mcp-conversation"), [[
+    "mcp-conversation", "workspace", "C-team", "U-member",
+    "Payment decision\nsummarize the owner and due date", "F-canvas",
+    "Payment decision\nsummarize the owner and due date",
   ]]);
 });
 

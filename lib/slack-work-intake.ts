@@ -43,6 +43,8 @@ export type SlackWorkIntakeEvent = {
   text: string;
   ts?: string;
   threadTs?: string;
+  canvasFileId?: string;
+  canvasExcerpt?: string;
 };
 
 export type SlackWorkDraft = {
@@ -91,6 +93,7 @@ type SlackThreadFile = {
   contents?: string;
   contents_extracts?: unknown[];
   preview_plain_text?: string;
+  mode?: string;
   is_huddle_canvas?: boolean;
   canvas_readtime?: number;
   canvas_metadata?: { originating_huddle_id?: string };
@@ -103,6 +106,7 @@ type SlackThreadMessage = {
   ts?: string;
   subtype?: string;
   room?: {
+    id?: string;
     call_family?: string;
     created_by?: string;
     attached_file_ids?: string[];
@@ -117,6 +121,8 @@ type SlackThreadResult = {
 } & Record<string, unknown>;
 
 type SlackFileInfoResult = { ok?: boolean; file?: SlackThreadFile } & Record<string, unknown>;
+type SlackFileListResult = { ok?: boolean; files?: SlackThreadFile[] } & Record<string, unknown>;
+type SlackCanvasCandidate = { id: string; user: string; huddleId?: string; fallbackText?: string };
 
 const maxOutputTokens = 900;
 // Slack caps this method at 15 messages for new commercially distributed apps.
@@ -125,6 +131,7 @@ const maxThreadChars = 24_000;
 const maxThreadImages = 10;
 const maxHuddleCanvasCandidates = 4;
 const maxHuddleCanvasChars = 16_000;
+const maxHuddleCanvasDownloadBytes = 2 * 1024 * 1024;
 
 const draftSchema = {
   type: "object",
@@ -385,7 +392,14 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   const collected: Array<{ user: string; text: string; botId?: string; ts?: string }> = [];
   const imageFiles: SlackImageFile[] = [];
   const imageIds = new Set<string>();
-  const huddleCanvasCandidates = new Map<string, { id: string; user: string }>();
+  const huddleCanvasCandidates = new Map<string, SlackCanvasCandidate>();
+  if (event.canvasFileId) {
+    huddleCanvasCandidates.set(event.canvasFileId, {
+      id: event.canvasFileId,
+      user: event.user,
+      fallbackText: cleanHuddleCanvasText(event.canvasExcerpt ?? ""),
+    });
+  }
   let cursor = "";
   let truncated = false;
   let imagesTruncated = false;
@@ -470,7 +484,10 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   }
   if (huddleCanvasCandidates.size) {
     const canvasResults = await Promise.all([...huddleCanvasCandidates.values()].slice(0, maxHuddleCanvasCandidates)
-      .map((candidate) => readSlackHuddleCanvasMessage(token, candidate, canvasToken)));
+      .map((candidate) => readSlackHuddleCanvasMessage(token, candidate, {
+        canvasToken,
+        channel: event.channel,
+      })));
     collected.push(...canvasResults.flatMap((result) => result?.message ? [result.message] : []));
     if (huddleCanvasCandidates.size > maxHuddleCanvasCandidates || canvasResults.some((result) => result?.truncated)) truncated = true;
   }
@@ -497,56 +514,222 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   return { messages: bounded.reverse(), truncated, imageFiles, imagesTruncated };
 }
 
-function collectHuddleCanvasCandidates(message: SlackThreadMessage, target: Map<string, { id: string; user: string }>) {
+function collectHuddleCanvasCandidates(message: SlackThreadMessage, target: Map<string, SlackCanvasCandidate>) {
   const huddle = message.subtype === "huddle_thread" || message.room?.call_family === "huddle";
   if (!huddle) return;
   const user = message.room?.created_by || message.user || "";
   for (const id of message.room?.attached_file_ids ?? []) {
-    if (id && !target.has(id)) target.set(id, { id, user });
+    if (id && !target.has(id)) target.set(id, { id, user, huddleId: message.room?.id });
   }
   for (const file of message.files ?? []) {
     if (!file.id || (!file.is_huddle_canvas && !file.canvas_metadata?.originating_huddle_id)) continue;
-    if (!target.has(file.id)) target.set(file.id, { id: file.id, user });
+    if (!target.has(file.id)) target.set(file.id, {
+      id: file.id,
+      user,
+      huddleId: file.canvas_metadata?.originating_huddle_id || message.room?.id,
+    });
   }
 }
 
-async function readSlackHuddleCanvasMessage(botToken: string, candidate: { id: string; user: string }, canvasToken?: string | null) {
-  const tokens = [...new Set([botToken, canvasToken].filter((value): value is string => Boolean(value)))];
+async function readSlackHuddleCanvasMessage(
+  botToken: string,
+  candidate: SlackCanvasCandidate,
+  context: { canvasToken?: string | null; channel: string },
+) {
+  const tokens = [...new Set([botToken, context.canvasToken].filter((value): value is string => Boolean(value)))];
   let canvasTokenScopeMissing = false;
   let canvasFound = false;
   let contentExpected = false;
   let lookupSucceeded = false;
+  let directLookupSucceeded = false;
+
   for (const token of tokens) {
     let result: SlackFileInfoResult;
     try {
       result = await slackApi<SlackFileInfoResult>(token, "files.info", { file: candidate.id });
+      lookupSucceeded = true;
+      directLookupSucceeded = true;
     } catch (error) {
-      if (token === canvasToken && slackErrorCode(error) === "missing_scope") canvasTokenScopeMissing = true;
+      if (token === context.canvasToken && slackErrorCode(error) === "missing_scope") canvasTokenScopeMissing = true;
+      logSlackCanvasReadFailure("files.info", token === context.canvasToken ? "user" : "bot", error);
       continue;
     }
-    lookupSucceeded = true;
-    const file = result.file;
-    if (!file?.id || (!file.is_huddle_canvas && !file.canvas_metadata?.originating_huddle_id)) continue;
+    const tokenKind = token === context.canvasToken ? "user" : "bot";
+    const resolved = await canvasMessageFromFile(token, result.file, candidate, tokenKind);
+    if (!resolved.fileMatched) continue;
     canvasFound = true;
-    contentExpected ||= Number(file.canvas_readtime) > 0;
-    const rawText = canvasFileText(file);
-    const text = cleanHuddleCanvasText(rawText);
-    if (!text) continue;
-    const title = clean(file.title || file.name || "허들 메모", 160);
+    contentExpected ||= resolved.contentExpected;
+    if (resolved.message) return resolved.message;
+  }
+
+  if (canvasFound && !contentExpected && !candidate.fallbackText) return null;
+  if (!canvasFound && directLookupSucceeded && !candidate.fallbackText) return null;
+
+  for (const token of [...tokens].reverse()) {
+    let result: SlackFileListResult;
+    try {
+      result = await slackApi<SlackFileListResult>(token, "files.list", {
+        channel: context.channel,
+        types: "canvas",
+        count: 100,
+        show_files_hidden_by_limit: true,
+      });
+      lookupSucceeded = true;
+    } catch (error) {
+      if (token === context.canvasToken && slackErrorCode(error) === "missing_scope") canvasTokenScopeMissing = true;
+      logSlackCanvasReadFailure("files.list", token === context.canvasToken ? "user" : "bot", error);
+      continue;
+    }
+    const file = selectSlackCanvas(result.files ?? [], candidate);
+    const tokenKind = token === context.canvasToken ? "user" : "bot";
+    const resolved = await canvasMessageFromFile(token, file, candidate, tokenKind);
+    if (!resolved.fileMatched) continue;
+    canvasFound = true;
+    contentExpected ||= resolved.contentExpected;
+    if (resolved.message) return resolved.message;
+  }
+
+  const excerpt = cleanHuddleCanvasText(candidate.fallbackText ?? "");
+  if (excerpt) {
     return {
-      message: { user: candidate.user, text: `[허들 메모 Canvas: ${title}]\n${text}` },
-      truncated: rawText.length > maxHuddleCanvasChars,
+      message: { user: candidate.user, text: `[Canvas excerpt]\n${excerpt}` },
+      truncated: false,
     };
+  }
+  if ((!context.canvasToken || canvasTokenScopeMissing) && !canvasFound) {
+    throw new SlackWorkIntakeError("허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_scope_required");
   }
   if (!canvasFound && lookupSucceeded) return null;
   if (canvasFound && !contentExpected) return null;
-  if (!canvasToken || canvasTokenScopeMissing) {
-    throw new SlackWorkIntakeError("허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_scope_required");
-  }
   if (canvasFound) {
     throw new SlackWorkIntakeError("허들 메모 Canvas의 본문을 불러오지 못했습니다. OKRI를 연결한 Owner 또는 Admin이 이 Canvas를 볼 수 있는지 확인한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_content_unavailable");
   }
   throw new SlackWorkIntakeError("허들 메모 Canvas에 접근하지 못했습니다. OKRI를 연결한 Owner 또는 Admin이 이 Canvas를 볼 수 있는지 확인한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_unavailable");
+}
+
+async function canvasMessageFromFile(
+  token: string,
+  file: SlackThreadFile | undefined,
+  candidate: SlackCanvasCandidate,
+  tokenKind: "bot" | "user",
+) {
+  if (!file?.id || !isSlackCanvasFile(file)) {
+    return { fileMatched: false, contentExpected: false, message: null };
+  }
+  const inlineText = canvasFileText(file);
+  const downloadedText = inlineText ? "" : await downloadSlackCanvasText(token, file, tokenKind);
+  const rawText = inlineText || downloadedText;
+  const text = cleanHuddleCanvasText(looksLikeHtml(rawText) ? canvasHtmlToText(rawText) : rawText);
+  const contentExpected = Number(file.canvas_readtime) > 0
+    || Boolean(file.url_private_download || file.url_private || inlineText);
+  if (!text) return { fileMatched: true, contentExpected, message: null };
+  const title = clean(file.title || file.name || "허들 메모", 160);
+  return {
+    fileMatched: true,
+    contentExpected,
+    message: {
+      message: { user: candidate.user, text: `[허들 메모 Canvas: ${title}]\n${text}` },
+      truncated: rawText.length > maxHuddleCanvasChars,
+    },
+  };
+}
+
+function selectSlackCanvas(files: SlackThreadFile[], candidate: SlackCanvasCandidate) {
+  return files.find((file) => file.id === candidate.id)
+    ?? (candidate.huddleId
+      ? files.find((file) => file.canvas_metadata?.originating_huddle_id === candidate.huddleId)
+      : undefined);
+}
+
+function isSlackCanvasFile(file: SlackThreadFile) {
+  return Boolean(file.is_huddle_canvas
+    || file.canvas_metadata?.originating_huddle_id
+    || file.mode === "quip"
+    || file.filetype === "canvas"
+    || file.filetype === "quip");
+}
+
+async function downloadSlackCanvasText(token: string, file: SlackThreadFile, tokenKind: "bot" | "user") {
+  const value = file.url_private_download || file.url_private;
+  if (!value || !isSlackFileUrl(value)) return "";
+  try {
+    const response = await fetch(value, {
+      headers: { Authorization: `Bearer ${token}`, Accept: "text/html,text/plain;q=0.9" },
+      redirect: "follow",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return "";
+    const contentType = response.headers.get("content-type")?.toLowerCase() ?? "";
+    if (contentType && !/^(?:text\/html|text\/plain|application\/xhtml\+xml|application\/octet-stream)(?:;|$)/.test(contentType)) return "";
+    const declaredLength = Number(response.headers.get("content-length") || 0);
+    if (declaredLength > maxHuddleCanvasDownloadBytes) return "";
+    return await readBoundedText(response, maxHuddleCanvasDownloadBytes);
+  } catch (error) {
+    logSlackCanvasReadFailure("file.download", tokenKind, error);
+    return "";
+  }
+}
+
+async function readBoundedText(response: Response, limit: number) {
+  if (!response.body) return "";
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > limit) {
+      await reader.cancel();
+      return "";
+    }
+    chunks.push(value);
+  }
+  const bytes = new Uint8Array(size);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(bytes);
+}
+
+function isSlackFileUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && (url.hostname === "files.slack.com" || url.hostname.endsWith(".slack.com"));
+  } catch {
+    return false;
+  }
+}
+
+function looksLikeHtml(value: string) {
+  return /<(?:html|body|div|p|h[1-6]|ul|ol|li|table|blockquote|br)\b/i.test(value);
+}
+
+function canvasHtmlToText(value: string) {
+  return decodeHtmlEntities(value
+    .replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, "")
+    .replace(/<!--([\s\S]*?)-->/g, "")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|h[1-6]|blockquote|pre|ul|ol|table|tr|section|article)>/gi, "\n")
+    .replace(/<li\b[^>]*>/gi, "\n- ")
+    .replace(/<\/(?:li|td|th)>/gi, "\t")
+    .replace(/<[^>]+>/g, ""));
+}
+
+function decodeHtmlEntities(value: string) {
+  const named: Record<string, string> = { amp: "&", apos: "'", gt: ">", lt: "<", nbsp: " ", quot: '"' };
+  return value.replace(/&(#(?:x[0-9a-f]+|\d+)|[a-z]+);/gi, (entity, key: string) => {
+    if (key[0] !== "#") return named[key.toLowerCase()] ?? entity;
+    const codePoint = key[1]?.toLowerCase() === "x" ? Number.parseInt(key.slice(2), 16) : Number.parseInt(key.slice(1), 10);
+    try { return Number.isFinite(codePoint) ? String.fromCodePoint(codePoint) : entity; } catch { return entity; }
+  });
+}
+
+function logSlackCanvasReadFailure(method: string, tokenKind: "bot" | "user", error: unknown) {
+  const code = slackErrorCode(error) || (error instanceof Error ? error.name : "unknown");
+  console.warn("Slack Canvas read failed", { method, tokenKind, code });
 }
 
 function canvasFileText(file: SlackThreadFile) {

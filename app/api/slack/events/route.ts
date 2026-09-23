@@ -20,18 +20,22 @@ type SlackEventEnvelope = {
     bot_id?: string;
     subtype?: string;
     thread_ts?: string;
-    blocks?: Array<{ block_id?: string }>;
+    file_id?: string;
+    blocks?: unknown[];
   };
 };
 
 type SlackEvent = NonNullable<SlackEventEnvelope["event"]>;
-type SlackCommandEvent = SlackEvent & { channel: string; user: string; text: string; ts: string };
+type SlackCommandEvent = SlackEvent & { channel: string; user: string; ts: string };
 
 function isSlackCommandEvent(event: SlackEvent | undefined): event is SlackCommandEvent {
+  const supportedSubtype = !event?.subtype
+    || (event.type === "app_mention" && event.subtype === "document_mention");
   return Boolean(event
     && (event.type === "message" || event.type === "app_mention")
-    && event.channel && event.user && event.text && event.ts
-    && !event.bot_id && !event.subtype);
+    && event.channel && event.user && event.ts
+    && (event.text || event.subtype === "document_mention")
+    && !event.bot_id && supportedSubtype);
 }
 
 function slackCommandReceiptId(teamId: string, event: SlackCommandEvent) {
@@ -40,6 +44,31 @@ function slackCommandReceiptId(teamId: string, event: SlackCommandEvent) {
 
 function withoutBotMention(text: string, botUserId: string) {
   return text.replaceAll(`<@${botUserId}>`, " ").replace(/[ \t]{2,}/g, " ").trim();
+}
+
+function slackBlockText(blocks: unknown[] | undefined) {
+  const found: string[] = [];
+  const visit = (value: unknown, depth: number) => {
+    if (depth > 8 || !value) return;
+    if (Array.isArray(value)) {
+      value.forEach((entry) => visit(entry, depth + 1));
+      return;
+    }
+    if (typeof value !== "object") return;
+    const record = value as Record<string, unknown>;
+    if (typeof record.text === "string") found.push(record.text);
+    for (const [key, entry] of Object.entries(record)) {
+      if (key !== "text" && (key === "elements" || key === "blocks" || key === "fields")) visit(entry, depth + 1);
+    }
+  };
+  visit(blocks, 0);
+  return [...new Set(found.map((value) => value.trim()).filter(Boolean))].join("\n").slice(0, 8_000);
+}
+
+function slackBlockId(value: unknown) {
+  return value && typeof value === "object" && typeof (value as { block_id?: unknown }).block_id === "string"
+    ? (value as { block_id: string }).block_id
+    : "";
 }
 
 export async function POST(request: Request) {
@@ -57,9 +86,11 @@ export async function POST(request: Request) {
   const connection = await getSlackConnectionByTeam(teamId);
   if (!connection) return new Response(null, { status: 200 });
   const commandEvent = isSlackCommandEvent(event) && event.user !== connection.botUserId ? event : null;
+  const canvasExcerpt = commandEvent?.subtype === "document_mention" ? slackBlockText(commandEvent.blocks) : "";
+  const rawCommandText = commandEvent?.text || canvasExcerpt;
   const commandText = commandEvent?.type === "app_mention"
-    ? withoutBotMention(commandEvent.text, connection.botUserId)
-    : commandEvent?.text;
+    ? withoutBotMention(rawCommandText ?? "", connection.botUserId)
+    : rawCommandText;
   const parsedCommand = commandText ? parseSlackWorkCommand(commandText) : null;
   const mcpConversation = commandEvent?.type === "app_mention";
   const naturalCreation = !parsedCommand && commandText?.trim()
@@ -91,14 +122,16 @@ export async function POST(request: Request) {
       channel: commandEvent.channel,
       channelType: commandEvent.channel_type ?? "channel",
       user: commandEvent.user,
-      text: commandEvent.text,
+      text: commandEvent.text || canvasExcerpt,
       ts: commandEvent.ts,
       threadTs: commandEvent.thread_ts,
-    }, commandText?.trim().slice(0, 4_000) || "사용할 수 있는 기능을 짧게 안내해 줘.").then(() => import("@/lib/slack-task-changes"))
+      canvasFileId: commandEvent.subtype === "document_mention" ? commandEvent.file_id : undefined,
+      canvasExcerpt: commandEvent.subtype === "document_mention" ? canvasExcerpt : undefined,
+    }, commandText?.trim().slice(0, 4_000) || "Read this Canvas and respond to the request around the mention.").then(() => import("@/lib/slack-task-changes"))
       .then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB))
       .catch((error) => console.error("Slack MCP conversation failed", error)));
   } else if (dailyMessage && event?.channel && event.user) {
-    const blockIds = (event.blocks ?? []).flatMap((block) => block.block_id ? [block.block_id] : []);
+    const blockIds = (event.blocks ?? []).map(slackBlockId).filter(Boolean);
     waitUntil(handleDeliveredDailyReminder({ teamId, channelId: event.channel, botId: event.user, blockIds }).then(() => undefined));
   } else if (workCommand && commandEvent
     && ["im", "channel", "group"].includes(commandEvent.channel_type ?? (commandEvent.type === "app_mention" ? "channel" : ""))) {
@@ -106,7 +139,7 @@ export async function POST(request: Request) {
       channel: commandEvent.channel,
       channelType: commandEvent.channel_type ?? (commandEvent.type === "app_mention" ? "channel" : ""),
       user: commandEvent.user,
-      text: commandEvent.text,
+      text: commandEvent.text ?? "",
       ts: commandEvent.ts,
       threadTs: commandEvent.thread_ts,
     }, workCommand).then(() => import("@/lib/slack-task-changes")).then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)).catch((error) => console.error("Slack work command failed", error)));

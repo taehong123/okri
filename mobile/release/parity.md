@@ -68,6 +68,11 @@
   sharing alone does not guarantee Canvas body access. The token is not used for
   messages or other bot calls. This does not read audio or transcripts and does
   not change `/api/mobile/v1`, native contracts or native UI.
+- Slack Huddle Canvas reads now recover from unresolved attached-file lookups by
+  matching the exact Canvas in the channel list and downloading its authenticated,
+  size-bounded Slack HTML export. Mentions inside a Canvas also carry the exact
+  file ID and bounded Slack excerpt into the same conversation. This remains a
+  Slack-only server fix; `/api/mobile/v1`, native contracts and native UI are unchanged.
 - Slack Daily team summaries now update their existing channel message when a
   member submits or revises after the initial summary. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.
