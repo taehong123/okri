@@ -73,6 +73,9 @@
   size-bounded Slack HTML export. Mentions inside a Canvas also carry the exact
   file ID and bounded Slack excerpt into the same conversation. This remains a
   Slack-only server fix; `/api/mobile/v1`, native contracts and native UI are unchanged.
+- The Sites fallback build now skips Node-only prerendering and lets the Cloudflare
+  worker render requests with its real runtime bindings. Self-hosted and native
+  builds are unchanged, and `/api/mobile/v1` keeps its frozen contract.
 - Slack Daily team summaries now update their existing channel message when a
   member submits or revises after the initial summary. This is Slack-only;
   `/api/mobile/v1` and native UI are unchanged.

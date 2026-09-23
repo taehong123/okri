@@ -62,7 +62,9 @@ export default defineConfig(async () => {
       : undefined,
     plugins: isSitesRuntime
       ? [
-          vinext({ prerender: { routes: "*" } }),
+          // Cloudflare runtime bindings are unavailable to vinext's Node prerender process.
+          // The Sites worker renders routes at request time and still serves hashed assets directly.
+          vinext(),
           sites(),
           cloudflare({
             viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
