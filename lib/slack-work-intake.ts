@@ -387,7 +387,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   const rootTs = event.threadTs || event.ts;
   if (!rootTs) {
     return { messages: [{ user: event.user, text: cleanSlackText(event.text) }], truncated: false,
-      imageFiles: [] as SlackImageFile[], imagesTruncated: false };
+      imageFiles: [] as SlackImageFile[], imagesTruncated: false, canvasCandidateCount: 0, canvasReadCount: 0 };
   }
   const collected: Array<{ user: string; text: string; botId?: string; ts?: string }> = [];
   const imageFiles: SlackImageFile[] = [];
@@ -482,12 +482,14 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       if (!threadReadError) threadReadError = error;
     }
   }
+  let canvasReadCount = 0;
   if (huddleCanvasCandidates.size) {
     const canvasResults = await Promise.all([...huddleCanvasCandidates.values()].slice(0, maxHuddleCanvasCandidates)
       .map((candidate) => readSlackHuddleCanvasMessage(token, candidate, {
         canvasToken,
         channel: event.channel,
       })));
+    canvasReadCount = canvasResults.filter((result) => result?.message).length;
     collected.push(...canvasResults.flatMap((result) => result?.message ? [result.message] : []));
     if (huddleCanvasCandidates.size > maxHuddleCanvasCandidates || canvasResults.some((result) => result?.truncated)) truncated = true;
   }
@@ -511,7 +513,14 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     chars += text.length;
     if (text.length < message.text.length) truncated = true;
   }
-  return { messages: bounded.reverse(), truncated, imageFiles, imagesTruncated };
+  return {
+    messages: bounded.reverse(),
+    truncated,
+    imageFiles,
+    imagesTruncated,
+    canvasCandidateCount: huddleCanvasCandidates.size,
+    canvasReadCount,
+  };
 }
 
 function collectHuddleCanvasCandidates(message: SlackThreadMessage, target: Map<string, SlackCanvasCandidate>) {
@@ -541,14 +550,14 @@ async function readSlackHuddleCanvasMessage(
   let canvasFound = false;
   let contentExpected = false;
   let lookupSucceeded = false;
-  let directLookupSucceeded = false;
+  let directNonCanvas = false;
 
   for (const token of tokens) {
     let result: SlackFileInfoResult;
     try {
       result = await slackApi<SlackFileInfoResult>(token, "files.info", { file: candidate.id });
       lookupSucceeded = true;
-      directLookupSucceeded = true;
+      if (result.file?.id === candidate.id && isDefinitelyNotCanvas(result.file)) directNonCanvas = true;
     } catch (error) {
       if (token === context.canvasToken && slackErrorCode(error) === "missing_scope") canvasTokenScopeMissing = true;
       logSlackCanvasReadFailure("files.info", token === context.canvasToken ? "user" : "bot", error);
@@ -562,15 +571,16 @@ async function readSlackHuddleCanvasMessage(
     if (resolved.message) return resolved.message;
   }
 
-  if (canvasFound && !contentExpected && !candidate.fallbackText) return null;
-  if (!canvasFound && directLookupSucceeded && !candidate.fallbackText) return null;
+  if (directNonCanvas) return null;
 
   for (const token of [...tokens].reverse()) {
     let result: SlackFileListResult;
     try {
       result = await slackApi<SlackFileListResult>(token, "files.list", {
         channel: context.channel,
-        types: "canvas",
+        // Slack exposes Canvas documents through the legacy "spaces" file filter.
+        // "canvas" is not a valid files.list type and returns unknown_type.
+        types: "spaces",
         count: 100,
         show_files_hidden_by_limit: true,
       });
@@ -599,7 +609,9 @@ async function readSlackHuddleCanvasMessage(
   if ((!context.canvasToken || canvasTokenScopeMissing) && !canvasFound) {
     throw new SlackWorkIntakeError("허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_scope_required");
   }
-  if (!canvasFound && lookupSucceeded) return null;
+  if (!canvasFound && lookupSucceeded) {
+    throw new SlackWorkIntakeError("허들 메모 Canvas를 찾았지만 OKRI가 본문을 볼 수 없습니다. 앱 연동에서 Slack 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_scope_required");
+  }
   if (canvasFound && !contentExpected) return null;
   if (canvasFound) {
     throw new SlackWorkIntakeError("허들 메모 Canvas의 본문을 불러오지 못했습니다. OKRI를 연결한 Owner 또는 Admin이 이 Canvas를 볼 수 있는지 확인한 뒤 같은 스레드에서 다시 불러 주세요.", "slack_canvas_content_unavailable");
@@ -647,6 +659,12 @@ function isSlackCanvasFile(file: SlackThreadFile) {
     || file.mode === "quip"
     || file.filetype === "canvas"
     || file.filetype === "quip");
+}
+
+function isDefinitelyNotCanvas(file: SlackThreadFile) {
+  return Boolean((file.filetype || file.mimetype)
+    && !isSlackCanvasFile(file)
+    && !file.canvas_readtime);
 }
 
 async function downloadSlackCanvasText(token: string, file: SlackThreadFile, tokenKind: "bot" | "user") {

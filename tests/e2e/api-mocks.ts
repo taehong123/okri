@@ -228,6 +228,9 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
         redirectUrl: "https://okri.ai/api/slack/callback", commandUrl: "https://okri.ai/api/slack/commands", interactionUrl: "https://okri.ai/api/slack/interactions", eventsUrl: "https://okri.ai/api/slack/events",
       } });
     }
+    if (url.pathname === "/api/slack/diagnostics/canvas") {
+      return json(route, { state: "readable", channelName: "daily", receivedAt: now, delegatedAccess: true });
+    }
     if (url.pathname === "/api/slack/daily/preferences") return json(route, { linked: true, enabled: true, reminderTime: "09:00", timezone: "Asia/Seoul", usesWorkspaceTime: true, usesWorkspaceTimezone: true });
     const slackAdmin = () => ({
       connected: true, teamName: "테스트 Slack", needsReauthorization: false, setupComplete: slackSetupComplete,

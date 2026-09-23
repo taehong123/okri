@@ -12,6 +12,8 @@ test("업무 생성 관리 봇은 생성 중심 흐름과 비공개 처리 정�
   for (const command of ["!업무생성", "@OKRI 만들 일 입력", "!도움말", "!내업무", "!프로젝트생성", "!프로젝트조회", "!프로젝트수정", "!프로젝트상태", "!테스크생성", "!테스크조회", "!테스크수정", "!테스크완료", "!테스크재열기"]) {
     await expect(rows.nth(2).getByText(command, { exact: true })).toBeVisible();
   }
+  await rows.nth(2).getByRole("button", { name: "최근 허들 메모 확인" }).click();
+  await expect(rows.nth(2).getByText("#daily의 최근 허들 메모 본문을 읽을 수 있습니다.")).toBeVisible();
   await page.screenshot({ path: info.outputPath("slack-work-management.png"), fullPage: true });
   await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
   expect(await dialog.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);

@@ -7238,12 +7238,63 @@ const slackWorkCommands = [
   { label: "Task", commands: ["!테스크생성", "!테스크조회", "!테스크수정", "!테스크완료", "!테스크재열기"] },
 ] as const;
 
-function SlackWorkManagementBot({ connected, needsReauthorization }: { connected: boolean; needsReauthorization: boolean }) {
-  if (!connected || needsReauthorization) return <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t(needsReauthorization ? "Slack 권한 업데이트가 필요합니다" : "Slack 연결 후 업무 생성 관리 봇을 사용할 수 있습니다")}</b><p>{t("DM과 봇이 참여한 채널에서 명령을 처리하려면 메시지 권한을 승인해 주세요.")}</p></div></div>;
+type SlackCanvasDiagnostic = {
+  state: "readable" | "permission_required" | "content_unavailable" | "no_recent_request" | "disconnected";
+  channelName?: string;
+  receivedAt?: string;
+  delegatedAccess?: boolean;
+};
+
+function SlackCanvasDiagnosticControl() {
+  const [checking, setChecking] = useState(false);
+  const [result, setResult] = useState<SlackCanvasDiagnostic | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  async function check() {
+    setChecking(true);
+    setFailed(false);
+    try {
+      const response = await fetch("/api/slack/diagnostics/canvas", { cache: "no-store" });
+      const data = await response.json() as SlackCanvasDiagnostic;
+      if (!response.ok) throw new Error("diagnostics_failed");
+      setResult(data);
+    } catch {
+      setFailed(true);
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  const location = result?.channelName ? `#${result.channelName}` : t("최근 Slack 스레드");
+  const message = failed
+    ? t("허들 메모 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")
+    : result?.state === "readable"
+      ? t("{value1}의 최근 허들 메모 본문을 읽을 수 있습니다.", { value1: location })
+      : result?.state === "permission_required"
+        ? t("{value1}의 허들 메모를 읽으려면 위에서 Slack 권한을 업데이트해야 합니다.", { value1: location })
+        : result?.state === "content_unavailable"
+          ? t("{value1}의 허들 메모는 찾았지만 본문을 읽지 못했습니다.", { value1: location })
+          : result?.state === "disconnected"
+            ? t("Slack 연결이 필요합니다.")
+            : result?.state === "no_recent_request"
+              ? t("최근 허들 메모 요청이 없습니다. Slack 스레드에서 @OKRI를 부르면 여기서 확인할 수 있습니다.")
+              : t("최근 Slack 요청을 기준으로 Canvas 접근 상태를 확인합니다.");
+
+  return <div className={`slack-canvas-diagnostic ${result?.state === "readable" ? "success" : result || failed ? "warning" : ""}`} role="status">
+    <div>{result?.state === "readable" ? <CheckCircle2 size={16} /> : <CircleHelp size={16} />}<p>{message}</p></div>
+    <button type="button" onClick={() => void check()} disabled={checking}>{checking ? <LoaderCircle className="spin" size={14} /> : <RefreshCw size={14} />}{checking ? t("확인 중") : t("최근 허들 메모 확인")}</button>
+  </div>;
+}
+
+function SlackWorkManagementBot({ connected, needsReauthorization, canManage }: { connected: boolean; needsReauthorization: boolean; canManage: boolean }) {
+  if (!connected) return <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t("Slack 연결 후 업무 생성 관리 봇을 사용할 수 있습니다")}</b><p>{t("DM과 봇이 참여한 채널에서 명령을 처리하려면 메시지 권한을 승인해 주세요.")}</p></div></div>;
   return <div className="slack-work-command-panel">
-    <div className="slack-bot-note"><LockKeyhole size={15} /><p>{t("해당 Slack 스레드 내용을 AI 생성 초안에 사용하며, 결과와 입력 화면은 요청자에게만 표시됩니다.")}</p></div>
-    <div className="slack-work-command-groups">{slackWorkCommands.map((group) => <section key={group.label}><b>{t(group.label)}</b><div>{group.commands.map((command) => <code key={command}>{command}</code>)}</div></section>)}</div>
-    <p className="slack-channel-help">{t("스레드에서 @OKRI와 만들 일을 적거나 !업무생성을 입력하세요. AI 사용량에 포함되며 최종 생성 전 내용을 확인합니다.")}</p>
+    {needsReauthorization ? <div className="slack-automation-locked"><ListChecks size={16} /><div><b>{t("Slack 권한 업데이트가 필요합니다")}</b><p>{t("허들 메모 Canvas 본문을 읽으려면 Owner 또는 Admin의 Slack 사용자 권한이 필요합니다.")}</p></div></div> : <>
+      <div className="slack-bot-note"><LockKeyhole size={15} /><p>{t("해당 Slack 스레드 내용을 AI 생성 초안에 사용하며, 결과와 입력 화면은 요청자에게만 표시됩니다.")}</p></div>
+      <div className="slack-work-command-groups">{slackWorkCommands.map((group) => <section key={group.label}><b>{t(group.label)}</b><div>{group.commands.map((command) => <code key={command}>{command}</code>)}</div></section>)}</div>
+      <p className="slack-channel-help">{t("스레드에서 @OKRI와 만들 일을 적거나 !업무생성을 입력하세요. AI 사용량에 포함되며 최종 생성 전 내용을 확인합니다.")}</p>
+    </>}
+    {canManage && <SlackCanvasDiagnosticControl />}
   </div>;
 }
 
@@ -7344,7 +7395,7 @@ function WorkspaceSlackIntegration({ slack, slackOAuthIssue, loading, loadError,
       <div className="bot-accordion" aria-label={t("워크스페이스 봇 목록")}>
         <BotAccordionRow id="daily" icon={Bot} title={t("데일리 봇")} description={t("멤버별 데일리 DM과 공유 채널")} status={displayedBotSummaries.daily.status} summary={displayedBotSummaries.daily.summary} expanded={openBot === "daily"} onToggle={toggleBot}><SlackDailySettingsPanel key={`daily-${botRefreshAttempt}`} active={openBot === "daily"} connected={slackConnected} canManage={canManageSlack} teamName={connectedSlackName} onSummary={updateDailySummary} onNotice={onNotice} /></BotAccordionRow>
         <BotAccordionRow id="management" icon={Activity} title={t("관리 봇")} description={t("누락 정보와 긴급 업무 리포트")} status={displayedBotSummaries.management.status} summary={displayedBotSummaries.management.summary} expanded={openBot === "management"} onToggle={toggleBot}><WorkspaceManagementBot key={`management-${botRefreshAttempt}`} active={openBot === "management"} canManage={canManageSlack} onSummary={updateManagementSummary} onNotice={onNotice} /></BotAccordionRow>
-        <BotAccordionRow id="work" icon={ListChecks} title={t("업무 생성 관리 봇")} description={t("Slack 스레드에서 Project와 Task 생성")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} /></BotAccordionRow>
+        <BotAccordionRow id="work" icon={ListChecks} title={t("업무 생성 관리 봇")} description={t("Slack 스레드에서 Project와 Task 생성")} status={slackState === "reauthorization_required" ? "권한 업데이트 필요" : displayedBotSummaries.work.status} summary={slackState === "reauthorization_required" ? "새 Slack 권한을 승인해 주세요" : displayedBotSummaries.work.summary} expanded={openBot === "work"} onToggle={toggleBot}><SlackWorkManagementBot connected={slackConnected} needsReauthorization={slackState === "reauthorization_required"} canManage={canManageSlack} /></BotAccordionRow>
         <BotAccordionRow id="automation" icon={Zap} title={t("Task 변동 알림 봇")} description={t("Task의 모든 변경사항 알림")} status={displayedBotSummaries.automation.status} summary={displayedBotSummaries.automation.summary} expanded={openBot === "automation"} onToggle={toggleBot}><SlackAutomationManager key={`automation-${botRefreshAttempt}`} active={openBot === "automation"} connected={slackConnected} canManage={canManageSlack} workspaceName={workspaceName} onSummary={updateAutomationSummary} onNotice={onNotice} /></BotAccordionRow>
       </div>
     </div>

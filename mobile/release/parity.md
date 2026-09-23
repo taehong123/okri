@@ -73,6 +73,11 @@
   size-bounded Slack HTML export. Mentions inside a Canvas also carry the exact
   file ID and bounded Slack excerpt into the same conversation. This remains a
   Slack-only server fix; `/api/mobile/v1`, native contracts and native UI are unchanged.
+- Slack Huddle Canvas recovery now uses Slack's documented `spaces` file filter,
+  reports stale delegated permissions instead of a generic sharing error, and gives
+  workspace administrators a read-only check against their most recent Slack request.
+  This remains a Slack/web administration fix; `/api/mobile/v1`, native contracts
+  and native UI are unchanged.
 - The Sites fallback build now skips Node-only prerendering and lets the Cloudflare
   worker render requests with its real runtime bindings. Self-hosted and native
   builds are unchanged, and `/api/mobile/v1` keeps its frozen contract.

@@ -52,5 +52,5 @@ export async function GET(request: Request) {
       distributionMode: "direct_oauth",
       connectedTeam: connection ? { id: connection.teamId, name: connection.teamName } : null,
     },
-  });
+  }, { headers: { "Cache-Control": "private, no-store, max-age=0" } });
 }

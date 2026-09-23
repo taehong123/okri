@@ -151,6 +151,7 @@ test("Slack thread reading discovers and downloads a Huddle Canvas when files.in
   }, "user-token");
 
   assert.deepEqual(requests.filter((request) => request.method === "files.list").map((request) => request.token), ["user-token"]);
+  assert.equal(requests.find((request) => request.method === "files.list").body.types, "spaces");
   assert.deepEqual(downloads, [{
     url: "https://files.slack.com/files-pri/T1-F1/download/notes.html",
     authorization: "Bearer user-token",
