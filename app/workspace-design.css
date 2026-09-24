@@ -382,7 +382,7 @@
   .app-shell .daily-project-heading h3 { align-items: flex-start; line-height: 1.45; }
   .app-shell .daily-container-kind { padding-top: 1px; line-height: 1.5; }
   .app-shell .daily-task-option { margin-inline-start: var(--space-3); padding-inline-start: var(--space-2); }
-  .app-shell .daily-task-groups > section > :is(.daily-empty, .daily-project-create, .daily-create-feedback) { margin-inline-start: var(--space-3); }
+  .app-shell .daily-task-group-content > :is(.daily-empty, .daily-project-create, .daily-create-feedback) { margin-inline-start: var(--space-3); }
   .app-shell .daily-project-create { padding-inline-start: var(--space-2); }
   .property-panel > header,
   .workspace-settings-header,

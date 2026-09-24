@@ -101,30 +101,34 @@ function escaped(value: string) { return value.replace(/[\r\n]+/g, " ").replace(
 export function dailyDigestMessages(digest: DailyDigest, t: Translator) {
   const shared = digest.members.filter((member) => member.shared).length;
   const header = `${digest.date} · ${t("데일리 팀 요약")}`;
-  const sections: string[] = [t("공유 {shared}/{total}명", { shared, total: digest.members.length })];
+  const overview = t("공유 {shared}/{total}명", { shared, total: digest.members.length });
+  const sections: Array<{ type: "section"; text: string } | { type: "divider" }> = [{ type: "section", text: overview }];
+  const addSection = (text: string) => sections.push({ type: "section", text });
   const addLines = (title: string, lines: string[]) => {
     let text = `*${title}*`;
     for (const line of lines) {
-      if (text.length + line.length > 2800) { sections.push(text); text = `*${title}*`; }
+      if (text.length + line.length > 2800) { addSection(text); text = `*${title}*`; }
       text += `\n${line}`;
     }
-    sections.push(text);
+    addSection(text);
   };
   const missing = digest.members.filter((member) => !member.shared);
   if (missing.length) addLines(t("미공유 {count}명", { count: missing.length }), missing.map((member) => `*${escaped(member.name.slice(0, 100))} · ${t("미공유")}*`));
   for (const kind of ["completed", "planned"] as const) {
+    if (kind === "planned") sections.push({ type: "divider" });
     const title = t(kind === "completed" ? "완료한 일" : "오늘 할 일");
-    sections.push(`*${title} · ${t("{count}건", { count: digest[kind] })}*`);
+    addSection(`*${title} · ${t("{count}건", { count: digest[kind] })}*`);
     addLines(t("팀원별"), digest.members.map((member) => `${escaped(member.name.slice(0, 100))}: ${member.shared ? t("{count}건", { count: member[kind] }) + (member.skipped ? ` · ${t("스킵")}` : "") : `*${t("미공유")}*`}`));
     addLines(t("KR별"), digest.groups.map((group) => `${escaped((group.id === "unlinked" ? t("KR 미연결") : group.title).slice(0, 180))}: ${t("{count}건", { count: group[kind] })}`));
   }
-  sections.push(t("제출된 Task 기준 · 전체와 KR별 합계는 중복 Task를 한 번만 집계합니다."));
+  addSection(t("제출된 Task 기준 · 전체와 KR별 합계는 중복 Task를 한 번만 집계합니다."));
   const pages = [];
   for (let start = 0; start < sections.length; start += 40) {
     const pageSections = sections.slice(start, start + 40);
-    pages.push({ text: `${header}\n${sections[0]}\n${pageSections.join("\n\n")}`.slice(0, 39000), blocks: [
+    const fallback = pageSections.flatMap((section) => section.type === "section" ? [section.text] : []).join("\n\n");
+    pages.push({ text: `${header}\n${overview}\n${fallback}`.slice(0, 39000), blocks: [
       { type: "header", text: { type: "plain_text", text: `${header}${sections.length > 40 ? ` (${start / 40 + 1}/${Math.ceil(sections.length / 40)})` : ""}` } },
-      ...pageSections.map((text) => ({ type: "section", text: { type: "mrkdwn", text } })),
+      ...pageSections.map((section) => section.type === "divider" ? section : ({ type: "section", text: { type: "mrkdwn", text: section.text } })),
     ] });
   }
   return pages;

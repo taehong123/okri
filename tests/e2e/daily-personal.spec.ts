@@ -49,8 +49,10 @@ test("Project and Routine are peer groups with only child Tasks selectable", asy
   for (const box of await boxes.all()) await expect(box).not.toBeChecked();
   await expect(picker.getByRole("heading", { name: title })).toBeVisible();
   await expect(picker.getByRole("checkbox", { name: title + " 선택", exact: true })).toHaveCount(0);
+  await picker.getByRole("button", { name: `${title} · 펼치기` }).click();
   await page.getByRole("checkbox", { name: "고객 인터뷰 진행 선택", exact: true }).focus();
   await page.keyboard.press("Space");
+  await picker.getByRole("button", { name: "Store management · 펼치기" }).click();
   await picker.getByRole("checkbox", { name: /Routine child Task/ }).check();
   const yesterdayPicker = page.locator(".daily-task-picker").first();
   await yesterdayPicker.getByText("완료한 일", { exact: true }).click();
@@ -169,8 +171,10 @@ test("participant adds a personal Task within a Project and preserves the daily 
   await page.goto("/?view=scrum");
   const picker = page.getByRole("group", { name: "오늘 할 일" });
   const project = picker.getByRole("region", { name: projectTitle, exact: true });
+  await project.getByRole("button", { name: `${projectTitle} · 펼치기` }).click();
   await expect(project.getByText("아직 Task가 없습니다.")).toBeVisible();
   await expect(project.getByRole("checkbox")).toHaveCount(0);
+  await picker.getByRole("button", { name: "기존 프로젝트 · 펼치기" }).click();
   await picker.getByRole("checkbox", { name: "기존 내 Task 선택", exact: true }).check();
   await page.getByRole("textbox", { name: "오늘 메모", exact: true }).fill("고객에게 공유할 메모");
   const add = project.getByRole("button", { name: projectTitle + "에 Task 추가", exact: true });

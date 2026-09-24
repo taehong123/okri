@@ -209,8 +209,14 @@ test("large teams and KR lists preserve every row within Slack limits, escape me
   const digest = { date: "2026-09-07", completed: 0, planned: 0, members: Array.from({ length: 300 }, (_, i) => ({ id: `m${i}`, name: `<@everyone> *member* ${i}`, shared: false, skipped: false, completed: 0, planned: 0 })), groups: Array.from({ length: 300 }, (_, i) => ({ id: `kr${i}`, title: `KR-${i} ${"x".repeat(150)}`, completed: 0, planned: 0 })) };
   const pages = h.api.dailyDigestMessages(digest, translator);
   assert.ok(pages.length > 1);
-  const text = pages.flatMap((page) => page.blocks.map((block) => block.text.text)).join("\n");
-  for (const page of pages) { assert.ok(page.blocks.length <= 50); for (const block of page.blocks) assert.ok(block.text.text.length <= 3000); }
+  const blocks = pages.flatMap((page) => page.blocks);
+  const text = blocks.flatMap((block) => block.text ? [block.text.text] : []).join("\n");
+  for (const page of pages) { assert.ok(page.blocks.length <= 50); for (const block of page.blocks) if (block.text) assert.ok(block.text.text.length <= 3000); }
+  assert.equal(blocks.filter((block) => block.type === "divider").length, 1);
+  const completedIndex = blocks.findIndex((block) => block.text?.text?.startsWith("*완료한 일 ·"));
+  const dividerIndex = blocks.findIndex((block) => block.type === "divider");
+  const plannedIndex = blocks.findIndex((block) => block.text?.text?.startsWith("*오늘 할 일 ·"));
+  assert.ok(completedIndex >= 0 && completedIndex < dividerIndex && dividerIndex < plannedIndex);
   for (let i = 0; i < 300; i++) assert.match(text, new RegExp(`KR-${i} `));
   assert.doesNotMatch(text, /<@everyone>/); assert.match(text, /&lt;@everyone&gt;/);
   const normal = await h.api.loadDailyDigest(h.raw, "a", "2026-09-07"); normal.members.forEach((member) => { member.name = "Member"; });

@@ -18,6 +18,7 @@
 .daily-picker-error { margin: 0 0 var(--space-3); color: var(--red); font-size: var(--type-meta); }
 .daily-submission-summary > b { display: block; margin: var(--space-3) 0 var(--space-2); font-size: var(--type-label); font-weight: 600; }
 .daily-submission-summary > b:first-child { margin-top: 0; }
+.daily-submission-summary > b:not(:first-child) { padding-top: var(--space-3); border-top: 1px solid var(--border-default); }
 .daily-submission-summary li { grid-template-columns: minmax(0, 1fr); align-items: start; gap: var(--space-1); }
 .daily-submission-summary li button { min-width: 0; white-space: normal; overflow-wrap: anywhere; text-overflow: clip; }
 .daily-submission-summary li small { min-width: 0; overflow-wrap: anywhere; }
@@ -26,12 +27,19 @@
 .daily-submission-work > small { color: var(--text-secondary); font-weight: 600; }
 .daily-submission-task { min-width: 0; display: flex; align-items: flex-start; gap: var(--space-2); margin-inline-start: var(--space-3); padding-inline-start: var(--space-3); border-inline-start: 1px solid var(--border-default); }
 .daily-submission-task > button { flex: 1; font-weight: 400; }
-.daily-project-heading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.daily-project-heading h3 { min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; font-weight: 600; }
-.daily-project-heading h3 button { padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.daily-project-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }
+.daily-project-heading h3 { flex: 1 1 12rem; min-width: 0; display: flex; align-items: center; gap: var(--space-2); overflow-wrap: anywhere; font-weight: 600; }
+.daily-project-heading h3 button { min-width: 0; padding: 0; border: 0; background: transparent; color: var(--text-primary); font: inherit; text-align: left; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
 .daily-container-kind { flex: 0 0 auto; color: var(--muted); font-size: var(--type-meta); font-weight: 600; }
+.daily-project-actions { flex: 0 0 auto; display: flex; align-items: center; gap: var(--space-1); }
 .daily-project-heading .icon-button { flex-shrink: 0; }
-.daily-task-groups > section > :is(.daily-empty, .daily-project-create, .daily-create-feedback) { margin-inline-start: var(--space-4); }
+.daily-group-toggle { min-width: 44px; min-height: 44px; display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-2); padding: 0; border: 0; background: transparent; color: var(--muted); font: inherit; cursor: pointer; }
+.daily-group-toggle small { white-space: nowrap; font-size: var(--type-meta); }
+.daily-group-toggle svg { flex: 0 0 auto; transition: transform 160ms ease; }
+.daily-task-group.is-expanded .daily-group-toggle svg { transform: rotate(180deg); }
+.daily-group-toggle:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.daily-task-group-content[hidden] { display: none; }
+.daily-task-group-content > :is(.daily-empty, .daily-project-create, .daily-create-feedback) { margin-inline-start: var(--space-4); }
 .daily-project-create { display: grid; gap: var(--space-2); padding: var(--space-3) 0 var(--space-3) var(--space-3); border-inline-start: 1px solid var(--border-default); }
 .daily-project-create label { display: grid; min-width: 0; gap: var(--space-2); }
 .daily-project-create input { width: 100%; min-width: 0; min-height: var(--field-height); font: inherit; color: var(--text-primary); background: var(--bg-surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); }

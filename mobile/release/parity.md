@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-09-24: Web Daily work groups can now be expanded and collapsed, while Slack team summaries add a divider between completed and planned work. This is presentation-only: `/api/mobile/v1` payloads and native Daily behavior are unchanged, so no native release is required.
+
 ## 2026-09-23 — Slack 업무 양식과 매뉴얼 공유
 
 - Web/Slack 전용: `!프로젝트`, `!루틴`, `!티켓`, `!테스크` 양식과 `@OKRI` 대화 진입을 분리하고, 워크스페이스 관리자가 최신 명령 매뉴얼을 Slack 채널에 공유할 수 있게 했다.
