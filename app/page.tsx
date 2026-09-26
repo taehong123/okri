@@ -2416,7 +2416,7 @@ function WorkspaceApp() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-label={entry.label} title={entry.label} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
@@ -2426,12 +2426,12 @@ function WorkspaceApp() {
           {mobileNavItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
+              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-label={entry.label} title={entry.label} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
           })}
-          <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>{t("더보기")}</span></button>
+          <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} aria-label={t("더보기")} title={t("더보기")} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>{t("더보기")}</span></button>
         </nav>
         <div className="sidebar-bottom">
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>{t("AI 연결")}</span></button>
@@ -3210,7 +3210,7 @@ function TaskDatabase({ items, allItems, properties, values, hiddenProperties, d
   }
 
   return (
-    <section className="database-section">
+    <section className={`database-section database-section-${display}`}>
       <div className="database-toolbar">
         <div className="view-tabs" role="tablist" aria-label={t("Project 표시 방식")}>
           <button role="tab" aria-selected={display === "cards"} className={display === "cards" ? "active" : ""} onClick={() => onDisplayChange("cards")}><Briefcase size={13} />{t("카드")}</button>

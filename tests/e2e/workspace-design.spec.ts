@@ -80,6 +80,56 @@ test("account settings stay reachable on short laptop viewports", async ({ page 
   }
 });
 
+test("project board uses spaced kanban columns without shrinking typography", async ({ page }, info) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/?view=work");
+  await page.getByRole("tab", { name: "보드" }).click();
+
+  const board = page.locator(".database-section-board .board");
+  await expect(board).toBeVisible();
+  const desktop = await board.evaluate((element) => {
+    const css = getComputedStyle(element);
+    const columns = Array.from(element.querySelectorAll<HTMLElement>(".board-column"));
+    const first = columns[0]?.getBoundingClientRect();
+    const second = columns[1]?.getBoundingClientRect();
+    return {
+      flow: css.gridAutoFlow,
+      gap: css.columnGap,
+      overflowX: css.overflowX,
+      scrollable: element.scrollWidth > element.clientWidth,
+      columnGap: first && second ? Math.round(second.left - first.right) : 0,
+    };
+  });
+  expect(desktop).toEqual({ flow: "column", gap: "16px", overflowX: "auto", scrollable: true, columnGap: 16 });
+
+  const firstCard = board.locator(".board-item").first();
+  await expect(firstCard).toBeVisible();
+  expect(await firstCard.locator(":scope > b").evaluate((node) => {
+    const css = getComputedStyle(node);
+    return { size: css.fontSize, weight: css.fontWeight, lineHeight: css.lineHeight };
+  })).toEqual({ size: "16px", weight: "400", lineHeight: "24.8px" });
+  expect(await firstCard.locator(":scope > span").evaluate((node) => getComputedStyle(node).fontSize)).toBe("14px");
+  await page.screenshot({ path: info.outputPath("project-board-1440.png"), fullPage: true });
+
+  await page.setViewportSize({ width: 768, height: 900 });
+  const toolbarRows = await page.locator(".database-toolbar").evaluate((toolbar) => {
+    const tabs = toolbar.querySelector(".view-tabs")!.getBoundingClientRect();
+    const actions = toolbar.querySelector(".database-actions")!.getBoundingClientRect();
+    return { separated: actions.top >= tabs.bottom, overflow: toolbar.scrollWidth > toolbar.clientWidth + 1 };
+  });
+  expect(toolbarRows).toEqual({ separated: true, overflow: false });
+
+  await page.setViewportSize({ width: 390, height: 900 });
+  const mobile = await board.evaluate((element) => {
+    const css = getComputedStyle(element);
+    return { flow: css.gridAutoFlow, columns: css.gridTemplateColumns, overflowX: css.overflowX };
+  });
+  expect(mobile.flow).toBe("row");
+  expect(mobile.overflowX).toBe("visible");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath("project-board-390.png"), fullPage: true });
+});
+
 test("working views share document layout and stable typography from 320px to 4K", async ({ page }, info) => {
   test.setTimeout(180_000);
   const errors: string[] = [];
