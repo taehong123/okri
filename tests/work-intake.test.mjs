@@ -238,6 +238,7 @@ function mcpFixture() {
     restoreTrashedItems: async (_owner, ids) => { calls.push({ method: "restore-ticket", ids }); return { restored: true, restoredRootIds: ids, restoredCount: 2 }; },
     getItemPropertiesByName: async (_owner, ids) => { calls.push({ method: "properties", ids }); return {}; },
     getItemAssignmentMap: async () => ({}),
+    getDailyScrum: async (_owner, date) => ({ date, yesterdayNote: "legacy", todayNote: "legacy", blockersNote: "legacy", yesterdayTasks: [], todayTasks: [], blockers: [], updatedAt: null }),
     replaceItemAssignmentRole: async () => {},
     validateItemPropertiesByName: async (_owner, properties) => { if (properties.invalid) throw new Error("Property not found"); },
     setItemPropertiesByName: async () => {},
@@ -254,6 +255,21 @@ function mcpFixture() {
   const serverModule = compile(`${mcpSource}\nexport { createOkriServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
+    "@/lib/daily-bot": {
+      getDailyDashboard: async (_authorization, date) => {
+        const availableWork = [
+          { id: "project", key: "project:project", kind: "project", title: "Assigned Project", status: "todo", priority: "medium", dueDate: null, parentTitle: "Initiative", parentId: "initiative", parentKind: "initiative" },
+          { id: "task-a", key: "task:task-a", kind: "task", title: "Selected Task", status: "todo", priority: "medium", dueDate: null, parentTitle: "Assigned Project", parentId: "project", parentKind: "project" },
+          { id: "task-b", key: "task:task-b", kind: "task", title: "Unselected Task", status: "todo", priority: "medium", dueDate: null, parentTitle: "Assigned Project", parentId: "project", parentKind: "project" },
+        ];
+        return {
+          date,
+          draft: { yesterdayNote: "done", todayNote: "today", blockersNote: "none", selectedWorkIds: ["task:task-a"], updatedAt: "2026-09-26T00:00:00.000Z" },
+          candidates: { work: availableWork },
+          latestSubmission: { work: [availableWork[0]] },
+        };
+      },
+    },
     "@/lib/client-directory": {
       createClient: async () => { throw new Error("not used in this fixture"); },
       listClients: async () => [],
@@ -304,6 +320,23 @@ function mcpFixture() {
   }
   return { ...fixtureData, calls, tools, call, reviewReceipt, async init() { await serverModule.createOkriServer({ ownerId: "a", userId: "user", role: "owner" }); } };
 }
+
+test("MCP Daily separates every assigned candidate from selected and shared subsets", async () => {
+  const f = mcpFixture();
+  try {
+    await f.init();
+    const daily = await f.call("get_daily_scrum", { date: "2026-09-26" });
+    assert.equal(daily.availableWorkCount, 3);
+    assert.equal(daily.availableProjectCount, 1);
+    assert.equal(daily.availableTaskCount, 2);
+    assert.equal(daily.selectedWorkCount, 1);
+    assert.equal(daily.latestSubmittedWorkCount, 1);
+    assert.deepEqual(daily.availableWork.map((entry) => entry.key), ["project:project", "task:task-a", "task:task-b"]);
+    assert.deepEqual(daily.selectedWork.map((entry) => entry.key), ["task:task-a"]);
+    assert.deepEqual(daily.latestSubmittedWork.map((entry) => entry.key), ["project:project"]);
+    assert.equal(daily.todayNote, "today");
+  } finally { f.db.close(); }
+});
 
 test("MCP review outcome contains the final edited connection and property summary, never a false pending success", async () => {
   const f = mcpFixture();

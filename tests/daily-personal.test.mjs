@@ -679,6 +679,30 @@ test("new checklist shows every task without search, grouped by stable project I
   }
 });
 
+test("a member's current 22 assigned entries stay together on one safe Slack Daily page", () => {
+  const entries = Array.from({ length: 22 }, (_, i) => ({
+    key: `task:${i}`, id: String(i), title: `Assigned Task ${i}`, kind: "task", status: "todo", priority: "medium",
+    parentId: `project-${i}`, parentKind: "project", parentTitle: `Project ${i}`, dueDate: null,
+  }));
+  const modal = form.dailyChecklistForm({ ...checklistInput(entries), taskFocused: true }, "opaque-metadata");
+  assert.equal(form.DAILY_CHECKLIST_PAGE_SIZE, 23);
+  assert.equal(modal.submit.text, "제출");
+  assert.equal(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).length, 22);
+  assert.ok(modal.blocks.length < 100);
+  for (const entry of entries) assert.match(JSON.stringify(modal), new RegExp(entry.title));
+});
+
+test("the 23-entry Slack Daily page remains below Slack's 100-block limit in the empty-container worst case", () => {
+  const entries = Array.from({ length: 23 }, (_, i) => ({
+    key: `project:${i}`, id: String(i), title: `Empty Project ${i}`, kind: "project", status: "todo", priority: "medium",
+    parentId: null, parentKind: "general", parentTitle: "General", dueDate: null,
+  }));
+  const taskTargets = entries.map((entry) => ({ key: entry.key, title: entry.title, hasTasks: false }));
+  const modal = form.dailyChecklistForm({ ...checklistInput(entries), taskFocused: true, taskTargets }, "opaque-metadata");
+  assert.equal(modal.submit.text, "제출");
+  assert.ok(modal.blocks.length < 100);
+});
+
 test("checkbox conflicts are rejected and unchecking removes a plan without cancelling the task", async (t) => {
   const { raw, db, checklist } = fixture(t);
   const input = checklistInput(await work.listDailyWork(raw, "w", "me", date));
@@ -829,7 +853,7 @@ test("legacy exclusions, paging, cancelling and conflicting choices never delete
   assert.ok(!JSON.stringify(legacy).includes('"value":"exclude"'));
   await checklist.handleDailyChecklist(authorization, legacy.private_metadata, { daily_choice_0: choice("exclude") }, false, (key) => key);
   assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
-  const modal = await checklist.createDailyChecklist("w", "me", checklistInput([task, ...Array.from({ length: 20 }, (_, i) => ({ ...task, id: `t-${i}`, key: `task:t-${i}` }))]), (key) => key);
+  const modal = await checklist.createDailyChecklist("w", "me", checklistInput([task, ...Array.from({ length: form.DAILY_CHECKLIST_PAGE_SIZE }, (_, i) => ({ ...task, id: `t-${i}`, key: `task:t-${i}` }))]), (key) => key);
   const next = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { daily_choice_0: choice("delete") }, false, (key) => key);
   const back = await checklist.handleDailyChecklist(authorization, next.view.private_metadata, {}, true, (key) => key);
   assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_options[0].value, "delete");

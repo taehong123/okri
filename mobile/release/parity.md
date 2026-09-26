@@ -108,6 +108,10 @@
   while the recorded workspace owner is restored as Owner. This prevents the
   workspace switcher/settings crash without changing `/api/mobile/v1` response
   shapes or adding a native UI claim.
+- Slack Daily now keeps up to 23 assigned open items on one safe modal page and
+  exposes separate authoritative candidate, draft-selection and latest-shared
+  counts to the Slack MCP agent. This corrects Slack visibility and diagnosis;
+  `/api/mobile/v1`, native contracts and native UI are unchanged.
 
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or

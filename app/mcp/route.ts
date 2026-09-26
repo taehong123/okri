@@ -10,6 +10,7 @@ import {
   updateClient,
 } from "@/lib/client-directory";
 import { arrayBufferToBase64, getProjectImage, getProjectImageCounts, listProjectImages } from "@/lib/project-images";
+import { getDailyDashboard } from "@/lib/daily-bot";
 import { assertConcreteWorkInput, isReadOnlyMcpRequest, readWorkContext, reviewTaskGeneralPlacement, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
 import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
@@ -168,6 +169,19 @@ const itemOutput = z.object({
   properties: z.record(z.string(), propertyValueSchema),
   assignments: z.array(itemAssignmentOutput),
   imageCount: z.number().optional(),
+});
+
+const dailyWorkOutput = z.object({
+  id: z.string(),
+  key: z.string(),
+  kind: z.enum(["project", "task", "routine"]),
+  title: z.string(),
+  status: z.string(),
+  priority: z.string(),
+  dueDate: z.string().nullable(),
+  parentTitle: z.string(),
+  parentId: z.string().nullable().optional(),
+  parentKind: z.string().optional(),
 });
 
 const clientProductOutput = z.object({
@@ -1578,31 +1592,61 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "get_daily_scrum",
     {
       title: "Get a daily scrum",
-      description: "Get saved notes plus automatically collected completed, active, and blocked Tasks for a date.",
+      description: "Get the invoking member's Daily state. availableWork is the authoritative complete list of currently assigned open Projects, Tasks, and Routines shown by Daily. selectedWork is only the member's current plan, and latestSubmittedWork is only the most recently shared snapshot; never treat either subset as missing assignments.",
       inputSchema: { date: z.string().optional().describe("YYYY-MM-DD; defaults to today") },
       outputSchema: {
         date: z.string(),
         yesterdayNote: z.string(),
         todayNote: z.string(),
         blockersNote: z.string(),
-        yesterdayTasks: z.array(itemOutput),
-        todayTasks: z.array(itemOutput),
-        blockers: z.array(itemOutput),
+        yesterdayTasks: z.array(itemOutput).describe("Legacy workspace completion preview; not the member's complete Daily assignment list."),
+        todayTasks: z.array(itemOutput).describe("Legacy urgency preview; not the member's complete Daily assignment list."),
+        blockers: z.array(itemOutput).describe("Legacy workspace blocker preview; not the member's complete Daily assignment list."),
+        availableWork: z.array(dailyWorkOutput).describe("Authoritative complete Daily candidates assigned to the invoking member."),
+        availableWorkCount: z.number(),
+        availableProjectCount: z.number(),
+        availableTaskCount: z.number(),
+        availableRoutineCount: z.number(),
+        selectedWork: z.array(dailyWorkOutput).describe("Current draft selection only; unselected availableWork is not missing."),
+        selectedWorkCount: z.number(),
+        latestSubmittedWork: z.array(dailyWorkOutput).describe("Most recently shared snapshot only; it is not the complete assignment list."),
+        latestSubmittedWorkCount: z.number(),
         updatedAt: z.string().nullable(),
       },
       annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
     },
     async ({ date }) => {
-      const scrum = await getDailyScrum(ownerId, date ?? new Date().toISOString().slice(0, 10));
+      const selectedDate = date ?? new Date().toISOString().slice(0, 10);
+      const [scrum, dashboard] = await Promise.all([
+        getDailyScrum(ownerId, selectedDate),
+        getDailyDashboard(authorization, selectedDate),
+      ]);
+      const availableWork = dashboard.candidates.work;
+      const selectedKeys = new Set(dashboard.draft.selectedWorkIds);
+      const selectedWork = availableWork.filter((work) => selectedKeys.has(work.key));
+      const latestSubmittedWork = dashboard.latestSubmission?.work ?? [];
       const structuredContent = {
-        ...scrum,
+        date: dashboard.date,
+        yesterdayNote: dashboard.draft.yesterdayNote,
+        todayNote: dashboard.draft.todayNote,
+        blockersNote: dashboard.draft.blockersNote,
         yesterdayTasks: await serializeItemsForMcp(ownerId, scrum.yesterdayTasks),
         todayTasks: await serializeItemsForMcp(ownerId, scrum.todayTasks),
         blockers: await serializeItemsForMcp(ownerId, scrum.blockers),
+        availableWork,
+        availableWorkCount: availableWork.length,
+        availableProjectCount: availableWork.filter((work) => work.kind === "project").length,
+        availableTaskCount: availableWork.filter((work) => work.kind === "task").length,
+        availableRoutineCount: availableWork.filter((work) => work.kind === "routine").length,
+        selectedWork,
+        selectedWorkCount: selectedWork.length,
+        latestSubmittedWork,
+        latestSubmittedWorkCount: latestSubmittedWork.length,
+        updatedAt: dashboard.draft.updatedAt,
       };
       return {
         structuredContent,
-        content: [{ type: "text", text: `${scrum.date} daily scrum is ready.` }],
+        content: [{ type: "text", text: `${dashboard.date} Daily has ${availableWork.length} assigned open candidates, ${selectedWork.length} currently selected, and ${latestSubmittedWork.length} in the latest shared snapshot. Use availableWork to check whether assignments are visible.` }],
       };
     },
   );

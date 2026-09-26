@@ -17,7 +17,10 @@ export type DailyChecklist = {
   taskEntry?: { parentKey: string; title: string; requestId: string; creating?: boolean };
   createdTaskKey?: string;
 };
-export const DAILY_CHECKLIST_PAGE_SIZE = 20;
+// Slack modals allow at most 100 blocks. Twenty-three maximizes the common
+// Daily page while keeping the worst case (23 empty containers with inline
+// Task actions, navigation, and validation feedback) below that limit.
+export const DAILY_CHECKLIST_PAGE_SIZE = 23;
 
 // Slack preserves inputs by block/action ID; inserting a Task must not shift another Task's choice.
 export function dailyChoiceBlockId(input: DailyChecklist, entry: DailyWork, index: number) {
