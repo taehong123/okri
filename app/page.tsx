@@ -99,7 +99,6 @@ import { languages, type Language } from "@/lib/language";
 import LanguageLoadError from "./language-load-error";
 import type { LanguagePreferences } from "@/lib/language";
 import { LandingScreen } from "./landing";
-import { AppInstallButton } from "./app-install-button";
 import { BrandLogo } from "./brand-logo";
 import { LocalAgentLauncher } from "./local-agent-launcher";
 import { GuideDraft } from "./guide-draft";
@@ -2435,7 +2434,6 @@ function WorkspaceApp() {
           <button className={`nav-item ${mobileMenuOpen ? "active" : ""}`} onClick={() => setMobileMenuOpen(true)}><Menu size={16} /><span>{t("더보기")}</span></button>
         </nav>
         <div className="sidebar-bottom">
-          <AppInstallButton />
           <button className="nav-item" onClick={() => setIntegrationOpen(true)}><Link2 size={16} /><span>{t("AI 연결")}</span></button>
           <button className={`nav-item ${activeView === "integrations" && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === "integrations" && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} onClick={() => navigateView("integrations")}><Plug size={16} /><span>{t("개인 앱 연동")}</span></button>
           <button className={`nav-item ${activeView === "billing" && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-current={activeView === "billing" && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} onClick={() => navigateView("billing")}><CreditCard size={16} /><span>{t("요금제 및 결제")}</span></button>
@@ -2448,7 +2446,6 @@ function WorkspaceApp() {
           {(requestClose) => <aside className="mobile-menu-sheet">
             <header><div><b>{currentWorkspace?.name || t("개인 워크스페이스")}</b><small>{currentWorkspace?.personal ? t("개인 워크스페이스") : t("팀 워크스페이스")}</small></div><span className="mobile-menu-header-actions"><button className="icon-button" onClick={() => openWorkspaceSettings("general")} aria-label={t("워크스페이스 설정")}><Settings size={17} /></button><button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></span></header>
             <div className="mobile-menu-list">
-              <AppInstallButton />
               {mobileMoreItems.map((entry) => { const Icon = entry.icon; return <button key={entry.id} onClick={() => { navigateView(entry.id); setMobileMenuOpen(false); }}><Icon size={16} /><span>{entry.label}</span><ChevronRight size={14} /></button>; })}
               <button onClick={() => { setMobileMenuOpen(false); setIntegrationOpen(true); }}><Link2 size={16} /><span>{t("AI 연결")}</span><ChevronRight size={14} /></button>
               <button onClick={() => { setMobileMenuOpen(false); navigateView("integrations"); }}><Plug size={16} /><span>{t("개인 앱 연동")}</span><ChevronRight size={14} /></button>

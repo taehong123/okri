@@ -67,10 +67,4 @@ test("settings, guidance, avatars and conversation share neutral support roles",
   await page.goto("/?view=billing");
   await expect(page.locator(".billing-plan-card.current")).toBeVisible();
   await neutral(page, ".billing-plan-card > header div span, .billing-usage-grid article > div i");
-  await page.goto("/download");
-  await expect(page.getByText("브라우저 앱", { exact: true })).toBeVisible();
-  await neutral(page, "[class*='topbar'], [class*='format']");
-  const contrast = await new AxeBuilder({ page: page as never }).withRules(["color-contrast"]).analyze();
-  expect(contrast.violations).toEqual([]);
-  await page.screenshot({ path: info.outputPath("download.png") });
 });

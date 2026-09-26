@@ -5,14 +5,12 @@ import "./workspace-design.css";
 import "./item-editor.css";
 import "./document-view.css";
 import "./gantt-view.css";
-import "./pwa.css";
 import "./local-agent.css";
 import { themeBootstrapScript, themeCss } from "@/lib/themes";
-import { appInstallBootstrapScript } from "@/lib/app-install";
 import { PRODUCT_NAME, PUBLIC_APP_URL } from "@/lib/brand";
 import { BRAND_ASSET_ROOT } from "@/lib/brand-artwork";
 
-const bootstrapScript = themeBootstrapScript + appInstallBootstrapScript + `(() => {
+const bootstrapScript = themeBootstrapScript + `(() => {
   const now = new Date();
   const date = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-");
   const path = "/api/bootstrap?date=" + encodeURIComponent(date);
@@ -68,8 +66,6 @@ export default function RootLayout({
   return (
     <html lang="ko" suppressHydrationWarning>
       <head>
-        {/* Keep the manifest in the real head after hydration, not a streamed metadata container. */}
-        <link rel="manifest" href="/manifest.webmanifest" />
         <style id="okri-theme-colors" dangerouslySetInnerHTML={{ __html: themeCss }} />
         <script dangerouslySetInnerHTML={{ __html: bootstrapScript }} />
       </head>

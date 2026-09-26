@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-09-26: Removed web browser-install entry points and install manifest linking to avoid confusing the web shortcut with the native Android closed test. The Play Store tester link remains. This is web-only; `/api/mobile/v1` and native binaries are unchanged.
+
 - 2026-09-26: Android closed-test recruitment, private tester status links, feedback collection, and the Slack morning aggregate are web/server-only. They do not change `/api/mobile/v1`, the installed client, or native release behavior.
 
 - 2026-09-24: Web Daily work groups can now be expanded and collapsed, while Slack team summaries add a divider between completed and planned work. This is presentation-only: `/api/mobile/v1` payloads and native Daily behavior are unchanged, so no native release is required.

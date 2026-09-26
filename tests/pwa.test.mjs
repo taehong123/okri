@@ -2,79 +2,20 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 import test from "node:test";
-import ts from "typescript";
 
 const root = new URL("../", import.meta.url);
-const source = await readFile(new URL("lib/app-install.ts", root), "utf8");
-const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { appInstallBootstrapScript } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
-
-function installation(standalone = false) {
-  const window = new EventTarget();
-  const display = Object.assign(new EventTarget(), { matches: standalone });
-  window.matchMedia = () => display;
-  vm.runInNewContext(appInstallBootstrapScript, { window, Event });
-  return { window, display, state: window.__OKRI_INSTALL__ };
-}
-function offer(window, prompt) {
-  const event = new Event("beforeinstallprompt", { cancelable: true });
-  event.prompt = prompt;
-  window.dispatchEvent(event);
-  assert.equal(event.defaultPrevented, true);
-}
-
-test("install prompt is one-use, user-triggered, and accepted is not installed", async () => {
-  const { window, state } = installation();
-  let calls = 0;
-  let finish;
-  assert.equal(state.status, "unavailable");
-  offer(window, () => { calls += 1; return new Promise((resolve) => { finish = resolve; }); });
-  assert.equal(calls, 0);
-  assert.equal(state.status, "ready");
-  const pending = state.prompt();
-  await state.prompt();
-  assert.equal(calls, 1);
-  assert.equal(state.status, "prompting");
-  finish({ outcome: "accepted" });
-  await pending;
-  assert.equal(state.status, "accepted");
-  await state.prompt();
-  assert.equal(calls, 1);
-  window.dispatchEvent(new Event("appinstalled"));
-  assert.equal(state.status, "installed");
-});
-
-test("cancellation and failure require a fresh browser offer, never fabricate installation", async () => {
-  const { window, state } = installation();
-  offer(window, async () => ({ outcome: "dismissed" }));
-  await state.prompt();
-  assert.equal(state.status, "unavailable");
-  offer(window, async () => { throw new Error("blocked"); });
-  await state.prompt();
-  assert.equal(state.status, "error");
-  offer(window, async () => ({ outcome: "accepted" }));
-  await state.prompt();
-  assert.equal(state.status, "accepted");
-});
-
-test("standalone windows do not offer installation; installed event wins a pending prompt", async () => {
-  const app = installation(true);
-  offer(app.window, async () => { assert.fail("must not prompt"); });
-  await app.state.prompt();
-  assert.equal(app.state.status, "installed");
-  const { window, state } = installation();
-  offer(window, async () => { window.dispatchEvent(new Event("appinstalled")); return { outcome: "accepted" }; });
-  await state.prompt();
-  assert.equal(state.status, "installed");
-});
-
-test("app entry points open download guidance before the browser install prompt", async () => {
-  const entry = await readFile(new URL("app/app-install-button.tsx", root), "utf8");
-  const download = await readFile(new URL("app/download/download-client.tsx", root), "utf8");
-  assert.match(entry, /href="\/download"/);
-  assert.doesNotMatch(entry, /__OKRI_INSTALL__\?\.prompt/);
-  assert.match(download, /__OKRI_INSTALL__\?\.prompt/);
-  assert.match(download, /파일은 자동으로 다운로드되지 않습니다/);
+test("web pages do not advertise browser installation", async () => {
+  const [layout, landing, app, download, tester] = await Promise.all([
+    readFile(new URL("app/layout.tsx", root), "utf8"),
+    readFile(new URL("app/landing.tsx", root), "utf8"),
+    readFile(new URL("app/page.tsx", root), "utf8"),
+    readFile(new URL("app/download/page.tsx", root), "utf8"),
+    readFile(new URL("app/android-test/android-test-page.tsx", root), "utf8"),
+  ]);
+  assert.doesNotMatch(layout, /rel="manifest"|appInstallBootstrapScript/);
+  assert.doesNotMatch(landing + app, /AppInstallButton/);
+  assert.match(download, /redirect\("\/"\)/);
+  assert.match(tester, /https:\/\/play\.google\.com\/apps\/testing\/ai\.okri\.app/);
 });
 
 test("manifest uses stable same-origin launch paths, real PNG icons, and no account identifiers", async () => {
@@ -184,18 +125,15 @@ test("blocked storage preserves network responses and provides an honest offline
   assert.match(await response.text(), /연결할 수 없습니다/);
 });
 
-test("built offline page keeps shared themes and fonts, without bootstrap, user data or auto reload", async () => {
-  const shell = await readFile(new URL("dist/client/index.html", root), "utf8");
-  const manifestLink = shell.indexOf('rel="manifest"');
-  assert.ok(manifestLink >= 0 && manifestLink < shell.indexOf("</head>"));
-  const html = await readFile(new URL("dist/client/offline.html", root), "utf8");
+test("self-hosted offline page keeps shared themes and fonts, without bootstrap, user data or auto reload", async () => {
+  const html = await readFile(new URL("dist/standalone/public/offline.html", root), "utf8");
   assert.doesNotMatch(html, /build:theme|build:fonts|build:preference|__OKRI_BOOTSTRAP_REQUEST__|fetch\(/);
   for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) assert.ok(html.includes(`html[data-theme="${theme}"]`));
   const fonts = [...html.matchAll(/url\((\/fonts\/[^)]+)\)/g)].map((match) => match[1]);
   assert.ok(fonts.length > 0 && fonts.length < 92);
-  const builtWorker = await readFile(new URL("dist/client/sw.js", root), "utf8");
-  for (const font of fonts) assert.ok(builtWorker.includes(font));
+  const builtWorker = await readFile(new URL("dist/standalone/public/sw.js", root), "utf8");
+  assert.match(builtWorker, /PRECACHE_URLS = \["\/offline\.html"/);
   assert.doesNotMatch(builtWorker, /skipWaiting\(/);
   assert.doesNotMatch(builtWorker, /PRECACHE_URLS = \["\/"/);
-  assert.match(builtWorker, /CACHE_NAME = "okri-assets-[a-f0-9]{16}"/);
+  assert.match(builtWorker, /CACHE_NAME = "okri-assets-pwa1"/);
 });

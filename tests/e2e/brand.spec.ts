@@ -1,4 +1,3 @@
-import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 import { BRAND_SYMBOL_PATH, BRAND_WORDMARK_PATH } from "../../lib/brand-artwork";
 import { installApiMocks } from "./api-mocks";
@@ -25,7 +24,7 @@ test("public surfaces preserve the approved logo, themes, keyboard and user text
   const errors: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/api/**", (route) => route.fulfill({ status: 401, json: { error: "unauthorized" } }));
-  for (const path of ["/", "/download", "/privacy", "/terms"]) {
+  for (const path of ["/", "/privacy", "/terms"]) {
     await page.goto(path);
     const logo = page.locator(".landing-brand-home svg, [role='img'][aria-label='OKRI']").first();
     await expect(logo).toBeVisible();
@@ -39,7 +38,6 @@ test("public surfaces preserve the approved logo, themes, keyboard and user text
       await page.evaluate(value => { document.documentElement.dataset.theme = value; }, theme);
       const ink = await logo.locator("rect").evaluate(node => getComputedStyle(node).fill);
       expect(ink).toBe(["dark", "neon", "cyberpunk"].includes(theme) ? "rgb(255, 255, 255)" : "rgb(17, 17, 17)");
-      if (path === "/download") expect((await new AxeBuilder({ page: page as never }).withRules(["color-contrast"]).analyze()).violations).toEqual([]);
     }
     for (const width of [320, 390, 768, 1440, 1920, 2560, 3840]) {
       await page.setViewportSize({ width, height: 1000 });
