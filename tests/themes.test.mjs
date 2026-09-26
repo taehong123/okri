@@ -129,7 +129,7 @@ test("default workflow states use the theme accent while informational blue stay
 
 test("readability uses scalable roles instead of per-screen font patches or CSS zoom", () => {
   const root = postcss.parse(css);
-  const roles = { "--type-body": "1rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.125rem", "--type-page": "1.5rem" };
+  const roles = { "--type-body": "1rem", "--type-ui": ".9375rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.125rem", "--type-page": "1.5rem" };
   for (const [name, value] of Object.entries(roles)) {
     const declarations = [];
     root.walkDecls(name, (decl) => declarations.push(decl.value));

@@ -2,6 +2,8 @@
 
 - 2026-09-26: Removed web browser-install entry points and install manifest linking to avoid confusing the web shortcut with the native Android closed test. The Play Store tester link remains. This is web-only; `/api/mobile/v1` and native binaries are unchanged.
 
+- 2026-09-26: Web typography now shares a 15px UI role for navigation and work titles, 14px supporting copy, and 16px document/input text. Hierarchy and item weights are consistent across working views. This is web-only; native typography requires its own reviewed binary and `/api/mobile/v1` is unchanged.
+
 - 2026-09-26: Web Project board now uses spaced horizontal Kanban columns on desktop, a separated responsive toolbar, and vertical status sections on narrow screens. This is a web-only presentation change; `/api/mobile/v1`, native Project data, and installed-client UI are unchanged.
 
 - 2026-09-26: Android closed-test recruitment, private tester status links, feedback collection, and the Slack morning aggregate are web/server-only. They do not change `/api/mobile/v1`, the installed client, or native release behavior.

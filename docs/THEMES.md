@@ -33,7 +33,7 @@ OKRI-specific clarifications, not a replacement design system.
 - Korean, Latin and numerals use the same self-hosted Pretendard Variable 1.3.9
   family through `--font-ui`. The 92 official Unicode-range subsets load only
   when their glyphs are visible; do not preload the entire font or add a CDN.
-- Typography comes from `--type-body` (1rem), `--type-label` (.875rem),
+- Typography comes from `--type-body` (1rem), `--type-ui` (.9375rem), `--type-label` (.875rem),
   `--type-meta` (.8125rem), `--type-section` (1.125rem), `--type-page` (1.5rem).
   The root respects browser defaults (100%) at every viewport width.
   Do not add per-screen pixel font patches, CSS zoom or scale transforms.
@@ -42,8 +42,9 @@ OKRI-specific clarifications, not a replacement design system.
 - Desktop density is deliberately quieter: controls 36px, editable fields 40px,
   and rows at least 48px. At 980px and below, or with a coarse pointer, controls
   and fields are at least 44px and rows at least 52px. All dimensions use rem.
-  This is the user's balance correction, not a font-size reduction: body and
-  inputs remain 16px. Never enlarge desktop density at 1800px or any wider size.
+  Prose and inputs remain 16px. Scannable work titles and desktop navigation use
+  the 15px UI role at every viewport, following the user's typography balance
+  correction. Never enlarge desktop density at 1800px or any wider size.
   Deletion selection retains an 18px square inside a 44px unframed hit area;
   completion has a circular indicator. Long content must increase row height.
 - Radii: controls 8px, containers 10px, overlays 14px. Prefer quiet borders over
@@ -55,13 +56,15 @@ OKRI-specific clarifications, not a replacement design system.
   counts and percentages share fixed grid tracks; labels must not split mid-word.
 - The OKR read surface is an unframed document, not a card inside another card.
   Child Projects use dividers, not nested boxes. Root titles have section-sized
-  text, execution rows body-sized text, and metadata regular medium-weight text.
+  text, KR titles body-sized text, execution rows UI-sized text, and metadata
+  label-sized regular text. Metrics do not exceed their item title's size.
 - The OKR page header contains only its title and list action. Start the document
   at the Objective, with a quiet edit icon for writers; keep file metadata in the
   list/editor and Project/Task navigation in the hierarchy, not a duplicate banner.
-- Project item titles use regular weight (400) in cards, tables, boards, My Work
-  and the OKR tree. Preserve their size, placement and the separate emphasis of
-  page/section headings; do not make the entire item bold to distinguish its type.
+- Project, Task, Routine and Ticket item titles use the same UI role and regular
+  weight (400) in cards, tables, boards, My Work, search and the OKR tree. Keep
+  page/section headings at 24/18px with 600-650 weight; KR titles use 16px/500
+  and Initiative titles 15px/500. Do not make every work item bold.
 - New layout/typography tests cover 320, 390, 768, 1440, 1920, 2560 and 3840 CSS px,
   larger user text, unchanged navigation, long Korean titles and overlay stacking.
 - Run browser verification with one worker. Test writes use local mocks only;
@@ -110,8 +113,11 @@ the first body paint. The client and BlockNote consume the same registry.
 `app/workspace-design.css`, imported after the base stylesheet, aligns signed-in
 surfaces with the landing's document layout. It does not own theme values or
 application behavior. Page content is capped at 75rem, with the existing 32/16px
-insets and 24px top / 16px heading spacing. Body descriptions use the body role;
-regularly scanned secondary values use the label role rather than metadata.
+insets and 24px top / 16px heading spacing. Page subtitles and short supporting
+descriptions use the 14px label role, while document and conversation prose keep
+the 16px body role. UI titles use 1.5 line height and prose uses 1.6; no font role
+changes with viewport width. Regularly scanned secondary values use the label
+role rather than metadata.
 Project tabs use an underline, while the workspace, conversation and settings
 sections remain unframed. Repeated items and actual dialogs retain their frames.
 Mobile navigation grows with its labels, and content retains bottom clearance.

@@ -4,7 +4,7 @@
 .app-shell .page-body:has(.okr-document) { width: min(100%, 75rem); max-width: 75rem; padding: var(--space-6) var(--space-8) 4rem; }
 .app-shell .page-header { gap: var(--space-6); margin-bottom: var(--space-4); flex-wrap: wrap; }
 .app-shell .page-header h1 { font-weight: 650; line-height: 1.35; }
-.app-shell .page-header p { margin-top: var(--space-2); font-size: var(--type-body); line-height: 1.6; color: var(--text-secondary); }
+.app-shell .page-header p { margin-top: var(--space-2); font-size: var(--type-label); line-height: 1.5; color: var(--text-secondary); }
 .app-shell :is(.page-create-actions, .project-page-actions) { flex-wrap: wrap; gap: var(--space-2); }
 .app-shell .workspace-topbar { padding-inline: var(--space-8); background: var(--bg-page); font-size: var(--type-label); }
 .app-shell .workspace-topbar .workspace-brand {
@@ -41,6 +41,24 @@
 .app-shell .assistant-sidebar-tab { border-color: transparent; background: transparent; font-weight: 600; }
 .app-shell .sidebar-bottom { flex: 0 0 auto; padding-top: var(--space-3); gap: var(--space-1); }
 
+/* Scannable work and navigation share a scale; prose and editable fields retain body type. */
+.app-shell :is(.desktop-navigation, .sidebar-bottom) .nav-item span,
+.workspace-settings-nav button span { font-size: var(--type-ui); line-height: 1.5; }
+.app-shell :is(.project-card-open > header b, .name-open-button, .task-list-open b,
+  .my-work-item b, .my-work-routine b, .routine-card b, .ticket-row-copy b,
+  .ticket-task-list b, .client-directory-open b, .home-tasks b, .hierarchy-copy b,
+  .scrum-task-list b, .daily-task-option b, .review-list b, .trash-record h3,
+  .recommendation-row h3, .kr-data-card > header h2) {
+  font-size: var(--type-ui);
+  font-weight: 400;
+  line-height: 1.5;
+}
+.app-shell .okr-tree-copy strong { font-size: var(--type-ui); line-height: 1.5; }
+.app-shell .okr-tree-kr-row .okr-tree-copy strong { font-size: var(--type-body); font-weight: 500; }
+.app-shell .okr-tree-initiative-row .okr-tree-copy strong { font-weight: 500; }
+.app-shell .okr-tree-task { font-size: var(--type-ui); line-height: 1.5; }
+.app-shell .okr-tree-metrics b { font-size: var(--type-ui); font-weight: 500; line-height: 1.5; }
+
 /* Page sections are documents; cards remain for repeated items and dialogs. */
 .app-shell :is(.project-workspace, .home-okr-chat, .trash-list) { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
 .app-shell .project-workspace { overflow: visible; }
@@ -57,7 +75,7 @@
 .app-shell .task-table-row:not(.task-table-head) { min-height: calc(var(--row-height) + var(--space-2)); }
 .app-shell .task-table-row .name-open-button { font-weight: 400; }
 .app-shell .task-list-row { padding-block: var(--space-2); }
-.app-shell .task-list-open b { font-weight: 400; line-height: 1.6; }
+.app-shell .task-list-open b { font-weight: 400; line-height: 1.5; }
 .app-shell .ticket-area { min-width: 0; }
 .app-shell .ticket-area-tabs { min-height: var(--row-height); border-bottom: 1px solid var(--border-default); }
 .app-shell .ticket-area-tabs button { flex: 0 0 auto; }
@@ -74,7 +92,7 @@
 .app-shell .ticket-row-open { width: 100%; min-width: 0; min-height: calc(var(--row-height) + var(--space-3)); display: grid; grid-template-columns: .5rem minmax(12rem, 1fr) minmax(4.5rem, .28fr) minmax(4rem, .22fr) minmax(4rem, .22fr) minmax(6rem, .3fr) var(--control-height); align-items: center; gap: var(--space-3); padding: var(--space-2) 0; border: 0; background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .app-shell .ticket-row-open:hover { background: var(--bg-hover); }
 .app-shell .ticket-row-copy { min-width: 0; display: grid; gap: var(--space-1); }
-.app-shell .ticket-row-copy b { overflow: hidden; font-size: var(--type-body); font-weight: 500; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .ticket-row-copy b { overflow: hidden; font-size: var(--type-ui); font-weight: 400; line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .app-shell .ticket-row-copy small { overflow: hidden; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.5; text-overflow: ellipsis; white-space: nowrap; }
 .app-shell :is(.ticket-row-status, .ticket-row-priority, .ticket-row-tasks, .ticket-row-due) { min-width: 0; color: var(--text-secondary); font-size: var(--type-label); white-space: nowrap; }
 .app-shell .ticket-row-tasks { display: inline-flex; align-items: center; gap: var(--space-1); }
@@ -94,7 +112,7 @@
 .app-shell .ticket-task-list > button { width: 100%; min-height: var(--row-height); display: grid; grid-template-columns: var(--control-height) minmax(0, 1fr) var(--control-height); align-items: center; gap: var(--space-2); padding: var(--space-1) 0; border: 0; border-bottom: 1px solid var(--border-default); background: transparent; color: var(--text-primary); text-align: left; cursor: pointer; }
 .app-shell .ticket-task-list > button:hover { background: var(--bg-hover); }
 .app-shell .ticket-task-list > button > span:nth-child(2) { min-width: 0; display: grid; gap: var(--space-1); }
-.app-shell .ticket-task-list b { overflow: hidden; font-size: var(--type-body); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.app-shell .ticket-task-list b { overflow: hidden; font-size: var(--type-ui); font-weight: 400; text-overflow: ellipsis; white-space: nowrap; }
 .app-shell .ticket-task-list small, .app-shell .ticket-task-list > p { margin: 0; color: var(--text-secondary); font-size: var(--type-label); }
 .app-shell .ticket-task-list > p { padding: var(--space-6) 0; }
 .app-shell .ticket-client-empty { display: block; padding: 0 0 var(--space-2) calc(.5rem + var(--space-3)); color: var(--text-tertiary); font-size: var(--type-meta); }
@@ -139,7 +157,7 @@
 .app-shell .client-directory-open:hover { background: var(--bg-hover); }
 .app-shell .client-directory-open > span:last-child { min-width: 0; display: grid; gap: var(--space-1); }
 .app-shell .client-directory-open b, .app-shell .client-directory-open small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.app-shell .client-directory-open b { font-size: var(--type-body); font-weight: 500; }
+.app-shell .client-directory-open b { font-size: var(--type-ui); font-weight: 400; }
 .app-shell .client-directory-open small { color: var(--text-secondary); font-size: var(--type-label); }
 .app-shell .client-avatar { width: var(--control-height); height: var(--control-height); display: grid; place-items: center; border-radius: var(--radius-control); background: var(--bg-subtle); color: var(--text-secondary); }
 .app-shell .client-source-summary { min-width: 0; display: grid; grid-template-columns: minmax(0, auto) var(--control-height); align-items: center; column-gap: var(--space-1); color: var(--text-secondary); }
@@ -232,9 +250,9 @@
   background: var(--bg-raised);
 }
 .app-shell .database-section-board .board-item > b {
-  font-size: var(--type-body);
+  font-size: var(--type-ui);
   font-weight: 400;
-  line-height: 1.55;
+  line-height: 1.5;
   overflow-wrap: anywhere;
 }
 .app-shell .database-section-board .board-item > span { color: var(--text-secondary); font-size: var(--type-label); line-height: 1.5; }
@@ -255,7 +273,7 @@
 .app-shell .my-work-section > header b { font-size: var(--type-section); font-weight: 600; }
 .app-shell :is(.my-work-item, .my-work-routine) { padding: var(--space-3) 0; background: transparent; }
 .app-shell .my-work-item:hover { background: var(--bg-hover); }
-.app-shell .my-work-routine p { font-size: var(--type-body); line-height: 1.6; }
+.app-shell .my-work-routine p { font-size: var(--type-label); line-height: 1.6; }
 .app-shell .my-work-sort { padding: var(--space-1); border-radius: var(--radius-control); box-shadow: none; background: transparent; }
 .app-shell .my-work-sort button[aria-pressed="true"] { box-shadow: none; }
 .app-shell :is(.routine-toolbar, .scrum-toolbar) { padding-block: var(--space-3); gap: var(--space-4); flex-wrap: wrap; }
@@ -290,7 +308,7 @@
 .app-shell .kr-data-list { gap: var(--space-3); }
 .app-shell .kr-data-card { padding: var(--space-4) 0 var(--space-4) var(--space-3); border: 0; border-left: 2px solid var(--kr-rail); border-radius: 0; background: transparent; box-shadow: none; }
 .app-shell .kr-data-card:has(.type-project) { border-left-color: var(--project-badge-text); }
-.app-shell .kr-data-card > header h2 { font-size: var(--type-body); font-weight: 400; line-height: 1.6; }
+.app-shell .kr-data-card > header h2 { font-size: var(--type-ui); font-weight: 400; line-height: 1.5; }
 .app-shell .kr-data-card dl { grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: var(--space-4); border: 0; border-radius: 0; background: transparent; }
 .app-shell .kr-data-card dl > div { padding: 0; border: 0; }
 .app-shell .kr-data-unconnected { padding-inline: 0; border-top: 1px solid var(--border-default); border-radius: 0; background: transparent; }

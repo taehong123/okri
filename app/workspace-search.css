@@ -37,7 +37,7 @@
   padding: var(--space-2); border: 0; border-radius: var(--radius-control); background: var(--button-ghost-bg); text-align: left;
 }
 .workspace-search-results li > button:hover, .workspace-search-results li > button:focus-visible { background: var(--button-secondary-hover-bg); color: var(--button-secondary-hover-fg); }
-.workspace-search-results li > button > span:not(.workspace-search-kind) { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--type-body); }
+.workspace-search-results li > button > span:not(.workspace-search-kind) { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: var(--type-ui); line-height: 1.5; }
 .workspace-search-results li > button > svg { flex: none; color: var(--muted); }
 .workspace-search-kind { flex: 0 0 5.5rem; color: var(--muted); font-size: var(--type-meta); overflow-wrap: anywhere; }
 .workspace-search-result-copy { display: flex; flex-direction: column; }

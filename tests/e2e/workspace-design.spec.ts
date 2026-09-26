@@ -12,7 +12,7 @@ async function pageFits(page: Page, context: string) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth), context).toBeLessThanOrEqual(1);
   const escaped = await page.locator([
     ".page-header h1", ".page-header p", ".page-header button",
-    ".routine-card b", ".routine-card header button", ".my-work-item-title",
+    ".routine-card b", ".routine-card header button", ".my-work-item b",
     ".home-okr-chat h2", ".home-okr-chat .user-message", ".home-okr-chat .assistant-message",
     ".daily-editor h2", ".daily-new-task input", ".daily-task-option b", ".kr-data-card h2",
   ].join(", ")).evaluateAll((elements) => elements.filter((element) => {
@@ -80,7 +80,7 @@ test("account settings stay reachable on short laptop viewports", async ({ page 
   }
 });
 
-test("project board uses spaced kanban columns without shrinking typography", async ({ page }, info) => {
+test("project board uses spaced kanban columns and the shared work-title scale", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/?view=work");
   await page.getByRole("tab", { name: "보드" }).click();
@@ -107,7 +107,7 @@ test("project board uses spaced kanban columns without shrinking typography", as
   expect(await firstCard.locator(":scope > b").evaluate((node) => {
     const css = getComputedStyle(node);
     return { size: css.fontSize, weight: css.fontWeight, lineHeight: css.lineHeight };
-  })).toEqual({ size: "16px", weight: "400", lineHeight: "24.8px" });
+  })).toEqual({ size: "15px", weight: "400", lineHeight: "22.5px" });
   expect(await firstCard.locator(":scope > span").evaluate((node) => getComputedStyle(node).fontSize)).toBe("14px");
   await page.screenshot({ path: info.outputPath("project-board-1440.png"), fullPage: true });
 
@@ -143,7 +143,25 @@ test("working views share document layout and stable typography from 320px to 4K
       expect(await page.locator(".page-header h1").evaluate((node) => getComputedStyle(node).fontSize)).toBe("24px");
       // OKR deliberately starts at Objective without repeating a page subtitle.
       if (view === "okr") await expect(page.locator(".page-header p")).toHaveCount(0);
-      else expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("16px");
+      else expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("14px");
+      if (width > 700) {
+        expect(await page.locator(".desktop-navigation .nav-item span").first().evaluate((node) => getComputedStyle(node).fontSize)).toBe("15px");
+      }
+      const titlesByView: Record<string, string> = {
+        my_work: ".my-work-item b", work: ".name-open-button, .project-card-open > header b, .board-item > b", inbox: ".task-list-open b",
+        routines: ".routine-card b", data: ".kr-data-card > header h2",
+      };
+      const itemSelector = titlesByView[view];
+      if (itemSelector) {
+        const titles = page.locator(itemSelector);
+        if (view !== "data") await expect(titles.first()).toBeVisible();
+        for (const title of await titles.all()) {
+          expect(await title.evaluate((node) => {
+            const css = getComputedStyle(node);
+            return { size: css.fontSize, weight: css.fontWeight };
+          }), `${width}/${view}/item title`).toEqual({ size: "15px", weight: "400" });
+        }
+      }
       expect((await page.locator(".page-body").boundingBox())!.width).toBeLessThanOrEqual(1200);
       if (view === "work") {
         expect(await page.locator(".project-workspace").evaluate((node) => {
@@ -190,7 +208,7 @@ test("long titles, 200 percent user text and local Korean Latin numeral fonts st
         document.documentElement.style.fontSize = "200%";
         const heading = document.querySelector(".page-header h1")!;
         heading.textContent = "고객의 첫 경험부터 팀의 성과까지 연결하는 긴 제목";
-        for (const node of document.querySelectorAll(".routine-card b, .my-work-item-title")) node.textContent = "고객의 피드백을 확인하고 다음 제품 개선에 반영하기";
+        for (const node of document.querySelectorAll(".routine-card b, .my-work-item b")) node.textContent = "고객의 피드백을 확인하고 다음 제품 개선에 반영하기";
       });
       await pageFits(page, `large text/${width}/${view}`);
       await page.screenshot({ path: info.outputPath(`large-text-${view}-${width}.png`), fullPage: true });

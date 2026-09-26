@@ -345,7 +345,7 @@
 .project-primary-column .project-task-row { border-color: var(--border-default); }
 .project-primary-column .project-task-row > * { border-right: 0; }
 .project-primary-column .project-task-head { background: transparent; }
-.project-primary-column .project-task-title { font-weight: 400; }
+.project-primary-column .project-task-title { font-size: var(--type-ui); font-weight: 400; line-height: 1.5; }
 .project-primary-column .project-task-title:hover { color: var(--text-primary); text-decoration: underline; text-underline-offset: .15em; }
 .project-primary-column .project-document-section { background: transparent; }
 .project-detail-panel .project-context-column :is(.project-detail-form, .project-custom-properties, .project-linked-data, .project-lineage-compact) { padding: var(--space-6) var(--editor-inset); background: transparent; }
