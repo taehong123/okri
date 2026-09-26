@@ -7,10 +7,15 @@ import { runDueDailyManualRuns } from "@/lib/slack-daily-manual";
 import { runDueDailyDigests } from "@/lib/slack-daily-digest";
 import { runDueWorkspaceManagementBots } from "@/lib/workspace-management-bot";
 import { runDueSlackDailyReminders } from "@/lib/slack-daily";
+import { runAndroidTestDailyReport } from "@/lib/android-test-feedback";
 
 export type ScheduledRuntime = {
   DB: D1Database;
   WORKSPACE_AVATARS: R2Bucket;
+  SLACK_TOKEN_ENCRYPTION_KEY?: string;
+  ANDROID_TEST_FEEDBACK_SLACK_TEAM_ID?: string;
+  ANDROID_TEST_FEEDBACK_SLACK_CHANNEL_NAME?: string;
+  STORE_FEEDBACK_SLACK_TEAM_ID?: string;
 };
 
 export type ScheduledJobResult = {
@@ -30,6 +35,7 @@ export async function runScheduledJobs(runtime: ScheduledRuntime, scheduledAt = 
     ["slack_task_changes", runDueTaskChanges(runtime.DB)],
     ["daily_manual_runs", runDueDailyManualRuns(runtime.DB)],
     ["daily_digests", runDueDailyDigests(runtime.DB, scheduledAt)],
+    ["android_test_daily_report", runAndroidTestDailyReport(runtime, scheduledAt)],
   ];
 
   if (scheduledAt.getUTCMinutes() % 15 === 0) {

@@ -1743,6 +1743,54 @@ export const storeReviewFeedback = sqliteTable("store_review_feedback", {
   index("idx_store_review_feedback_delivery").on(table.deliveryStatus, table.receivedAt),
 ]);
 
+export const androidTestSignups = sqliteTable("android_test_signups", {
+  id: text("id").primaryKey(),
+  emailNormalized: text("email_normalized").notNull(),
+  encryptedPhone: text("encrypted_phone").notNull(),
+  phoneLastFour: text("phone_last_four").notNull(),
+  accessTokenHash: text("access_token_hash").notNull(),
+  language: text("language").notNull().default("en"),
+  status: text("status").notNull().default("applied"),
+  consentVersion: text("consent_version").notNull(),
+  consentAcceptedAt: text("consent_accepted_at").notNull(),
+  firstAppliedAt: text("first_applied_at").notNull(),
+  lastAppliedAt: text("last_applied_at").notNull(),
+  invitedAt: text("invited_at"),
+  optedInAt: text("opted_in_at"),
+  eligibleAt: text("eligible_at"),
+  rewardedAt: text("rewarded_at"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, (table) => [
+  uniqueIndex("idx_android_test_signups_email").on(table.emailNormalized),
+  uniqueIndex("idx_android_test_signups_access_token").on(table.accessTokenHash),
+  index("idx_android_test_signups_status").on(table.status, table.updatedAt),
+]);
+
+export const androidTestFeedback = sqliteTable("android_test_feedback", {
+  id: text("id").primaryKey(),
+  signupId: text("signup_id").notNull().references(() => androidTestSignups.id, { onDelete: "cascade" }),
+  message: text("message").notNull(),
+  deliveryStatus: text("delivery_status").notNull().default("pending"),
+  slackMessageTs: text("slack_message_ts"),
+  createdAt: text("created_at").notNull(),
+  deliveredAt: text("delivered_at"),
+  lastError: text("last_error").notNull().default(""),
+}, (table) => [
+  index("idx_android_test_feedback_signup").on(table.signupId, table.createdAt),
+  index("idx_android_test_feedback_delivery").on(table.deliveryStatus, table.createdAt),
+]);
+
+export const androidTestDailyReports = sqliteTable("android_test_daily_reports", {
+  reportDate: text("report_date").primaryKey(),
+  status: text("status").notNull().default("pending"),
+  summaryJson: text("summary_json").notNull(),
+  attempts: integer("attempts").notNull().default(0),
+  createdAt: text("created_at").notNull(),
+  deliveredAt: text("delivered_at"),
+  lastError: text("last_error").notNull().default(""),
+}, (table) => [index("idx_android_test_daily_reports_status").on(table.status, table.reportDate)]);
+
 export type SlackDailySettings = typeof slackDailySettings.$inferSelect;
 export type SlackDailyReminder = typeof slackDailyReminders.$inferSelect;
 export type SlackDailyPublication = typeof slackDailyPublications.$inferSelect;

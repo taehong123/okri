@@ -414,6 +414,13 @@
       "when": 1790121600000,
       "tag": "0066_slack_canvas_user_token",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "6",
+      "when": 1790398000000,
+      "tag": "0067_android_test_portal",
+      "breakpoints": true
     }
   ]
 }

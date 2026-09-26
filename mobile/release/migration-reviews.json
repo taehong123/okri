@@ -26,5 +26,12 @@
     "rollbackPlan": "Leave the additive columns in place when rolling application code back. Older application versions ignore them; do not drop encrypted credentials or rewrite migration history.",
     "dataPreservation": "Three ADD COLUMN statements preserve every existing Slack connection and default delegated credentials to empty until an Owner or Admin explicitly reauthorizes.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-23"
+  },
+  "drizzle/0067_android_test_portal.sql": {
+    "sha256": "7b74c32beba98d98aaa191e9b447664a50be93d6c20d80334fa5df117260c8e9",
+    "v1Compatibility": "The migration creates isolated web-only Android test recruitment, feedback, and aggregate-report tables. It does not alter `/api/mobile/v1`, native-session tables, existing item data, or the installed Android/iOS client contracts.",
+    "rollbackPlan": "Leave the additive tester tables and encrypted contact records in place when rolling back application code. Older web and native versions ignore these tables; do not drop data or rewrite the historical migration.",
+    "dataPreservation": "Only new tables and indexes are created. The ON DELETE CASCADE clause applies solely to feedback that belongs to a newly created tester record; no existing account, workspace, item, routine, daily, or native data is mutated.",
+    "reviewedBy": "Codex native compatibility integration review, 2026-09-26"
   }
 }
