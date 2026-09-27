@@ -29,18 +29,22 @@ export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t:
   const start = input.page * DAILY_CHECKLIST_PAGE_SIZE;
   input.work.slice(start, start + DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
     const block = dailyChoiceBlockId(input, entry, start + offset);
-    const field = state[block]?.choice;
+    const field = state[block]?.selection ?? state[block]?.choice;
     if (!field) return;
-    const choices = field.selected_options ?? [];
+    // Accept already-open checkbox modals, but new forms submit exactly one option.
+    const single = Object.prototype.hasOwnProperty.call(field, "selected_option");
+    const choices = single ? (field.selected_option === null ? [] : [field.selected_option]) : field.selected_options ?? [];
     // Old open modals may still send "exclude"; never reinterpret it as deletion.
-    if (!Array.isArray(choices) || choices.some((option) => !["today", "done", "delete", "exclude"].includes(option?.value)) || choices.length > 1) {
+    if ((single && field.selected_options !== undefined) || !Array.isArray(choices) || choices.some((option) => !["none", "today", "done", "archive", "delete", "exclude"].includes(option?.value)) || choices.length > 1) {
       errors[block] = t("업무마다 한 가지 상태만 선택해 주세요."); return;
     }
-    if (choices.some((option) => option.value === "delete") && entry.kind !== "task") {
-      errors[block] = t("데일리에서는 개별 Task만 삭제할 수 있습니다."); return;
+    if (choices.some((option) => option.value === "delete" || option.value === "archive") && entry.kind !== "task") {
+      errors[block] = t("데일리에서는 개별 Task만 아카이브할 수 있습니다."); return;
     }
     delete next.choices[entry.key];
-    if (choices.length) next.choices[entry.key] = choices[0].value;
+    if (choices.length && choices[0].value !== "none" && choices[0].value !== "exclude") {
+      next.choices[entry.key] = choices[0].value === "archive" ? "delete" : choices[0].value;
+    }
   });
   if (next.taskEntry && state.daily_new_task?.title) next.taskEntry = { ...next.taskEntry, title: String(state.daily_new_task.title.value ?? "") };
   for (const [block, key] of [["today_note", "todayNote"], ["yesterday_note", "yesterdayNote"], ["blockers_note", "blockersNote"], ["skip_note", "skipNote"]] as const) {
@@ -161,7 +165,7 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   const skipping = workStatus === "skip";
   if (skipping && (today.length || done.length || deleted.length)) return problem({ [next.taskFocused ? "work_status" : "skip_reason"]: t("스킵하려면 선택한 업무를 먼저 해제해 주세요.") });
   if (next.noPlannedTasks && today.length) return problem({ no_planned: t("오늘 예정 없음과 오늘 할 일을 함께 선택할 수 없습니다.") });
-  if (!skipping && next.taskFocused && !today.length && !done.length) return problem({ work_status: t("오늘 진행하거나 완료한 업무를 하나 이상 선택해 주세요.") });
+  if (!skipping && next.taskFocused && !today.length && !done.length && !deleted.length) return problem({ work_status: t("오늘 진행·완료하거나 아카이브할 업무를 하나 이상 선택해 주세요.") });
   if (!skipping && !next.taskFocused && !next.noPlannedTasks && !today.length && !done.length && !deleted.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
   if (skipReason === "other" && !next.skipNote.trim()) return problem({ skip_note: t("기타 스킵 사유를 입력해 주세요.") });
   // Replays return the durable submission before revalidating already-completed work.
@@ -170,7 +174,7 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
       selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
-      noPlannedTasks: !next.taskFocused && (next.noPlannedTasks || (!today.length && done.length + deleted.length > 0)), workStatus,
+      noPlannedTasks: (!next.taskFocused && next.noPlannedTasks) || (!today.length && done.length + deleted.length > 0), workStatus,
       skipReason, skipNote: next.skipNote, source: "slack" }, false);
   }
   return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done, deleted) };

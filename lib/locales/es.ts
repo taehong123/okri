@@ -2647,5 +2647,9 @@ const messages = {
 "허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.": "Para leer el Canvas de notas del Huddle hay que actualizar los permisos de Slack. Pide a un Owner o Admin que los actualice en las integraciones de OKRI y vuelve a llamar al bot en el mismo hilo.",
 "허들 메모 Canvas를 읽지 못했습니다. OKRI가 해당 채널에 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요.": "No se pudo leer el Canvas de notas del Huddle. Comprueba que OKRI esté en el canal y vuelve a llamar al bot en el mismo hilo.",
 "허들 메모 Canvas의 본문을 불러오지 못했습니다. Slack 권한을 업데이트한 뒤 같은 스레드에서 다시 불러 주세요.": "No se pudo cargar el contenido del Canvas de notas del Huddle. Actualiza los permisos de Slack y vuelve a llamar al bot en el mismo hilo.",
+"아카이브": "Archivar",
+"완료와 아카이브는 제출할 때 반영됩니다. 아카이브한 Task는 휴지통에서 복구할 수 있습니다.": "Completar y archivar se aplican al enviar. Los Tasks archivados se pueden restaurar desde la papelera.",
+"데일리에서는 개별 Task만 아카이브할 수 있습니다.": "Solo se pueden archivar Tasks individuales desde Daily.",
+"오늘 진행·완료하거나 아카이브할 업무를 하나 이상 선택해 주세요.": "Selecciona al menos un elemento para trabajar hoy, completar o archivar.",
 } satisfies Catalog;
 export default messages;

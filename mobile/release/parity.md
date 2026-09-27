@@ -121,6 +121,12 @@
   counts to the Slack MCP agent. This corrects Slack visibility and diagnosis;
   `/api/mobile/v1`, native contracts and native UI are unchanged.
 
+- Slack Daily work rows now use a single-choice select with a clear reset option.
+  Individual Tasks can be archived on submit through the existing recoverable
+  Trash transaction; completion-only and archive-only submissions are supported.
+  This is Slack-only UI/interaction behavior. Native `/api/mobile/v1` and installed
+  client contracts are unchanged; no native release is required.
+
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or
 deferred with a target store release. The candidate report is input to this review,

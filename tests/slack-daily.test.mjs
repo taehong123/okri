@@ -328,7 +328,10 @@ test("delivered reminder schedules the following day and ignores unrelated event
 
 test("recovery is off the bootstrap critical path and independently registered in maintenance", async () => {
   assert.match(await read("../app/api/bootstrap/route.ts"), /waitUntil\(import\("@\/lib\/slack-daily"\)/);
-  assert.match(await read("../worker/index.ts"), /ctx.waitUntil\(import\("@\/lib\/slack-daily"\)/);
+  assert.match(await read("../worker/index.ts"), /ctx.waitUntil\(runScheduledJobs\(env, new Date\(controller.scheduledTime\)\)/);
+  const scheduled = await read("../lib/scheduled-jobs.ts");
+  assert.match(scheduled, /import \{ runDueSlackDailyReminders \} from "@\/lib\/slack-daily"/);
+  assert.match(scheduled, /\["slack_daily_reminders", runDueSlackDailyReminders\(\)\]/);
   const route = await read("../app/api/slack/daily/settings/route.ts");
   assert.ok(route.indexOf("if (!canManageTeam(authorization))") < route.indexOf('payload.action === "repair"'));
   assert.match(source, /setupComplete: scheduleResults.length === selectedLinkedMemberIds.size/);

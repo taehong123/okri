@@ -501,7 +501,7 @@ test("untouched null checkbox state does not block adding a Task to an empty pro
   assert.ok(added.blocks.find((b) => b.block_id === "daily_new_task"));
   const created = await checklist.editDailyChecklistTask(authorization, added.private_metadata,
     { ...state, daily_new_task: { title: { value: "First Task" } } }, "create", "project:worker", (key) => key);
-  assert.ok(created.blocks.find((b) => b.label?.text === "└ First Task")?.element.initial_options.some((o) => o.value === "today"));
+  assert.equal(created.blocks.find((b) => b.label?.text === "└ First Task")?.element.initial_option.value, "today");
 });
 
 test("Slack Task creation uses real parent validation and D1 persistence for a Project in an OKR cycle", async (t) => {
@@ -519,7 +519,7 @@ test("Slack Task creation uses real parent validation and D1 persistence for a P
   assert.equal(rows[0].cycle_id, "cycle-project");
   assert.equal(rows[0].parent_id, "worker");
   assert.equal(rows[0].title, "First real Task");
-  assert.equal(created.blocks.find((b) => b.block_id === `daily_choice_task:${rows[0].id}`).element.initial_options[0].value, "today");
+  assert.equal(created.blocks.find((b) => b.block_id === `daily_choice_task:${rows[0].id}`).element.initial_option.value, "today");
   const taskIndex = created.blocks.findIndex((b) => b.block_id === `daily_choice_task:${rows[0].id}`);
   assert.equal(created.blocks[taskIndex + 1].elements[0].text, "Task를 추가하고 오늘 할 일에 선택했습니다.");
   assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.selectedTaskIds, [rows[0].id]);
@@ -543,7 +543,7 @@ test("Slack participant adds a Task inside the simplified checklist, preserves c
   assert.equal(saved.choices["task:task"], "today");
   assert.equal(saved.choices[`task:${db.prepare("SELECT id FROM items WHERE title='Explicit participant task'").get().id}`], "today");
   assert.equal(saved.taskEntry, undefined);
-  assert.equal(created.blocks.find((block) => block.block_id === "daily_choice_task:task").element.initial_options[0].value, "today");
+  assert.equal(created.blocks.find((block) => block.block_id === "daily_choice_task:task").element.initial_option.value, "today");
   assert.equal(opened.blocks.some((block) => ["no_planned", "today_note", "yesterday_note", "blockers_note", "skip_reason", "skip_note"].includes(block.block_id)), false);
   assert.equal(created.blocks.some((block) => ["no_planned", "today_note", "yesterday_note", "blockers_note", "skip_reason", "skip_note"].includes(block.block_id)), false);
   const submission = await checklist.handleDailyChecklist(authorization, created.private_metadata, {}, false, (key) => key);
@@ -653,6 +653,67 @@ test("Task retries repair a failed own assignment but never reclaim a reassigned
 const checklistInput = (entries) => ({ date, memberName: "Me", work: entries, choices: {}, selectedYesterday: [], page: 0,
   todayNote: "", yesterdayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false });
 const choice = (...values) => ({ choice: { selected_options: values.map((value) => ({ value })) } });
+const selection = (value) => ({ selection: { type: "static_select", selected_option: value === null ? null : { value } } });
+
+test("single-choice Daily inputs replace or clear choices and reject malformed or legacy double selections", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
+    choices: { "task:task": "today", "project:project": "today" } };
+  const key = "daily_choice_task:task";
+  const done = checklist.mergeDailyChecklist(input, { [key]: selection("done") }, (key) => key);
+  assert.deepEqual(done.errors, {});
+  assert.equal(done.next.choices["task:task"], "done");
+  assert.equal(done.next.choices["project:project"], "today");
+  for (const value of ["none", null]) {
+    const cleared = checklist.mergeDailyChecklist(done.next, { [key]: selection(value) }, (key) => key);
+    assert.equal(cleared.next.choices["task:task"], undefined);
+    assert.equal(cleared.next.choices["project:project"], "today");
+  }
+  for (const invalid of [choice("today", "done"), selection("unknown"), { selection: { selected_option: { value: "today" }, selected_options: [{ value: "done" }] } }]) {
+    const result = checklist.mergeDailyChecklist(input, { [key]: invalid }, (key) => key);
+    assert.ok(result.errors[key]);
+    assert.equal(result.next.choices["task:task"], "today");
+  }
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const translate = await serverLanguage.serverTranslator(language);
+    const modal = form.dailyChecklistForm(input, "{}", translate);
+    const field = modal.blocks.find((block) => block.block_id === key).element;
+    assert.equal(field.type, "static_select");
+    assert.equal(field.initial_option.value, "today");
+    assert.deepEqual(field.options.map((option) => option.value), ["none", "today", "done", "archive"]);
+    assert.equal(field.options.at(-1).text.text, translate("아카이브"));
+    assert.equal(field.initial_options, undefined);
+  }
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+});
+
+test("compact Daily archive-only submission is deferred, recoverable, and idempotent", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const modal = await checklist.createDailyChecklist("w", "me", { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true }, (key) => key);
+  const state = { "daily_choice_task:task": selection("archive") };
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  const result = await checklist.handleDailyChecklist(authorization, modal.private_metadata, state, false, (key) => key);
+  assert.ok(result.submission);
+  assert.deepEqual(result.submission.work, []);
+  const saved = db.prepare("SELECT status,archived_from_status,archived_at,archive_root_id FROM items WHERE id='task'").get();
+  assert.equal(saved.status, "archived");
+  assert.equal(saved.archived_from_status, "todo");
+  assert.equal(saved.archive_root_id, "task");
+  assert.ok(saved.archived_at);
+  const again = await checklist.handleDailyChecklist(authorization, modal.private_metadata, state, false, (key) => key);
+  assert.equal(again.submission.id, result.submission.id);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM activity_log WHERE action='item_trashed'").get().n, 1);
+});
+
+test("compact Daily supports completion-only submissions with the new single selection", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const modal = await checklist.createDailyChecklist("w", "me", { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true }, (key) => key);
+  const result = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { "daily_choice_task:task": selection("done") }, false, (key) => key);
+  assert.ok(result.submission);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "done");
+  assert.equal(result.submission.work[0].completedToday, true);
+});
 
 test("new checklist shows every task without search, grouped by stable project ID with overdue dates", async () => {
   const entries = Array.from({ length: 101 }, (_, i) => ({ key: `task:${i}`, id: String(i), title: `Task ${i}`, kind: "task", parentId: `project-${Math.floor(i / 2)}`, parentKind: "project", parentTitle: "Same project name", dueDate: "2026-09-01" }));
@@ -663,8 +724,8 @@ test("new checklist shows every task without search, grouped by stable project I
     assert.ok(!JSON.stringify(modal).includes("external_select"));
     assert.match(JSON.stringify(modal), /기한 초과/);
     for (const input of modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_"))) {
-      assert.equal(input.element.type, "checkboxes");
-      assert.deepEqual(input.element.options.map((option) => option.value), ["today", "done", "delete"]);
+      assert.equal(input.element.type, "static_select");
+      assert.deepEqual(input.element.options.map((option) => option.value), ["none", "today", "done", "archive"]);
       seen.push(input.block_id);
     }
   }
@@ -674,7 +735,7 @@ test("new checklist shows every task without search, grouped by stable project I
     const t = await serverLanguage.serverTranslator(lang);
     const modal = form.dailyChecklistForm(checklistInput(entries.slice(0, 1)), "{}", t);
     assert.ok(!/[가-힣]/.test(JSON.stringify(modal)));
-    assert.ok(modal.blocks.find((block) => block.block_id === "daily_choice_0").element.options.find((option) => option.value === "delete"));
+    assert.ok(modal.blocks.find((block) => block.block_id === "daily_choice_0").element.options.find((option) => option.value === "archive"));
     assert.ok(JSON.stringify(modal).includes("Task 0"));
   }
 });
@@ -693,14 +754,20 @@ test("a member's current 22 assigned entries stay together on one safe Slack Dai
 });
 
 test("the 23-entry Slack Daily page remains below Slack's 100-block limit in the empty-container worst case", () => {
-  const entries = Array.from({ length: 23 }, (_, i) => ({
-    key: `project:${i}`, id: String(i), title: `Empty Project ${i}`, kind: "project", status: "todo", priority: "medium",
+  const entries = Array.from({ length: 47 }, (_, i) => ({
+    key: `project:${i}`, id: String(i), title: `Empty Project ${i} ${"Long title ".repeat(25)}`, kind: "project", status: "todo", priority: "medium",
     parentId: null, parentKind: "general", parentTitle: "General", dueDate: null,
   }));
   const taskTargets = entries.map((entry) => ({ key: entry.key, title: entry.title, hasTasks: false }));
-  const modal = form.dailyChecklistForm({ ...checklistInput(entries), taskFocused: true, taskTargets }, "opaque-metadata");
-  assert.equal(modal.submit.text, "제출");
-  assert.ok(modal.blocks.length < 100);
+  for (const page of [0, 1, 2]) {
+    const input = { ...checklistInput(entries), taskFocused: true, taskTargets, page };
+    for (const taskEntry of [undefined, { parentKey: `project:${page * 23}`, title: "New Task", requestId: "request" }]) {
+      const modal = form.dailyChecklistForm({ ...input, taskEntry }, "opaque-metadata", (key) => key, "Validation feedback");
+      assert.equal(modal.submit.text, page === 2 ? "제출" : "다음");
+      assert.ok(modal.blocks.length <= 100);
+      assert.ok(modal.blocks.some((block) => block.text?.text.includes(entries[page * 23].title)));
+    }
+  }
 });
 
 test("checkbox conflicts are rejected and unchecking removes a plan without cancelling the task", async (t) => {
@@ -796,14 +863,16 @@ test("delete on submit moves only the selected Task to Trash and replays never d
   assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "in_progress");
 });
 
-test("deletion is never offered or accepted for Project and Routine rows", async (t) => {
+test("archiving is never offered or accepted for Project and Routine rows", async (t) => {
   const { raw, db, checklist, api } = fixture(t);
   const input = checklistInput(await work.listDailyWork(raw, "w", "me", date));
   const modal = form.dailyChecklistForm(input, "{}");
   input.work.forEach((entry, i) => {
     const options = modal.blocks.find((block) => block.block_id === `daily_choice_${i}`).element.options;
-    assert.equal(options.some((option) => option.value === "delete"), entry.kind === "task");
-    if (entry.kind !== "task") assert.ok(checklist.mergeDailyChecklist(input, { [`daily_choice_${i}`]: choice("delete") }, (key) => key).errors[`daily_choice_${i}`]);
+    assert.equal(options.some((option) => option.value === "archive"), entry.kind === "task");
+    if (entry.kind !== "task") for (const value of [choice("delete"), selection("archive")]) {
+      assert.ok(checklist.mergeDailyChecklist(input, { [`daily_choice_${i}`]: value }, (key) => key).errors[`daily_choice_${i}`]);
+    }
   });
   await api.saveDailyDraft(authorization, { date, noPlannedTasks: true }, false);
   for (const key of ["project:project", "project:worker", "routine:routine", "task:not-mine", "task:foreign-task", "task:done"]) {
@@ -856,7 +925,7 @@ test("legacy exclusions, paging, cancelling and conflicting choices never delete
   const modal = await checklist.createDailyChecklist("w", "me", checklistInput([task, ...Array.from({ length: form.DAILY_CHECKLIST_PAGE_SIZE }, (_, i) => ({ ...task, id: `t-${i}`, key: `task:t-${i}` }))]), (key) => key);
   const next = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { daily_choice_0: choice("delete") }, false, (key) => key);
   const back = await checklist.handleDailyChecklist(authorization, next.view.private_metadata, {}, true, (key) => key);
-  assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_options[0].value, "delete");
+  assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_option.value, "archive");
   assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
   const cleared = checklist.mergeDailyChecklist(checklistInput([task]), { daily_choice_0: choice() }, (key) => key);
   assert.deepEqual(cleared.next.choices, {});
@@ -1123,7 +1192,7 @@ test("paged checklists preserve notes and choices, reject foreign/viewer access,
   const next = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { daily_choice_0: choice("today"), today_note: { value: { value: "Keep my note" } } }, false, (key) => key);
   assert.ok(next.view);
   const back = await checklist.handleDailyChecklist(authorization, next.view.private_metadata, { daily_choice_20: choice("exclude") }, true, (key) => key);
-  assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_options[0].value, "today");
+  assert.equal(back.view.blocks.find((b) => b.block_id === "daily_choice_0").element.initial_option.value, "today");
   assert.equal(back.view.blocks.find((b) => b.block_id === "today_note").element.initial_value, "Keep my note");
   assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
   await assert.rejects(checklist.handleDailyChecklist({ ...authorization, role: "viewer" }, back.view.private_metadata, {}, false, (key) => key));

@@ -2646,6 +2646,10 @@ const messages = {
 "허들 메모 Canvas를 읽으려면 Slack 권한 업데이트가 필요합니다. Owner 또는 Admin이 OKRI의 앱 연동에서 권한 업데이트를 완료한 뒤 같은 스레드에서 다시 불러 주세요.": "Reading the Huddle notes Canvas requires updated Slack permissions. Ask an Owner or Admin to update permissions in OKRI App integrations, then call the bot again in the same thread.",
 "허들 메모 Canvas를 읽지 못했습니다. OKRI가 해당 채널에 참여 중인지 확인한 뒤 같은 스레드에서 다시 불러 주세요.": "The Huddle notes Canvas could not be read. Make sure OKRI is in the channel, then call the bot again in the same thread.",
 "허들 메모 Canvas의 본문을 불러오지 못했습니다. Slack 권한을 업데이트한 뒤 같은 스레드에서 다시 불러 주세요.": "The Huddle notes Canvas content could not be loaded. Update Slack permissions, then call the bot again in the same thread.",
+"아카이브": "Archive",
+"완료와 아카이브는 제출할 때 반영됩니다. 아카이브한 Task는 휴지통에서 복구할 수 있습니다.": "Completion and archiving take effect on submit. Archived Tasks can be restored from Trash.",
+"데일리에서는 개별 Task만 아카이브할 수 있습니다.": "Only individual Tasks can be archived from Daily.",
+"오늘 진행·완료하거나 아카이브할 업무를 하나 이상 선택해 주세요.": "Select at least one item to work on today, complete, or archive.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;
