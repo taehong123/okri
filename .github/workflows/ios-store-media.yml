@@ -1,0 +1,69 @@
+name: OKRI iOS store media
+on:
+  push:
+    branches: [codex/ios-release-readiness]
+    paths:
+      - .github/workflows/ios-store-media.yml
+      - mobile/preview/native-store.tsx
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: macos-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: harness
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          # Exact source of the uploaded 1.0.0 (1), not current moving main.
+          ref: 406380c4c99dc12452bdcd830e77dd54f32ae439
+          path: source
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.20.0"
+          cache: npm
+          cache-dependency-path: |
+            source/package-lock.json
+            source/mobile/package-lock.json
+      - run: npm ci && npm ci --prefix mobile
+        working-directory: source
+      - name: Prepare simulator-only entry
+        working-directory: source/mobile
+        run: |
+          cp ../../harness/mobile/preview/native-store.tsx preview/native-store.tsx
+          node -e 'const fs=require("fs");const p=JSON.parse(fs.readFileSync("package.json"));p.main="preview/native-store.tsx";fs.writeFileSync("package.json",JSON.stringify(p,null,2));'
+          npx expo prebuild --platform ios --clean --no-install
+          cd ios
+          pod install
+      - name: Build actual native UI for simulator
+        working-directory: source/mobile
+        run: |
+          xcodebuild -workspace ios/OKRI.xcworkspace -scheme OKRI -configuration Release -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' -derivedDataPath artifacts/derived CODE_SIGNING_ALLOWED=NO build > simulator-build.log 2>&1 || { tail -100 simulator-build.log; exit 1; }
+      - name: Capture native screen with fictional data
+        working-directory: source/mobile
+        run: |
+          mkdir -p artifacts/store-media
+          RUNTIME=$(xcrun simctl list runtimes -j | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s).runtimes.find(r=>r.isAvailable&&r.name.startsWith("iOS"));if(!r)process.exit(1);console.log(r.identifier)});')
+          DEVICE_TYPE=$(xcrun simctl list devicetypes -j | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const d=JSON.parse(s).devicetypes.find(d=>d.name==="iPhone 13 Pro Max");if(!d)process.exit(1);console.log(d.identifier)});')
+          DEVICE=$(xcrun simctl create OKRI-Store-Media "$DEVICE_TYPE" "$RUNTIME")
+          xcrun simctl boot "$DEVICE"
+          xcrun simctl bootstatus "$DEVICE" -b
+          xcrun simctl status_bar "$DEVICE" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
+          xcrun simctl install "$DEVICE" artifacts/derived/Build/Products/Release-iphonesimulator/OKRI.app
+          xcrun simctl launch "$DEVICE" ai.okri.app
+          sleep 45
+          xcrun simctl io "$DEVICE" screenshot artifacts/store-media/okri-ios-my-work-ko.png
+          node -e 'require("fs").writeFileSync("artifacts/store-media/provenance.json",JSON.stringify({sourceCommit:"406380c4c99dc12452bdcd830e77dd54f32ae439",storeBuild:"1.0.0 (1)",capture:"iOS Simulator",device:"iPhone 13 Pro Max",data:"fictional; all remote business requests mocked",physicalDeviceVerification:false},null,2))'
+          xcrun simctl shutdown "$DEVICE"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: okri-ios-store-media-${{ github.run_id }}
+          path: |
+            source/mobile/artifacts/store-media
+            source/mobile/simulator-build.log
+          retention-days: 30
