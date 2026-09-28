@@ -140,9 +140,9 @@ test("working views share document layout and stable typography from 320px to 4K
       await page.goto(`/?view=${view}`);
       await expect(page.locator(".page-header h1")).toBeVisible();
       await pageFits(page, `${width}/${view}`);
-      expect(await page.locator(".page-header h1").evaluate((node) => getComputedStyle(node).fontSize)).toBe("24px");
-      // OKR deliberately starts at Objective without repeating a page subtitle.
-      if (view === "okr") await expect(page.locator(".page-header p")).toHaveCount(0);
+      expect(await page.locator(".page-header h1").evaluate((node) => getComputedStyle(node).fontSize)).toBe("28px");
+      // Workspace billing context is useful; repeated feature descriptions are not.
+      if (view !== "billing") await expect(page.locator(".page-header p")).toHaveCount(0);
       else expect(await page.locator(".page-header p").evaluate((node) => getComputedStyle(node).fontSize)).toBe("14px");
       if (width > 700) {
         expect(await page.locator(".desktop-navigation .nav-item span").first().evaluate((node) => getComputedStyle(node).fontSize)).toBe("15px");

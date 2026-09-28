@@ -24,14 +24,15 @@
   --type-ui: .9375rem;
   --type-label: .875rem;
   --type-meta: .8125rem;
-  --type-section: 1.125rem;
-  --type-page: 1.5rem;
+  --type-section: 1rem;
+  --type-lead: 1.25rem;
+  --type-page: 1.75rem;
   --control-height: 2.25rem;
   --field-height: 2.5rem;
   --row-height: 3rem;
-  --radius-control: 8px;
-  --radius-container: 10px;
-  --radius-overlay: 14px;
+  --radius-control: 4px;
+  --radius-container: 6px;
+  --radius-overlay: 10px;
   --radius-panel: var(--radius-container);
   --motion-fast: 120ms;
   --motion-default: 180ms;
@@ -781,7 +782,7 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .overlay-dialog[open] { display: grid; }
 .overlay-dialog::backdrop { background: var(--overlay-backdrop); }
 .overlay-dialog > :not(.sr-only):not(.overlay-confirm-layer) { position: relative; z-index: 1; }
-.overlay-confirm-layer { position: absolute; z-index: 10; inset: 0; display: grid; place-items: center; padding: 18px; background: var(--overlay-backdrop); backdrop-filter: blur(2px); }
+.overlay-confirm-layer { position: absolute; z-index: 10; inset: 0; display: grid; place-items: center; padding: 18px; background: var(--overlay-backdrop); }
 .overlay-confirm { width: min(420px, 100%); overflow: hidden; border: 1px solid var(--line-strong); border-radius: var(--radius-overlay); background: var(--raised); box-shadow: var(--shadow-overlay); }
 .overlay-confirm h2 { margin: 0; padding: 18px 18px 0; font-size: var(--type-section); }
 .overlay-confirm p { margin: 0; padding: 9px 18px 18px; color: var(--muted); font-size: var(--type-meta); line-height: 1.55; }
@@ -2526,7 +2527,9 @@ html, body, .app-shell, .app-loading-shell, .workspace { background: var(--paper
 .settings-hint { background: color-mix(in srgb, var(--accent-soft) 64%, var(--raised)); }
 .settings-hint svg { color: var(--accent); }
 .settings-workspace-card, .settings-action-grid button, .settings-account-actions button { background: var(--raised); }
-.modal-backdrop, .welcome-backdrop { background: var(--overlay-backdrop); backdrop-filter: blur(2px); }
+.modal-backdrop, .welcome-backdrop { background: var(--overlay-backdrop); }
+/* Native dialogs already paint a backdrop; don't darken the workspace twice. */
+.overlay-dialog.modal-backdrop { background: transparent; }
 
 /* One file = one Objective with its complete KR / Initiative tree. */
 .okr-document { width: 100%; margin: 0; }

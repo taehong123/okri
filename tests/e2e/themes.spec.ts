@@ -178,17 +178,26 @@ for (const theme of THEMES) {
     await expect(page.locator(".project-block-editor .bn-container")).toHaveAttribute("data-color-scheme", theme.colorScheme);
     expect(await editor.evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(await page.locator("html").evaluate((root) => {
       const probe = document.createElement("i");
-      probe.style.backgroundColor = getComputedStyle(root).getPropertyValue("--bg-raised");
+      probe.style.backgroundColor = getComputedStyle(root).getPropertyValue("--bg-page");
       root.appendChild(probe);
       const color = getComputedStyle(probe).backgroundColor;
       probe.remove();
       return color;
     }));
     expect(await contrastOf(editor)).toBeGreaterThanOrEqual(4.5);
+    await page.locator(".project-document-section").getByRole("button", { name: "변경", exact: true }).click();
+    await expect(editor).toHaveAttribute("contenteditable", "true");
     await editor.click();
     await page.keyboard.type("/");
     await expect(page.getByRole("listbox")).toBeVisible();
-    expect(await page.getByRole("listbox").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(await editor.evaluate((element) => getComputedStyle(element).backgroundColor));
+    expect(await page.getByRole("listbox").evaluate((element) => getComputedStyle(element).backgroundColor)).toBe(await page.locator("html").evaluate((root) => {
+      const probe = document.createElement("i");
+      probe.style.backgroundColor = getComputedStyle(root).getPropertyValue("--bg-raised");
+      root.appendChild(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    }));
     await readable(page, `${theme.mode}/editor slash menu`);
     await noOverflow(page);
     await page.screenshot({ path: testInfo.outputPath(`${theme.mode}-editor.png`) });

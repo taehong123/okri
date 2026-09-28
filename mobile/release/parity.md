@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-09-28: OKRI adopts its own Notion-inspired document workspace: neutral navigation, restrained commands, compact work rows and unified reading/editing surfaces. Layout changes are web-only. The shared theme registry changes sidebar/separator/primary colors; a future native build will inherit those colors and requires its own device/contrast verification. Installed binaries, `/api/mobile/v1`, auth and saved data are unchanged; no native release is claimed.
+
 - 2026-09-28: Product manuals and the read-only `read_manual` MCP tool are shared by Slack AI and web AI. Slack help bypasses AI, and how-to questions cannot create work or replace drafts. This is web/Slack/MCP-only; `/api/mobile/v1`, installed native UI, auth and storage semantics are unchanged. No native release is claimed.
 
 - 2026-09-26: Removed web browser-install entry points and install manifest linking to avoid confusing the web shortcut with the native Android closed test. The Play Store tester link remains. This is web-only; `/api/mobile/v1` and native binaries are unchanged.

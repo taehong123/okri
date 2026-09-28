@@ -1,4 +1,38 @@
-# OKRI design and theme contract
+# OKRI design system: document workspace
+
+## Product direction (2026-09-28)
+
+This is OKRI's independent design system. It replaces the previous inherited
+visual direction and the proposed Slack-style shell. The user's approved
+reference is Notion: quiet navigation, database-like work lists, readable pages
+and progressive disclosure. We borrow these interaction and density principles,
+not Notion branding, proprietary assets or its product behavior.
+
+- People: team members scanning today's execution and owners tracing work back
+  to an Objective. The main job is finding, opening and updating real work.
+- Character: a calm, precise shared document workspace, not a dashboard of cards.
+- Domain: Objective, KR, Initiative, Project, Task, Routine, Ticket, owner, due
+  date and document. Hierarchy and relationships are the product signature.
+- White uses a white reading canvas, subtly gray navigation, ink text, quiet
+  gray hover/selection and blue primary commands. Status colors retain meaning.
+- Avoid large tinted sections, repeated explanatory subtitles, thick framing,
+  bold text on every row and empty padded panels. Do not add decorative imagery
+  to a work list. Existing OKRI branding and meaningful icons remain.
+- Shared page titles are 28px, Objective titles 20px, section titles 16px, work/navigation 15px,
+  metadata 13-14px and editable/prose text 16px. Scale by browser text preference,
+  never viewport width. Controls remain 36px desktop / 44px touch.
+- Use 4px control, 6px item and 10px overlay radii. Reading surfaces are unframed.
+- A work row has stable title/context/priority/date tracks. Long mobile titles
+  wrap; priority and due date remain visible. Never hide data solely for styling.
+- Details share one paper surface and inset: breadcrumb, title, properties,
+  direct actions, document and related work. Expanded properties use aligned
+  label/value rows. Secondary integrations remain available without dominating.
+- Existing six theme IDs and saved preferences remain supported. Every theme
+  uses this same layout and density; only semantic colors change. No new API,
+  database migration, permission model or native app release is implied.
+
+Reference: [Notion databases and item pages](https://www.notion.com/help/intro-to-databases)
+and [sidebar navigation](https://www.notion.com/help/guides/navigating-with-the-sidebar).
 
 ## First-login setup
 
@@ -22,19 +56,20 @@
 The upstream design source is [ALLVIBE Design v1.0.0](https://github.com/all-vibe/all-vibe-agent-toolkit/blob/4f927714f728abcbe8920a3c39aad49692758c46/plugins/all-vibe-design/skills/all-vibe-design/SKILL.md), shared by 조성배 on 2026-08-24.
 Read its foundations, application-design, interaction-accessibility, content-design
 and service-profiles references before substantial UI work. This document records
-OKRI-specific clarifications, not a replacement design system.
+shared accessibility and engineering standards. This document owns OKRI's visual
+identity; no upstream palette, shape or page styling overrides it.
 
 - Preserve navigation order, default destination, URL contracts, tab grouping,
   object hierarchy, view modes and create/edit flows. Styling is not permission
   to move features or rewrite their behavior.
-- White is monochrome: white canvas, ink-black actions/links/focus, cool neutral
-  separators. Keep semantic status colors and external brand marks intact.
+- White uses a white canvas, gray navigation, ink text/links/focus and blue
+  primary commands. Keep semantic status colors and external brand marks intact.
 - Existing explicit themes remain available and saved preferences win.
 - Korean, Latin and numerals use the same self-hosted Pretendard Variable 1.3.9
   family through `--font-ui`. The 92 official Unicode-range subsets load only
   when their glyphs are visible; do not preload the entire font or add a CDN.
 - Typography comes from `--type-body` (1rem), `--type-ui` (.9375rem), `--type-label` (.875rem),
-  `--type-meta` (.8125rem), `--type-section` (1.125rem), `--type-page` (1.5rem).
+  `--type-meta` (.8125rem), `--type-section` (1rem), `--type-lead` (1.25rem), `--type-page` (1.75rem).
   The root respects browser defaults (100%) at every viewport width.
   Do not add per-screen pixel font patches, CSS zoom or scale transforms.
 - Korean body line height is 1.6; headings start at 1.25. Letter spacing is zero.
@@ -47,15 +82,15 @@ OKRI-specific clarifications, not a replacement design system.
   correction. Never enlarge desktop density at 1800px or any wider size.
   Deletion selection retains an 18px square inside a 44px unframed hit area;
   completion has a circular indicator. Long content must increase row height.
-- Radii: controls 8px, containers 10px, overlays 14px. Prefer quiet borders over
+- Radii: controls 4px, containers 6px, overlays 10px. Prefer quiet borders over
   shadows or nested tinted panels. Remove redundant eyebrow copy, not useful help.
 - Spacing uses the 4/8/12/16/24/32px scale (`--space-*`). Desktop page insets are
-  32px, mobile insets 16px. Page top spacing is 24px and heading-to-content spacing
-  is 16px. The page heading and document share a left edge.
+  32px, mobile insets 16px. Page top spacing is 32px desktop / 24px mobile and
+  heading-to-content spacing is 24px. The page heading and document share a left edge.
   Tree indentation is 32px on desktop and 16px on mobile. Sibling titles,
   counts and percentages share fixed grid tracks; labels must not split mid-word.
 - The OKR read surface is an unframed document, not a card inside another card.
-  Child Projects use dividers, not nested boxes. Root titles have section-sized
+  Child Projects use dividers, not nested boxes. Root titles have lead-sized
   text, KR titles body-sized text, execution rows UI-sized text, and metadata
   label-sized regular text. Metrics do not exceed their item title's size.
 - The OKR page header contains only its title and list action. Start the document
@@ -63,7 +98,7 @@ OKRI-specific clarifications, not a replacement design system.
   list/editor and Project/Task navigation in the hierarchy, not a duplicate banner.
 - Project, Task, Routine and Ticket item titles use the same UI role and regular
   weight (400) in cards, tables, boards, My Work, search and the OKR tree. Keep
-  page/section headings at 24/18px with 600-650 weight; KR titles use 16px/500
+  page/section headings at 28/16px with 600-650 weight; KR titles use 16px/500
   and Initiative titles 15px/500. Do not make every work item bold.
 - New layout/typography tests cover 320, 390, 768, 1440, 1920, 2560 and 3840 CSS px,
   larger user text, unchanged navigation, long Korean titles and overlay stacking.
@@ -92,8 +127,8 @@ Status colors retain their meaning independently of the hierarchy palette.
 Default workflow states such as Todo and medium priority follow the active
 theme accent instead of introducing the blue information palette. Reserve
 `info-*` for actual informational feedback, and keep user-chosen blue groups.
-White navigation uses the same white canvas as the page, including the loading
-sidebar, mobile navigation and settings navigation. Hover and selection use
+White navigation uses a subtle Gray-2 surface distinct from the white page,
+including loading, mobile navigation and settings navigation. Hover and selection use
 neutral Gray steps. Generic guidance, default avatars, empty-state icons and
 setup steps use text/icon/surface roles, never the blue information-status role.
 White Initiative labels and rails are neutral Gray as well. Keep informational
@@ -110,10 +145,10 @@ the first body paint. The client and BlockNote consume the same registry.
 
 ## Component rules
 
-`app/workspace-design.css`, imported after the base stylesheet, aligns signed-in
-surfaces with the landing's document layout. It does not own theme values or
-application behavior. Page content is capped at 75rem, with the existing 32/16px
-insets and 24px top / 16px heading spacing. Page subtitles and short supporting
+`app/workspace-design.css`, imported after the base stylesheet, owns the signed-in
+document workspace. It does not own theme values or application behavior.
+Page content is centered and capped at 75rem, with 32/16px
+insets and 32/24px top / 24px heading spacing. Short supporting
 descriptions use the 14px label role, while document and conversation prose keep
 the 16px body role. UI titles use 1.5 line height and prose uses 1.6; no font role
 changes with viewport width. Regularly scanned secondary values use the label

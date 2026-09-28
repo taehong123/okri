@@ -4,15 +4,15 @@
 .document-properties-toggle { display: inline-flex; align-items: center; flex: 0 0 auto; gap: var(--space-1); min-height: var(--control-height); padding: 0; border: 0; background: var(--button-ghost-bg); color: var(--text-secondary); font: inherit; font-size: var(--type-label); cursor: pointer; }
 .document-properties-toggle:hover { color: var(--text-primary); }
 .document-properties-toggle[aria-expanded="true"] > svg { transform: rotate(180deg); }
-.document-properties-summary { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; min-height: var(--control-height); gap: var(--space-1) var(--space-3); color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
-.document-properties-summary > span { overflow-wrap: anywhere; }
+.document-properties-summary { display: flex; flex: 1; flex-wrap: wrap; align-items: center; min-width: 0; min-height: var(--control-height); gap: var(--space-2); color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
+.document-properties-summary > span { padding: 0 var(--space-2); border-radius: var(--radius-control); background: var(--bg-subtle); overflow-wrap: anywhere; }
 .document-properties-change { flex: 0 0 auto; }
 .document-properties-change,
 .project-document-section > header > button.secondary,
 .project-linked-tasks > button.secondary,
 .routine-toolbar > button.secondary { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); min-height: var(--control-height); padding: var(--space-1) var(--space-3); border: 0; border-radius: var(--radius-control); font: inherit; font-size: var(--type-label); cursor: pointer; }
 .project-linked-tasks > button.secondary { justify-self: start; }
-.document-property-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr)); gap: var(--space-3) var(--space-6); margin: var(--space-4) 0 0; padding: 0 0 var(--space-4); }
+.document-property-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--space-2); margin: var(--space-3) 0 0; padding: 0 0 var(--space-3); }
 .document-property-list[hidden] { display: none; }
 .document-property-list > div { display: grid; grid-template-columns: minmax(0, 7rem) minmax(0, 1fr); align-content: start; gap: var(--space-3); min-width: 0; }
 .document-property-list dt { color: var(--text-secondary); font-size: var(--type-label); overflow-wrap: anywhere; }
@@ -28,8 +28,17 @@
 .document-properties-editor .project-progress-bot-control { padding: var(--space-4) var(--editor-inset); justify-content: space-between; }
 .document-properties-editor .project-progress-bot-control { flex-wrap: wrap; }
 .document-properties-editor .project-progress-bot-control > span { white-space: normal; overflow-wrap: anywhere; }
-.project-detail-panel > header.project-page-head, .task-detail-panel > header { position: static; }
-.property-panel :is(h2.document-title, h3.document-title) { margin: var(--space-2) 0 0; color: var(--text-primary); font-size: var(--type-page); font-weight: 650; line-height: 1.4; overflow-wrap: anywhere; }
+.project-detail-panel > header.project-page-head, .task-detail-panel > header { position: static; padding-block: var(--space-6) var(--space-3); border-bottom: 0; background: var(--bg-page); }
+.property-panel.task-detail-panel > header { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: var(--space-2); }
+.property-panel.task-detail-panel > header > div:first-child { display: contents; }
+.task-detail-panel > header :is(.detail-parent-link, p) { grid-column: 1; grid-row: 1; }
+.task-detail-panel > header .document-title { grid-column: 1 / -1; grid-row: 2; }
+.property-panel.task-detail-panel > header .task-detail-actions { grid-column: 2; grid-row: 1; order: 0; margin: 0; padding: 0; }
+.property-panel :is(h2.document-title, h3.document-title) { margin: var(--space-3) 0 0; color: var(--text-primary); font-size: var(--type-page); font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.property-panel:is(.task-detail-panel, .project-detail-panel, .ticket-detail-panel) { --editor-inset: var(--space-8); }
+.property-panel:is(.task-detail-panel, .project-detail-panel, .ticket-detail-panel) :is(.checklist-section, .project-linked-tasks, .project-linked-data) { background: transparent; padding-block: var(--space-4); }
+.property-panel .checklist-section > header { min-height: var(--control-height); }
+.property-panel .checklist-section > header b { font-size: var(--type-label); font-weight: 600; }
 .project-detail-panel .project-detail-content { display: flex; flex-direction: column; }
 .project-detail-panel .project-primary-column { display: flex; flex-direction: column; width: 100%; }
 .project-detail-panel .project-context-column { order: -1; width: 100%; border: 0; }
@@ -41,13 +50,13 @@
 .project-detail-panel .project-progress-overview { grid-template-columns: auto minmax(4rem, 1fr) auto; }
 .project-detail-panel .project-progress-value strong { font-size: var(--type-page); }
 .project-detail-panel .project-progress-overview dd { font-size: var(--type-body); font-weight: 500; }
-.document-related { padding: var(--space-4) var(--editor-inset); border-top: 1px solid var(--border-default); }
+.document-related { padding: var(--space-2) var(--editor-inset); border: 0; }
 .document-related > summary { display: flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); color: var(--text-secondary); font-size: var(--type-label); cursor: pointer; }
 .document-related > summary::before { content: "+"; }
 .document-related[open] > summary::before { content: "−"; }
 .property-panel .document-related :is(.task-lineage, .project-linked-data, .task-calendar-action) { padding-inline: 0; border: 0; }
-.property-panel.task-detail-panel { width: min(54rem, 100vw); background: var(--bg-page); }
-.task-detail-panel .task-completion-toggle { margin: var(--space-3) var(--editor-inset); width: fit-content; }
+.property-panel.task-detail-panel { width: min(48rem, 100vw); container-type: inline-size; background: var(--bg-page); }
+.task-detail-panel .task-completion-toggle { margin: var(--space-3) var(--editor-inset); width: fit-content; font-size: var(--type-label); font-weight: 500; border-color: var(--border-default); }
 .document-properties-toggle:focus-visible, .document-related > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
 .app-shell .routine-card { padding: var(--space-4) 0; border-width: 0 0 1px; border-radius: 0; background: transparent; }
 .app-shell .routine-card > header { grid-template-columns: var(--control-height) minmax(0, 1fr); }
@@ -63,7 +72,8 @@
 .project-detail-panel .project-block-editor:not(:has([contenteditable="true"])) { min-height: 0; padding-bottom: var(--space-6); }
 .project-detail-panel .project-block-editor [contenteditable="false"] { min-height: 0; }
 .work-document-section { border: 0; background: transparent; }
-.work-document-section > header { flex-direction: row; align-items: center; border: 0; background: transparent; }
+.work-document-section > header { flex-direction: row; align-items: center; border: 0; background: transparent; padding-block: var(--space-2); }
+.work-document-section > header b { font-size: var(--type-label); font-weight: 600; }
 .work-document-section > header > div { flex: 1; min-width: 0; }
 .work-document-section > header > button { flex: 0 0 auto; }
 .work-document-section .project-block-editor:not(:has([contenteditable="true"])) { min-height: 0; padding-bottom: var(--space-6); }
@@ -107,13 +117,26 @@
 .routine-cards, .routine-card, .routine-details { grid-template-columns: minmax(0, 1fr); }
 .routine-card, .routine-details, .work-document-section, .project-block-editor { min-width: 0; max-width: 100%; }
 .project-block-editor :is(.bn-container, .bn-editor, .bn-file-block-content-wrapper, .bn-visual-media-wrapper) { min-width: 0; max-width: 100%; }
-.project-block-editor .bn-editor { font-family: var(--font-ui); }
+.project-block-editor .bn-editor { font-family: var(--font-ui); font-size: var(--type-body); line-height: 1.6; background: var(--bg-page); }
+.work-document-section .project-block-editor:not(:has([contenteditable="true"])) { padding-top: var(--space-2); padding-bottom: var(--space-3); }
+.property-panel .work-document-section .project-block-editor .bn-editor { padding-inline: var(--editor-inset); }
 .project-block-editor img { max-width: 100%; height: auto; border-radius: var(--radius-container); }
 .project-block-editor [data-content-type="image"] .bn-add-file-button { min-height: var(--control-height); padding: var(--space-3); border-radius: var(--radius-control); background: var(--button-secondary-bg); color: var(--button-secondary-fg); }
 .project-block-editor [data-content-type="image"] .bn-add-file-button:hover { background: var(--button-secondary-hover-bg); color: var(--button-secondary-hover-fg); }
 .project-block-editor [data-content-type="image"].ProseMirror-selectednode > *::after,
 .project-block-editor .ProseMirror-selectednode > [data-content-type="image"] > *::after { background: transparent; border-radius: var(--radius-container); box-shadow: inset 0 0 0 2px var(--focus-ring); }
+@container (max-width: 22rem) {
+  .property-panel.task-detail-panel > header { grid-template-columns: minmax(0, 1fr); }
+  .property-panel.task-detail-panel > header .task-detail-actions { grid-column: 1; grid-row: 1; justify-content: flex-end; }
+  .task-detail-panel > header :is(.detail-parent-link, p) { grid-column: 1; grid-row: 2; }
+  .task-detail-panel > header .document-title { grid-row: 3; }
+}
 @media (max-width: 700px) {
+  .property-panel:is(.task-detail-panel, .project-detail-panel, .ticket-detail-panel) { --editor-inset: var(--space-4); }
+  .property-panel.task-detail-panel > header { padding-top: var(--space-3); }
+  .document-properties-bar { flex-wrap: wrap; gap: var(--space-1) var(--space-2); }
+  .document-properties-summary { order: 2; flex-basis: 100%; }
+  .document-properties-change { margin-left: auto; }
   .property-panel.document-properties-editor { --editor-inset: var(--space-4); max-height: 94dvh; }
   .document-properties-summary { gap: var(--space-1) var(--space-2); }
   .project-detail-panel .project-task-row { grid-template-columns: minmax(0, 1fr) var(--control-height); }

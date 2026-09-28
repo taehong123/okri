@@ -51,8 +51,8 @@ function seed(neutral: Scale, accent: Scale, secondary: Scale, scheme: "light" |
   const secondaryText = contrast(secondary[10], secondary[2]) >= 4.5 ? secondary[10] : secondary[11];
   return {
     scheme, page: monochrome ? "#FFFFFF" : neutral[0], surface: neutral[1], raised: dark ? neutral[1] : "#FFFFFF",
-    subtle: neutral[2], hover: neutral[3], sidebar: monochrome ? "#FFFFFF" : dark ? neutral[0] : neutral[1],
-    text: neutral[11], muted: neutral[10], faint: neutral[10], line: neutral[5], control: neutral[9],
+    subtle: neutral[2], hover: neutral[3], sidebar: dark ? neutral[0] : neutral[1],
+    text: neutral[11], muted: neutral[10], faint: neutral[10], line: neutral[3], control: neutral[9],
     primary, onPrimary: foreground, primaryHover, primaryActive: monochrome ? neutral[11] : accent[11],
     accent: accentText, accentSoft: accent[2], link: accentText, focus: accentText,
     secondaryAccent: secondaryText, secondarySoft: secondary[2],
@@ -60,7 +60,10 @@ function seed(neutral: Scale, accent: Scale, secondary: Scale, scheme: "light" |
 }
 
 const themeSeeds = {
-  white: { label: "화이트", description: "화이트와 잉크", ...seed(radix.gray, radix.gray, radix.gray, "light", true) },
+  white: {
+    label: "화이트", description: "화이트와 잉크", ...seed(radix.gray, radix.gray, radix.gray, "light", true),
+    primary: radix.blue[10], primaryHover: radix.blue[11], primaryActive: radix.blue[11],
+  },
   beige: { label: "베이지", description: "샌드와 골드", ...seed(radix.sand, radix.gold, radix.teal, "light") },
   gray: { label: "그레이", description: "슬레이트와 청록", ...seed(radix.slate, radix.teal, radix.violet, "light") },
   dark: { label: "다크", description: "차콜과 블루", ...seed(radix.grayDark, radix.blueDark, radix.violetDark, "dark") },
@@ -114,7 +117,7 @@ function colors(seed: Seed, mode: ThemeMode) {
     "initiative-badge-bg": seed.secondarySoft, "initiative-badge-text": seed.secondaryAccent, "initiative-rail": seed.secondaryAccent,
     "project-badge-bg": seed.subtle, "project-badge-text": seed.accent,
     "progress-fill": seed.accent, "progress-track": seed.subtle, "progress-text": seed.accent,
-    "overlay-backdrop": dark ? "rgba(0, 0, 0, .66)" : "rgba(25, 28, 33, .34)",
+    "overlay-backdrop": dark ? "rgba(0, 0, 0, .48)" : "rgba(25, 28, 33, .18)",
     "shadow-raised": dark ? "0 1px 3px rgba(0, 0, 0, .22)" : "0 1px 3px rgba(25, 28, 33, .06)",
     "shadow-overlay": dark ? "0 20px 56px rgba(0, 0, 0, .42)" : "0 18px 48px rgba(25, 28, 33, .18)",
     "selection-glow": mode === "cyberpunk" ? `0 0 10px color-mix(in srgb, ${seed.accent} 18%, transparent)` : "none",

@@ -2416,7 +2416,7 @@ function WorkspaceApp() {
           {navItems.map((entry) => {
             const Icon = entry.icon;
             return (
-              <button className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-label={entry.label} title={entry.label} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
+              <button data-view={entry.id} className={`nav-item ${activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "active" : ""}`} aria-label={entry.label} title={entry.label} aria-current={activeView === entry.id && !selectedProject && !selectedTicket && !selectedTask ? "page" : undefined} key={entry.id} onClick={() => entry.id === "home" ? openAssistant() : navigateView(entry.id)}>
                 <Icon size={16} /><span>{entry.label}</span>
               </button>
             );
@@ -2488,7 +2488,7 @@ function WorkspaceApp() {
           />}
           {!setupOpen && authState.user?.onboarding && authState.user.onboarding.status !== "completed" && <button type="button" onClick={() => setSetupOpen(true)}>{t("처음 설정 이어하기")}<ChevronRight size={14} /></button>}
           {activeView !== "home" && !selectedProject && <header className="page-header">
-            <div><h1>{viewTitles[activeView]}</h1>{activeView !== "okr" && <p>{activeView === "billing" ? `${currentWorkspace?.name ?? ""} · ${pageSubtitle(activeView)}` : pageSubtitle(activeView)}</p>}</div>
+            <div><h1>{viewTitles[activeView]}</h1>{activeView === "billing" && <p>{currentWorkspace?.name} · {pageSubtitle(activeView)}</p>}</div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />{t("목록보기")}</button>
             ) : activeView === "inbox" ? (
@@ -4742,7 +4742,7 @@ function MyWorkView({ workspaceId, items, routines, currentMember, onOpenProject
   return (
     <section className="my-work-view">
       <header className="my-work-toolbar">
-        <div><b>{t("{name}의 업무", { name: currentMember.displayName })}</b><span>{t("명시적으로 담당된 항목만 표시합니다.")}</span></div>
+        <span className="my-work-owner"><Users size={15} aria-hidden="true" />{currentMember.displayName}</span>
         <div className="my-work-toolbar-actions">
           <div className="my-work-sort" role="group" aria-label={t("내 업무 정렬")}>
             {([ ["due", t("기한순")], ["priority", t("우선순위순")] ] as const).map(([value, label]) => <button key={value} type="button" aria-pressed={sort === value} onClick={() => { setSort(value); saveMyWorkSort(workspaceId, currentMember.id, value); }}>{label}</button>)}
