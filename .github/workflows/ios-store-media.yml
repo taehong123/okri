@@ -29,7 +29,9 @@ jobs:
           cache-dependency-path: |
             source/package-lock.json
             source/mobile/package-lock.json
-      - run: npm ci && npm ci --prefix mobile
+      - run: |
+          npm ci
+          npm ci --prefix mobile
         working-directory: source
       - name: Prepare simulator-only entry
         working-directory: source/mobile
@@ -46,19 +48,20 @@ jobs:
       - name: Capture native screen with fictional data
         working-directory: source/mobile
         run: |
+          set -x
           mkdir -p artifacts/store-media
+          bounded() { node -e 'const cp=require("child_process");cp.execFileSync(process.argv[1],process.argv.slice(2),{stdio:"inherit",timeout:240000});' "$@"; }
           RUNTIME=$(xcrun simctl list runtimes -j | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const r=JSON.parse(s).runtimes.find(r=>r.isAvailable&&r.name.startsWith("iOS"));if(!r)process.exit(1);console.log(r.identifier)});')
           DEVICE_TYPE=$(xcrun simctl list devicetypes -j | node -e 'let s="";process.stdin.on("data",x=>s+=x);process.stdin.on("end",()=>{const d=JSON.parse(s).devicetypes.find(d=>d.name==="iPhone 13 Pro Max");if(!d)process.exit(1);console.log(d.identifier)});')
           DEVICE=$(xcrun simctl create OKRI-Store-Media "$DEVICE_TYPE" "$RUNTIME")
           xcrun simctl boot "$DEVICE"
-          xcrun simctl bootstatus "$DEVICE" -b
-          xcrun simctl status_bar "$DEVICE" override --time '9:41' --dataNetwork wifi --wifiMode active --wifiBars 3 --batteryState charged --batteryLevel 100
-          xcrun simctl install "$DEVICE" artifacts/derived/Build/Products/Release-iphonesimulator/OKRI.app
-          xcrun simctl launch "$DEVICE" ai.okri.app
+          bounded xcrun simctl bootstatus "$DEVICE" -b
+          bounded xcrun simctl install "$DEVICE" artifacts/derived/Build/Products/Release-iphonesimulator/OKRI.app
+          bounded xcrun simctl launch "$DEVICE" ai.okri.app
           sleep 45
-          xcrun simctl io "$DEVICE" screenshot artifacts/store-media/okri-ios-my-work-ko.png
+          bounded xcrun simctl io "$DEVICE" screenshot artifacts/store-media/okri-ios-my-work-ko.png
           node -e 'require("fs").writeFileSync("artifacts/store-media/provenance.json",JSON.stringify({sourceCommit:"406380c4c99dc12452bdcd830e77dd54f32ae439",storeBuild:"1.0.0 (1)",capture:"iOS Simulator",device:"iPhone 13 Pro Max",data:"fictional; all remote business requests mocked",physicalDeviceVerification:false},null,2))'
-          xcrun simctl shutdown "$DEVICE"
+          bounded xcrun simctl shutdown "$DEVICE"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
