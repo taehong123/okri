@@ -46,6 +46,10 @@ try {
     const keyId = required("ASC_KEY_ID");
     const issuerId = required("ASC_ISSUER_ID");
     const keyPath = required("ASC_KEY_PATH");
+    run("pod", ["install"], { cwd: path.join(mobileRoot, "ios") });
+    if (!existsSync(path.join(mobileRoot, "ios", "OKRI.xcworkspace"))) {
+      throw new Error("CocoaPods did not create the iOS workspace");
+    }
     const archive = path.join(artifacts, "OKRI.xcarchive");
     const exportPath = path.join(artifacts, "ios-export");
     const exportOptions = path.join(artifacts, "ExportOptions.plist");

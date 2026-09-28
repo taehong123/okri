@@ -1,5 +1,9 @@
 # Native parity ledger
 
+- 2026-09-28: Release readiness fixes nullable tester links, scheduler environment typing, self-hosted binary/metadata adapters and mismatched browser-test dependencies. TestFlight upload resolves the protected API key directory explicitly. These are shared infrastructure and release-tooling fixes; native screens and frozen v1 semantics are unchanged. Physical-device evidence and public release are still pending.
+
+- 2026-09-28: iOS store-build tooling now installs CocoaPods dependencies after native project generation and verifies the Xcode workspace before archiving. This is build-only; native UI, API v1 and authentication semantics are unchanged. No signed build, physical-device evidence or App Store submission is claimed.
+
 - 2026-09-28: Slack `@OKRI` creation now defaults an omitted Project DRI, Task assignee, or Routine assignee to the invoking linked workspace member while preserving an explicitly selected member. This is a web/server Slack integration behavior change; `/api/mobile/v1`, installed native UI and native assignment semantics are unchanged. No native release is claimed.
 
 - 2026-09-28: OKRI adopts its own Notion-inspired document workspace: neutral navigation, restrained commands, compact work rows and unified reading/editing surfaces. Layout changes are web-only. The shared theme registry changes sidebar/separator/primary colors; a future native build will inherit those colors and requires its own device/contrast verification. Installed binaries, `/api/mobile/v1`, auth and saved data are unchanged; no native release is claimed.

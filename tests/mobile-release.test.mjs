@@ -40,6 +40,16 @@ test("production app updates only through store binaries and never reloads activ
   const entry = await read("mobile/scripts/export-preview.mjs");
   assert.doesNotMatch(entry, /writeFile|package\.json/);
 });
+
+test("iOS store builds install native dependencies before archiving the workspace", async () => {
+  const release = await read("mobile/scripts/release.mjs");
+  const podInstall = release.indexOf('run("pod", ["install"], { cwd: path.join(mobileRoot, "ios") })');
+  const archive = release.indexOf('run("xcodebuild", ["-workspace"');
+  assert.ok(podInstall >= 0);
+  assert.ok(archive > podInstall);
+  assert.match(release, /CocoaPods did not create the iOS workspace/);
+  assert.match(release, /"--clean", "--no-install"/);
+});
 test("release evidence is source-bound, fresh, physical-device tested and platform-specific", () => {
   const now = Date.parse("2026-09-08T00:00:00Z"), digest = "d".repeat(64);
   const checks = Object.fromEntries(["googleLogin", "appleLogin", "dailySubmission", "workspaceIsolation", "accountDeletion", "systemText200Percent", "screenReader", "previousClientAgainstCurrentServer", "offlineStart", "rollback", "privacyDeclarationsReviewed", "dependencyAdvisoriesReviewed"].map(k => [k, true]));

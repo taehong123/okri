@@ -5,7 +5,7 @@
  * Cloudflare import sites intact means the current deployment remains usable
  * until a verified cutover, while the self-hosted image has no Sites binding.
  */
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, unlinkSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -20,10 +20,10 @@ type RuntimeEnv = {
 };
 
 class LocalStatement {
-  constructor(private readonly database: LocalD1Database, private readonly query: string, private readonly values: SqlValue[] = []) {}
+  constructor(private readonly database: LocalD1Database, private readonly query: string, private readonly values: SQLInputValue[] = []) {}
 
   bind(...values: SqlValue[]) {
-    return new LocalStatement(this.database, this.query, values);
+    return new LocalStatement(this.database, this.query, values.map((value) => value instanceof ArrayBuffer ? new Uint8Array(value) : value));
   }
 
   async first<T = Record<string, unknown>>(column?: string): Promise<T | null> {
@@ -139,7 +139,7 @@ class LocalR2Bucket {
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, bytes);
     const metadata: StoredMetadata = {
-      contentType: options.httpMetadata?.contentType,
+      contentType: options.httpMetadata instanceof Headers ? options.httpMetadata.get("content-type") ?? undefined : options.httpMetadata?.contentType,
       customMetadata: options.customMetadata,
       uploaded: new Date().toISOString(),
       etag: hash(bytes),
@@ -158,8 +158,8 @@ class LocalR2Bucket {
   async head(key: string): Promise<R2Object | null> {
     const object = await this.get(key);
     if (!object) return null;
-    const { body: _body, arrayBuffer: _arrayBuffer, text: _text, json: _json, ...metadata } = object as unknown as Record<string, unknown>;
-    return metadata as R2Object;
+    const { body: _body, bodyUsed: _bodyUsed, arrayBuffer: _arrayBuffer, text: _text, json: _json, blob: _blob, ...metadata } = object;
+    return { ...metadata, writeHttpMetadata: (headers: Headers) => object.writeHttpMetadata(headers) };
   }
 
   async delete(keys: string | string[]) {
@@ -172,7 +172,7 @@ class LocalR2Bucket {
 
   private toObject(key: string, bytes: Uint8Array, metadata: StoredMetadata) {
     const httpMetadata = metadata.contentType ? { contentType: metadata.contentType } : {};
-    const body = new Response(bytes).body!;
+    const body = new Response(new Uint8Array(bytes)).body!;
     return {
       key,
       version: metadata.etag,
