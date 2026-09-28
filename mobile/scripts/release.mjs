@@ -5,6 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { preflight } from "./release-preflight.mjs";
 import { git, sourceDigest } from "./release-lib.mjs";
+import { iosExportOptions } from "./ios-export-options.mjs";
 
 const platform = process.argv[2];
 const mobileRoot = fileURLToPath(new URL("../", import.meta.url));
@@ -46,6 +47,7 @@ try {
     const keyId = required("ASC_KEY_ID");
     const issuerId = required("ASC_ISSUER_ID");
     const keyPath = required("ASC_KEY_PATH");
+    const exportPlist = iosExportOptions(teamId, required("OKRI_IOS_PROFILE_UUID"));
     run("pod", ["install"], { cwd: path.join(mobileRoot, "ios") });
     if (!existsSync(path.join(mobileRoot, "ios", "OKRI.xcworkspace"))) {
       throw new Error("CocoaPods did not create the iOS workspace");
@@ -53,17 +55,10 @@ try {
     const archive = path.join(artifacts, "OKRI.xcarchive");
     const exportPath = path.join(artifacts, "ios-export");
     const exportOptions = path.join(artifacts, "ExportOptions.plist");
-    writeFileSync(exportOptions, `<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>method</key><string>app-store-connect</string>
-<key>signingStyle</key><string>automatic</string>
-<key>teamID</key><string>${teamId}</string>
-<key>uploadSymbols</key><true/>
-</dict></plist>\n`, "utf8");
+    writeFileSync(exportOptions, exportPlist, "utf8");
     const auth = ["-allowProvisioningUpdates", "-authenticationKeyPath", keyPath, "-authenticationKeyID", keyId, "-authenticationKeyIssuerID", issuerId];
     run("xcodebuild", ["-workspace", "ios/OKRI.xcworkspace", "-scheme", "OKRI", "-configuration", "Release", "-destination", "generic/platform=iOS", "-archivePath", archive, "DEVELOPMENT_TEAM=" + teamId, "CODE_SIGN_STYLE=Automatic", ...auth, "archive"]);
-    run("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportPath", exportPath, "-exportOptionsPlist", exportOptions, ...auth]);
+    run("xcodebuild", ["-exportArchive", "-archivePath", archive, "-exportPath", exportPath, "-exportOptionsPlist", exportOptions]);
     const ipa = readdirSync(exportPath).find(file => file.endsWith(".ipa"));
     if (!ipa) throw new Error("Xcode did not produce an IPA");
     source = path.join(exportPath, ipa);

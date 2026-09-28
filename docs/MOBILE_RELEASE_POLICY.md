@@ -57,7 +57,9 @@ logs the user out, erases a draft, or points to an untrusted update URL.
    key. First upload is manual; later internal-track uploads may use a restricted
    Google Play service account.
 3. **iOS store binary**: Xcode archive on GitHub macOS using the App Store Connect
-   API key and automatic signing, then upload to TestFlight.
+   API key for development signing, then manual distribution export using the
+   approved Apple Distribution identity and the explicit `ai.okri.app` App Store
+   profile. Upload to TestFlight with the existing Developer-role API key.
 
 There is no JavaScript OTA lane. Copy, translations, assets, feature code, SDKs,
 permissions, authentication and payments all reach installed mobile users through
@@ -71,6 +73,13 @@ a reviewed store binary. `mobile/app.config.ts` keeps remote updates disabled.
 - App Store Connect: use a least-privilege API key stored as `ASC_KEY_ID`,
   `ASC_ISSUER_ID`, `ASC_PRIVATE_KEY`, and `APPLE_TEAM_ID` in the protected GitHub
   `mobile-production` environment. Never place a `.p8` file in Git.
+- iOS distribution: store the encrypted PKCS#12 identity and its password as
+  `OKRI_IOS_CERTIFICATE_BASE64` and `OKRI_IOS_CERTIFICATE_PASSWORD`, and the approved
+  App Store profile as `OKRI_IOS_PROFILE_BASE64` in that same environment. Keep the
+  encrypted local key/password backup outside Git. CI imports the identity into
+  an ephemeral keychain, verifies the profile's app identity and release flag,
+  then deletes the keychain and installed profile even after failure. Do not
+  promote the upload API key to Admin to work around cloud signing permissions.
 - Google automation, once enabled, uses `GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` with
   only the permissions required for the OKRI app and internal releases.
 - GitHub `mobile-production` requires a reviewer, disallows self-approval where the

@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { compileLanguageModule } from "./helpers/language-fixture.mjs";
 import { validateEvidence } from "../mobile/scripts/release-lib.mjs";
+import { iosExportOptions } from "../mobile/scripts/ios-export-options.mjs";
 const read = p => readFile(new URL("../" + p, import.meta.url), "utf8");
 const policy = compileLanguageModule(await read("lib/mobile/release-policy.ts"));
 const registry = () => ({ schemaVersion: 1, ios: { storeUrl: "https://apps.apple.com/app/id123456", releases: [], retirements: [] }, android: { storeUrl: "https://play.google.com/store/apps/details?id=ai.okri.app", releases: [], retirements: [] } });
@@ -60,4 +61,26 @@ test("release evidence is source-bound, fresh, physical-device tested and platfo
   assert.throws(() => validateEvidence(e, { ...opts, digest: "changed" }));
   assert.throws(() => validateEvidence(e, { ...opts, now: now + 15 * 86400000 }));
   assert.throws(() => validateEvidence({ ...e, ios: { ...e.ios, buildNumber: "not-a-number" } }, opts));
+});
+
+test("iOS export uses the explicit app profile and never requires cloud signing", async () => {
+  const uuid = "00000000-1111-2222-3333-444444444444";
+  const plist = iosExportOptions("ABCDEFGHIJ", uuid);
+  assert.match(plist, /<key>signingStyle<\/key><string>manual<\/string>/);
+  assert.match(plist, /<key>ai\.okri\.app<\/key>/);
+  assert.ok(plist.includes(uuid));
+  assert.match(plist, /<key>manageAppVersionAndBuildNumber<\/key><false\/>/);
+  for (const invalid of [undefined, "", "../profile", "<xml>", "not-a-uuid"]) {
+    assert.throws(() => iosExportOptions("ABCDEFGHIJ", invalid));
+  }
+  assert.throws(() => iosExportOptions("bad-team", uuid));
+  const release = await read("mobile/scripts/release.mjs");
+  const exportCall = release.split('\n').find(line => line.includes('run("xcodebuild", ["-exportArchive"'));
+  assert.doesNotMatch(exportCall, /\.\.\.auth|allowProvisioningUpdates/);
+  const workflow = await read(".github/workflows/mobile-release.yml");
+  assert.match(workflow, /OKRI_IOS_CERTIFICATE_BASE64/);
+  assert.match(workflow, /OKRI_IOS_CERTIFICATE_PASSWORD/);
+  assert.match(workflow, /OKRI_IOS_PROFILE_BASE64/);
+  assert.match(workflow, /Entitlements:application-identifier/);
+  assert.match(workflow, /security delete-keychain/);
 });

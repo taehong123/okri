@@ -139,6 +139,12 @@
   This is Slack-only UI/interaction behavior. Native `/api/mobile/v1` and installed
   client contracts are unchanged; no native release is required.
 
+- iOS release signing now uses an approved, encrypted Apple Distribution identity
+  and an app-specific App Store profile in an ephemeral CI keychain. Distribution
+  export is manual; the existing Developer-role upload key is not promoted to
+  Admin. This is release infrastructure only, not a native feature or a claim of
+  physical-device validation, TestFlight availability, or public release.
+
 For every later product request, record web implementation and one explicit native
 disposition: shared next bundle, native implemented, web-only with rationale, or
 deferred with a target store release. The candidate report is input to this review,
