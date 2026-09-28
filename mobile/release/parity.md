@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-09-28: Slack `@OKRI` creation now defaults an omitted Project DRI, Task assignee, or Routine assignee to the invoking linked workspace member while preserving an explicitly selected member. This is a web/server Slack integration behavior change; `/api/mobile/v1`, installed native UI and native assignment semantics are unchanged. No native release is claimed.
+
 - 2026-09-28: OKRI adopts its own Notion-inspired document workspace: neutral navigation, restrained commands, compact work rows and unified reading/editing surfaces. Layout changes are web-only. The shared theme registry changes sidebar/separator/primary colors; a future native build will inherit those colors and requires its own device/contrast verification. Installed binaries, `/api/mobile/v1`, auth and saved data are unchanged; no native release is claimed.
 
 - 2026-09-28: Product manuals and the read-only `read_manual` MCP tool are shared by Slack AI and web AI. Slack help bypasses AI, and how-to questions cannot create work or replace drafts. This is web/Slack/MCP-only; `/api/mobile/v1`, installed native UI, auth and storage semantics are unchanged. No native release is claimed.

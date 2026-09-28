@@ -1778,6 +1778,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         triggerPoint: z.string().optional().describe("The cue that starts the routine, for example a time, event, or state."),
         actionPlace: z.string().optional().describe("Where or in which tool/context the routine should happen."),
         actionSteps: z.string().optional().describe("Concrete steps for how to perform the routine."),
+        assignee_member_id: memberIdInput.optional().describe("Active workspace member ID for the Routine assignee"),
         cadence: z.enum(ROUTINE_CADENCES).optional(),
         active: z.boolean().optional(),
         properties: z.record(z.string(), propertyValueSchema).optional().describe("Routine custom values keyed by IDs from list_routine_properties, not Project properties."),
@@ -1786,8 +1787,9 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       outputSchema: { routine: routineOutput },
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
-    async ({ title, description, triggerPoint, actionPlace, actionSteps, cadence, active, date, properties }) => {
+    async ({ title, description, triggerPoint, actionPlace, actionSteps, assignee_member_id, cadence, active, date, properties }) => {
       const selectedDate = date ?? new Date().toISOString().slice(0, 10);
+      await validateMcpMembers(ownerId, [assignee_member_id]);
       const created = await createRoutine(ownerId, {
         properties,
         title,
@@ -1795,6 +1797,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         triggerPoint,
         actionPlace,
         actionSteps,
+        assigneeMemberId: assignee_member_id,
         cadence: cadence as RoutineCadence | undefined,
         active,
       });
