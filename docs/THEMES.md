@@ -14,7 +14,10 @@ not Notion branding, proprietary assets or its product behavior.
 - Domain: Objective, KR, Initiative, Project, Task, Routine, Ticket, owner, due
   date and document. Hierarchy and relationships are the product signature.
 - White uses a white reading canvas, subtly gray navigation, ink text, quiet
-  gray hover/selection and blue primary commands. Status colors retain meaning.
+  gray hover/selection and charcoal primary commands. Status colors retain meaning.
+  Blue primary commands and blue-gray shadows were explicitly rejected in the
+  2026-09-28 color review. Neutral means equal RGB channels, including translucent
+  backdrops and elevation shadows, not just white backgrounds.
 - Avoid large tinted sections, repeated explanatory subtitles, thick framing,
   bold text on every row and empty padded panels. Do not add decorative imagery
   to a work list. Existing OKRI branding and meaningful icons remain.
@@ -62,7 +65,7 @@ identity; no upstream palette, shape or page styling overrides it.
 - Preserve navigation order, default destination, URL contracts, tab grouping,
   object hierarchy, view modes and create/edit flows. Styling is not permission
   to move features or rewrite their behavior.
-- White uses a white canvas, gray navigation, ink text/links/focus and blue
+- White uses a white canvas, gray navigation, ink text/links/focus and charcoal
   primary commands. Keep semantic status colors and external brand marks intact.
 - Existing explicit themes remain available and saved preferences win.
 - Korean, Latin and numerals use the same self-hosted Pretendard Variable 1.3.9
@@ -134,6 +137,11 @@ setup steps use text/icon/surface roles, never the blue information-status role.
 White Initiative labels and rails are neutral Gray as well. Keep informational
 alerts, workflow statuses, user-chosen group colors and external brands distinct;
 do not desaturate them or replace a user's saved theme.
+Primary buttons, checked controls and active action states in White share the
+Gray-12 / Gray-11 ink family, never the informational blue palette. Elevation
+uses neutral black alpha: `shadow-raised`, `shadow-overlay` and `shadow-drawer`.
+Drawer and modal backdrops must not introduce a cool cast over a neutral page.
+Use these roles for settings and detail panels as well as creation dialogs.
 Upstream licenses are retained with the font assets and in
 `public/RADIX-COLORS-LICENSE.txt`. Font reference:
 [Pretendard variable subsets](https://github.com/orioncactus/pretendard#%EA%B0%80%EB%B3%80-%EB%8B%A4%EC%9D%B4%EB%82%98%EB%AF%B9-%EC%84%9C%EB%B8%8C%EC%85%8B).
@@ -247,6 +255,9 @@ Do not add another page-specific input palette or density override.
   editor/slash menus, keyboard theme selection, reload persistence, contrast,
   overflow and runtime errors. Buttons are checked at rest, hover, active,
   focus, disabled/busy and frame-by-frame when enabled.
+- `tests/e2e/neutral-palette.spec.ts`: the default palette's actual buttons,
+  checked controls, navigation, Task panel and settings drawer remain neutral,
+  including hover/focus and the native dialog backdrop on desktop and mobile.
 - Axe contrast violations fail regardless of severity. Do not disable or filter
   them to accommodate a palette.
 - Verify actual Korean/Latin glyph rendering through browser font diagnostics,

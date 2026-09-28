@@ -60,10 +60,7 @@ function seed(neutral: Scale, accent: Scale, secondary: Scale, scheme: "light" |
 }
 
 const themeSeeds = {
-  white: {
-    label: "화이트", description: "화이트와 잉크", ...seed(radix.gray, radix.gray, radix.gray, "light", true),
-    primary: radix.blue[10], primaryHover: radix.blue[11], primaryActive: radix.blue[11],
-  },
+  white: { label: "화이트", description: "화이트와 잉크", ...seed(radix.gray, radix.gray, radix.gray, "light", true) },
   beige: { label: "베이지", description: "샌드와 골드", ...seed(radix.sand, radix.gold, radix.teal, "light") },
   gray: { label: "그레이", description: "슬레이트와 청록", ...seed(radix.slate, radix.teal, radix.violet, "light") },
   dark: { label: "다크", description: "차콜과 블루", ...seed(radix.grayDark, radix.blueDark, radix.violetDark, "dark") },
@@ -117,9 +114,10 @@ function colors(seed: Seed, mode: ThemeMode) {
     "initiative-badge-bg": seed.secondarySoft, "initiative-badge-text": seed.secondaryAccent, "initiative-rail": seed.secondaryAccent,
     "project-badge-bg": seed.subtle, "project-badge-text": seed.accent,
     "progress-fill": seed.accent, "progress-track": seed.subtle, "progress-text": seed.accent,
-    "overlay-backdrop": dark ? "rgba(0, 0, 0, .48)" : "rgba(25, 28, 33, .18)",
-    "shadow-raised": dark ? "0 1px 3px rgba(0, 0, 0, .22)" : "0 1px 3px rgba(25, 28, 33, .06)",
-    "shadow-overlay": dark ? "0 20px 56px rgba(0, 0, 0, .42)" : "0 18px 48px rgba(25, 28, 33, .18)",
+    "overlay-backdrop": dark ? "rgba(0, 0, 0, .48)" : "rgba(0, 0, 0, .12)",
+    "shadow-raised": dark ? "0 1px 3px rgba(0, 0, 0, .22)" : "0 1px 3px rgba(0, 0, 0, .06)",
+    "shadow-overlay": dark ? "0 20px 56px rgba(0, 0, 0, .42)" : "0 16px 48px rgba(0, 0, 0, .12)",
+    "shadow-drawer": dark ? "-8px 0 24px rgba(0, 0, 0, .32)" : "-8px 0 24px rgba(0, 0, 0, .08)",
     "selection-glow": mode === "cyberpunk" ? `0 0 10px color-mix(in srgb, ${seed.accent} 18%, transparent)` : "none",
     "skeleton-bg": seed.subtle,
   };

@@ -93,13 +93,13 @@ test("first paint preserves every saved theme and tolerates missing, invalid or 
 
 test("white chrome is strictly neutral while semantic status colors retain meaning", () => {
   const white = THEMES.find((theme) => theme.mode === "white").tokens;
-  const roles = ["bg-page", "bg-sidebar", "bg-surface", "bg-subtle", "bg-hover", "bg-raised", "text-primary", "text-secondary", "text-tertiary", "text-link", "icon-default", "border-default", "border-control", "menu-bg", "menu-fg", "modal-bg", "input-bg", "input-fg", "selected-bg", "selected-fg", "initiative-badge-bg", "initiative-badge-text", "initiative-rail"];
+  const roles = Object.keys(white).filter(role => white[role].startsWith("#") && !/^(success-|warning-|danger-|info-|purple-|orange-|button-danger-)/.test(role));
   for (const role of roles) {
     const channels = white[role].slice(1).match(/../g).map((part) => parseInt(part, 16));
     assert.equal(new Set(channels).size, 1, `${role} must have no color cast`);
   }
   assert.notEqual(white["bg-sidebar"], white["bg-page"], "navigation is distinct from the paper surface");
-  assert.notEqual(white["button-primary-bg"], white["text-primary"], "primary commands have a restrained blue accent");
+  assert.equal(white["button-primary-bg"], white["text-primary"], "primary commands use the charcoal action pair");
   assert.notEqual(white["danger-fg"], white["text-primary"]);
   assert.notEqual(white["success-fg"], white["text-primary"]);
   assert.notEqual(white["info-fg"], white["text-primary"]);
@@ -109,6 +109,23 @@ test("white chrome is strictly neutral while semantic status colors retain meani
     if (!/^\.(assistant-stage|assistant-example|chat-okr-context|general-routine-icon|system-badge|integration-service-icon|workspace-daily-bot-heading|integration-oauth-flow)/.test(rule.selector)) return;
     rule.walkDecls((decl) => assert.doesNotMatch(decl.value, /var\(--info-(?:fg|bg)\)/, `${rule.selector} is not a status alert`));
   });
+});
+
+test("depth never adds a blue cast and component shadows use theme roles for color", () => {
+  const neutral = (value, label) => {
+    for (const [, red, green, blue] of value.matchAll(/rgba?\(\s*(\d+),\s*(\d+),\s*(\d+)/g)) {
+      assert.equal(new Set([red, green, blue]).size, 1, `${label} adds a color cast`);
+    }
+  };
+  for (const theme of THEMES) {
+    for (const role of ["overlay-backdrop", "shadow-raised", "shadow-overlay", "shadow-drawer"]) {
+      assert.ok(theme.tokens[role].includes("rgba("));
+      neutral(theme.tokens[role], `${theme.mode}/${role}`);
+    }
+  }
+  postcss.parse(css).walkDecls("box-shadow", decl => neutral(decl.value, decl.parent.selector));
+  assert.match(css, /\.workspace-settings-panel\s*\{[^}]*box-shadow: var\(--shadow-drawer\)/);
+  assert.match(css, /\.property-panel\s*\{[^}]*box-shadow: var\(--shadow-drawer\)/);
 });
 
 test("default workflow states use the theme accent while informational blue stays semantic", () => {

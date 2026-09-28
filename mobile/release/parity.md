@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-09-28: Default White actions now use charcoal instead of informational blue, with neutral backdrop/elevation colors. Web detail/settings drawers use the shared shadow role. Installed clients and API semantics are unchanged; future native builds inherit the shared action palette and still require their own device contrast evidence. No native release is claimed.
+
 - 2026-09-28: Release readiness fixes nullable tester links, scheduler environment typing, self-hosted binary/metadata adapters and mismatched browser-test dependencies. TestFlight upload resolves the protected API key directory explicitly. These are shared infrastructure and release-tooling fixes; native screens and frozen v1 semantics are unchanged. Physical-device evidence and public release are still pending.
 
 - 2026-09-28: iOS store-build tooling now installs CocoaPods dependencies after native project generation and verifies the Xcode workspace before archiving. This is build-only; native UI, API v1 and authentication semantics are unchanged. No signed build, physical-device evidence or App Store submission is claimed.
