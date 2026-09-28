@@ -11,6 +11,7 @@ import {
 } from "@/lib/client-directory";
 import { arrayBufferToBase64, getProjectImage, getProjectImageCounts, listProjectImages } from "@/lib/project-images";
 import { getDailyDashboard } from "@/lib/daily-bot";
+import { MANUAL_SURFACES, readOkriManual } from "@/lib/okri-manual";
 import { assertConcreteWorkInput, isReadOnlyMcpRequest, readWorkContext, reviewTaskGeneralPlacement, WORK_KINDS, WORKFLOW_INSTRUCTIONS } from "@/lib/work-intake";
 import { ProjectReviewError } from "@/lib/project-review";
 import { cancelMcpProjectReview, confirmMcpProjectReview, confirmMcpProjectReviewFromCreateItem,
@@ -522,6 +523,28 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
       annotations: { readOnlyHint: false, destructiveHint: false, openWorldHint: false },
     },
     runProjectConversation,
+  );
+
+  server.registerTool(
+    "read_manual",
+    {
+      title: "Read the OKRI product manual",
+      description: "Read before answering how to use OKRI, available features, Slack commands, hierarchy, permissions or troubleshooting. Read-only product documentation, not workspace rules or live customer data. Omit topic for the index, use query to find up to four relevant articles, or topic=all for the complete manual. Respect the web/Slack/MCP capability differences; never create work from a how-to question.",
+      inputSchema: {
+        topic: z.string().max(80).optional().describe("Article ID from the index, index, or all"),
+        query: z.string().max(500).optional().describe("The user's usage question"),
+        surface: z.enum(MANUAL_SURFACES).default("mcp"),
+      },
+      outputSchema: { manual: z.record(z.string(), z.unknown()) },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+    },
+    async (input) => {
+      const manual = readOkriManual(input);
+      return {
+        structuredContent: { manual },
+        content: [{ type: "text" as const, text: JSON.stringify(manual) }],
+      };
+    },
   );
 
   server.registerTool(

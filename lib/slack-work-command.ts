@@ -76,7 +76,6 @@ export async function handleSlackWorkCommandEvent(
   options: { preparingNotice?: boolean } = {},
 ) {
   const token = await slackTokenForConnection(connection);
-  const canvasToken = await slackCanvasTokenForConnection(connection).catch(() => null);
   const linked = await resolveSlackMemberForEvent(connection, event.user, token);
   await ensureSlackWorkChannel(token, event);
   const t = linked
@@ -100,6 +99,7 @@ export async function handleSlackWorkCommandEvent(
     return;
   }
   if (parsed.command === "work_create") {
+    const canvasToken = await slackCanvasTokenForConnection(connection).catch(() => null);
     if (options.preparingNotice !== false) {
       await postPrivate(token, event, t("스레드를 읽고 생성 초안을 준비하고 있습니다."));
     }

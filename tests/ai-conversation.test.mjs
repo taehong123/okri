@@ -6,9 +6,11 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import ts from "typescript";
 import { clientLanguage } from "./helpers/client-language-fixture.mjs";
+import { okriManual } from "./helpers/okri-manual-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 function compile(source, dependencies = {}) {
+  dependencies = { "@/lib/okri-manual": okriManual, ...dependencies };
   const compiled = ts.transpileModule(source, {
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX },
   }).outputText;

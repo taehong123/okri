@@ -42,11 +42,13 @@ function pendingProjectTurn(overrides = {}) {
   };
 }
 
-test("every Slack @OKRI mention enters the public MCP conversation path", async () => {
+test("Slack mentions use MCP except deterministic help; DM manual questions also use MCP", async () => {
   const source = await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8");
   assert.match(source, /commandEvent\?\.type === "app_mention"/);
   assert.match(source, /handleSlackMcpConversation/);
   assert.match(source, /mcpConversation \? null : parsedCommand/);
+  assert.match(source, /parsedCommand\?\.command !== "help"/);
+  assert.match(source, /isOkriManualQuestion/);
   assert.ok(source.indexOf("if (mcpConversation && commandEvent)") < source.indexOf("else if (dailyMessage"));
 });
 
@@ -76,7 +78,7 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /\["list_items", "capture_item", "create_item", "create_tasks"\]/);
   assert.match(agent, /"trash_task"/);
   assert.match(agent, /never claim that Task deletion is unavailable/);
-  assert.match(agent, /const creationIntent = !hasTaskRemovalIntent\(input\.query\) && hasExplicitCreationIntent/);
+  assert.match(agent, /const creationIntent = !manualQuestion && !hasTaskRemovalIntent\(input\.query\) && hasExplicitCreationIntent/);
   assert.match(agent, /tool_choice: mustProgressCreation \? "required" : "auto"/);
   assert.match(agent, /never ask the user to repeat a title or work description/);
   assert.match(agent, /use availableWork as the authoritative complete list/);

@@ -4,9 +4,11 @@ import { DatabaseSync } from "node:sqlite";
 import { createRequire } from "node:module";
 import test from "node:test";
 import ts from "typescript";
+import { okriManual } from "./helpers/okri-manual-fixture.mjs";
 
 const require = createRequire(import.meta.url);
 function compile(source, dependencies = {}) {
+  dependencies = { "@/lib/okri-manual": okriManual, ...dependencies };
   const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   const loaded = { exports: {} };
   new Function("require", "module", "exports", compiled)((name) => name in dependencies ? dependencies[name] : require(name), loaded, loaded.exports);

@@ -4,6 +4,7 @@ import { handleDeliveredDailyReminder, repairSlackDailyReminders } from "@/lib/s
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { handleSlackWorkCommandEvent, parseSlackWorkCommand } from "@/lib/slack-work-command";
 import { handleSlackMcpConversation } from "@/lib/slack-mcp-agent";
+import { isOkriManualQuestion } from "@/lib/okri-manual";
 
 type SlackEventEnvelope = {
   type?: string;
@@ -92,7 +93,8 @@ export async function POST(request: Request) {
     ? withoutBotMention(rawCommandText ?? "", connection.botUserId)
     : rawCommandText;
   const parsedCommand = commandText ? parseSlackWorkCommand(commandText) : null;
-  const mcpConversation = commandEvent?.type === "app_mention";
+  const mcpConversation = parsedCommand?.command !== "help" && (commandEvent?.type === "app_mention"
+    || (!parsedCommand && commandEvent?.channel_type === "im" && isOkriManualQuestion(commandText ?? "")));
   const naturalCreation = !parsedCommand && commandText?.trim()
     && commandEvent?.channel_type === "im"
     ? { command: "work_create" as const, query: commandText.trim().slice(0, 240) }

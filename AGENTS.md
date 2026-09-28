@@ -17,6 +17,14 @@ The document is an implementation contract, not optional inspiration.
 - Coordinate with other OKRI tasks before changing shared files or deploying.
 - Keep migration SQL as LF. Never weaken database guards to fix packaging.
 
+## Product manual
+
+For product behavior, Slack command or AI capability changes, update the relevant
+articles in `lib/okri-manual.ts` and the shared Slack guide. Regenerate
+`docs/OKRI_MANUAL.md` with `node scripts/generate-okri-manual.mjs` and run
+`tests/okri-manual.test.mjs`. Distinguish web, Slack and external MCP support;
+never include customer records, tokens or live connection claims in the manual.
+
 ## Installed mobile clients
 
 Before API, auth, database, shared model or mobile release changes, read

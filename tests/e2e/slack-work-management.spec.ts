@@ -9,7 +9,7 @@ test("업무 생성 관리 봇은 생성 중심 흐름과 비공개 처리 정�
   await expect(rows).toHaveCount(4);
   await expect(rows.locator(".bot-accordion-copy > b")).toHaveText(["데일리 봇", "관리 봇", "업무 생성 관리 봇", "Task 변동 알림 봇"]);
   await expect(rows.nth(2).getByText(/요청자에게만 표시/)).toBeVisible();
-  for (const command of ["!프로젝트 [이름]", "!루틴 [이름]", "!티켓 [이름]", "!테스크 [이름]", "@OKRI [요청]", "!도움말", "!내업무"]) {
+  for (const command of ["!프로젝트 [이름]", "!루틴 [이름]", "!티켓 [이름]", "!테스크 [이름]", "@OKRI [요청]", "!도움말", "!내업무", "!업무생성 [내용]", "/okri daily"]) {
     await expect(rows.nth(2).getByText(command, { exact: true })).toBeVisible();
   }
   await rows.nth(2).getByRole("button", { name: "최근 허들 메모 확인" }).click();

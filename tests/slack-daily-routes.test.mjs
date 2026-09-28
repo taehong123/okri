@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
+import { okriManual } from "./helpers/okri-manual-fixture.mjs";
 
 const sources = Object.fromEntries(await Promise.all([
   ["settings", "daily/settings"], ["onboarding", "onboarding"], ["disconnect", "disconnect"], ["callback", "callback"], ["events", "events"],
@@ -33,6 +34,7 @@ function harness() {
   class SlackWorkspaceConnectionError extends Error {}
   class SlackOAuthExchangeError extends Error {}
   const deps = {
+    "@/lib/okri-manual": okriManual,
     "@/lib/slack-daily-digest": { parseDigestSettings },
     "@/lib/slack-daily-manual": {
       async latestDailyManualRun() { return null; },

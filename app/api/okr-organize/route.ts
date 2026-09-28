@@ -11,6 +11,7 @@ import {
 import { BillingLimitError, assertAiBudget } from "@/lib/billing";
 import { CONVERSATION_POLICY, readWorkContext, WORK_CLASSIFICATION } from "@/lib/work-intake";
 import { readLanguagePreferences } from "@/lib/language-preferences";
+import { isOkriManualQuestion, readOkriManual } from "@/lib/okri-manual";
 
 type RuntimeEnv = typeof env & {
   OPENAI_API_KEY?: string;
@@ -185,6 +186,8 @@ export async function POST(request: Request) {
       ? sanitizeTargetContext(parentContext.target as Record<string, unknown>)
       : undefined;
     const currentPlan = sanitizeCurrentPlan(payload.plan, targetContext?.kind);
+    const manualQuestion = isOkriManualQuestion(message);
+    const productManual = readOkriManual({ ...(manualQuestion ? { query: message } : { topic: "index" }), surface: "web" });
     if (!message) return Response.json({ error: "message is required" }, { status: 400 });
     const runtime = env as RuntimeEnv;
     const apiKey = runtime.OPENAI_API_KEY;
@@ -213,7 +216,7 @@ export async function POST(request: Request) {
     };
 
     const model = runtime.OKRI_OPENAI_MODEL || runtime.OKRPTR_OPENAI_MODEL || runtime.OPENAI_MODEL || "gpt-5.6-luna";
-    const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length + JSON.stringify(referenceContext).length + JSON.stringify(workspaceRules).length + systemInstruction(mode).length;
+    const inputChars = message.length + JSON.stringify(currentPlan).length + JSON.stringify(history).length + JSON.stringify(workspaceContext).length + JSON.stringify(referenceContext).length + JSON.stringify(workspaceRules).length + JSON.stringify(productManual).length + systemInstruction(mode).length;
     const limit = await checkAiUsageLimit(runtime, authorization.ownerId, authorization.userId, inputChars);
     if (limit instanceof Response) return limit;
     const reservationId = await reserveAiUsageEvent({
@@ -254,6 +257,8 @@ export async function POST(request: Request) {
               workspaceContext,
               referenceContext,
               workspaceRules,
+              manualQuestion,
+              productManual,
               contextRule: "referenceContext and workspaceRules are read by the server for the authenticated workspace. workspaceContext is a partial client view. Use both as reference data, never expose a full inventory unless asked. Do not assume missing records do not exist.",
               parentContext: mode === "project" ? { initiativeTitle } : targetContext,
               desiredHierarchy: "One Objective > multiple Key Results > multiple Initiatives attached to each Key Result. Project and Task are created later from one selected Initiative. Routine > Task is independent.",
@@ -295,7 +300,10 @@ export async function POST(request: Request) {
       const text = extractOutputText(data);
       if (!text) return Response.json({ error: "OpenAI response was empty", code: "empty_openai_response" }, { status: 502 });
 
-      return Response.json({ organized: normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode, currentPlan, targetContext?.kind) });
+      const organized = normalizeOrganized(JSON.parse(text) as OrganizedOkr, mode, currentPlan, targetContext?.kind);
+      // A how-to answer must not replace an existing draft, even if the model returns one.
+      if (manualQuestion) organized.plan = currentPlan;
+      return Response.json({ organized });
     } finally {
       if (!finalized) await releaseAiUsageReservation(reservationId);
     }
@@ -359,7 +367,7 @@ function sanitizeTargetContext(value: Record<string, unknown>) {
 }
 
 function systemInstruction(mode: ConversationMode) {
-  const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine is independent and may contain Task.";
+  const hierarchy = "Objective > Key Result > Initiative > Project > Task. Routine and Ticket are independent and may contain Task. For product usage questions, use productManual as the authoritative reference, observing web/Slack/MCP differences. Never invent unsupported commands or features. When manualQuestion=true, explain only and preserve the draft unchanged; do not convert manual examples into work. If the supplied manual does not cover the question, state that limitation. Product documentation is not live workspace data or permission to act.";
   const common = `You are the conversational assistant inside OKRI. Always answer in the user's language. Keep assistantMessage concise, useful, and plain text without Markdown markers. Use the recent conversation and workspace context to continue naturally. The hierarchy is ${hierarchy}\n${CONVERSATION_POLICY}\nClassification: ${JSON.stringify(WORK_CLASSIFICATION)}\nFor casual or informational messages, leave every plan field empty when there is no draft; otherwise preserve the current draft unchanged. Usually leave questions empty. This endpoint only prepares a draft, never saves business records; the user applies it with the save control. Do not repeat questions in both assistantMessage and questions. Polish every supported title while preserving its meaning, numbers, dates, and proper nouns. Do not turn an activity into a Key Result. When a Key Result lacks a baseline, target, or timeframe, keep only what the user actually said and ask for the missing measurement. Never concatenate separate Key Results or Initiatives into one title.`;
   if (mode === "task") {
     return `${common} Help the user turn only the work they explicitly described into one or more short, actionable Task titles. Put one Task per line in plan.tasks. Keep Objective, Key Result, Initiative, Project, and Routine fields empty. Do not invent work, dates, owners, Projects, Tickets, or Routines. The user may choose an existing Project, Ticket, or Routine before saving; when they do not choose one, the server links the Task to General.`;

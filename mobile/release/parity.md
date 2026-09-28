@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-09-28: Product manuals and the read-only `read_manual` MCP tool are shared by Slack AI and web AI. Slack help bypasses AI, and how-to questions cannot create work or replace drafts. This is web/Slack/MCP-only; `/api/mobile/v1`, installed native UI, auth and storage semantics are unchanged. No native release is claimed.
+
 - 2026-09-26: Removed web browser-install entry points and install manifest linking to avoid confusing the web shortcut with the native Android closed test. The Play Store tester link remains. This is web-only; `/api/mobile/v1` and native binaries are unchanged.
 
 - 2026-09-26: Web typography now shares a 15px UI role for navigation and work titles, 14px supporting copy, and 16px document/input text. Hierarchy and item weights are consistent across working views. This is web-only; native typography requires its own reviewed binary and `/api/mobile/v1` is unchanged.

@@ -24,7 +24,10 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
   {
     label: "말로 요청",
     description: "맥락을 설명하면 OKRI가 내용을 정리해 생성 초안을 제안합니다.",
-    entries: [{ command: "@OKRI [요청]", label: "자연어 대화" }],
+    entries: [
+      { command: "@OKRI [요청]", label: "자연어 대화" },
+      { command: "!업무생성 [내용]", label: "업무 생성" },
+    ],
   },
   {
     label: "조회와 관리",
@@ -34,6 +37,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
       { command: "!프로젝트조회 · !프로젝트수정 · !프로젝트상태", label: "Project 관리" },
       { command: "!테스크조회 · !테스크수정 · !테스크완료 · !테스크재열기", label: "Task 관리" },
       { command: "!도움말", label: "최신 사용법" },
+      { command: "/okri daily", label: "개인 데일리 작성" },
     ],
   },
 ] as const;
