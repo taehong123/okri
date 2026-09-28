@@ -98,7 +98,8 @@ test("white chrome is strictly neutral while semantic status colors retain meani
     const channels = white[role].slice(1).match(/../g).map((part) => parseInt(part, 16));
     assert.equal(new Set(channels).size, 1, `${role} must have no color cast`);
   }
-  assert.equal(white["bg-sidebar"], white["bg-page"]);
+  assert.notEqual(white["bg-sidebar"], white["bg-page"], "navigation is distinct from the paper surface");
+  assert.notEqual(white["button-primary-bg"], white["text-primary"], "primary commands have a restrained blue accent");
   assert.notEqual(white["danger-fg"], white["text-primary"]);
   assert.notEqual(white["success-fg"], white["text-primary"]);
   assert.notEqual(white["info-fg"], white["text-primary"]);
@@ -129,7 +130,7 @@ test("default workflow states use the theme accent while informational blue stay
 
 test("readability uses scalable roles instead of per-screen font patches or CSS zoom", () => {
   const root = postcss.parse(css);
-  const roles = { "--type-body": "1rem", "--type-ui": ".9375rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1.125rem", "--type-page": "1.5rem" };
+  const roles = { "--type-body": "1rem", "--type-ui": ".9375rem", "--type-label": ".875rem", "--type-meta": ".8125rem", "--type-section": "1rem", "--type-lead": "1.25rem", "--type-page": "1.75rem" };
   for (const [name, value] of Object.entries(roles)) {
     const declarations = [];
     root.walkDecls(name, (decl) => declarations.push(decl.value));

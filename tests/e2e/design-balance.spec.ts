@@ -17,7 +17,7 @@ test('balanced density preserves body type and does not inflate at wide widths',
         nav: height('.desktop-navigation .nav-item'), action: height('.page-create-actions button'),
         inset: style('.page-body').paddingTop, headingGap: style('.page-header').marginBottom };
     });
-    expect(density).toEqual({ body: '16px', title: '24px', nav: 36, action: 36, inset: '24px', headingGap: '16px' });
+    expect(density).toEqual({ body: '16px', title: '28px', nav: 36, action: 36, inset: '32px', headingGap: '24px' });
     const search = page.getByRole('textbox', { name: 'Project 검색' });
     expect(await search.evaluate((input: HTMLInputElement) => {
       const context = document.createElement('canvas').getContext('2d')!;

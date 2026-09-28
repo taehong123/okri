@@ -5,17 +5,17 @@
   gap: var(--space-2);
   min-height: var(--control-height);
   padding: 0 var(--space-3);
-  border: 1px solid var(--border-control);
+  border: 1px solid var(--border-default);
   border-radius: var(--radius-control);
   background: var(--button-secondary-bg);
   color: var(--button-secondary-fg);
   font: inherit;
   font-size: var(--type-label);
-  font-weight: 600;
+  font-weight: 500;
   cursor: pointer;
 }
 .local-agent-launcher-button:hover:not(:disabled) { background: var(--button-secondary-hover-bg); color: var(--button-secondary-hover-fg); }
-.local-agent-launcher-button:disabled { cursor: default; opacity: .55; }
+.local-agent-launcher-button:disabled { cursor: default; background: var(--button-disabled-bg); color: var(--button-disabled-fg); }
 .project-detail-panel > .local-agent-launcher-button { margin: var(--space-3) var(--editor-inset); align-self: flex-start; }
 .task-work-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--editor-inset); }
 .task-detail-panel .task-work-actions .task-completion-toggle { margin: 0; }

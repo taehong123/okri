@@ -9,6 +9,12 @@ const continuityCompiled = ts.transpileModule(continuitySource, {
 }).outputText;
 const continuity = await import(`data:text/javascript;base64,${Buffer.from(continuityCompiled).toString("base64")}`);
 
+const defaultsSource = await readFile(new URL("../lib/slack-creation-defaults.ts", import.meta.url), "utf8");
+const defaultsCompiled = ts.transpileModule(defaultsSource, {
+  compilerOptions: { target: ts.ScriptTarget.ES2023, module: ts.ModuleKind.ESNext },
+}).outputText;
+const defaults = await import(`data:text/javascript;base64,${Buffer.from(defaultsCompiled).toString("base64")}`);
+
 function pendingProjectTurn(overrides = {}) {
   const initiative = {
     id: "initiative-1",
@@ -52,6 +58,26 @@ test("Slack mentions use MCP except deterministic help; DM manual questions also
   assert.ok(source.indexOf("if (mcpConversation && commandEvent)") < source.indexOf("else if (dailyMessage"));
 });
 
+test("Slack @OKRI creation defaults responsibility to the invoking member", () => {
+  const actor = "member-author";
+  const explicit = "member-explicit";
+  assert.equal(defaults.applySlackCreationActorDefaults("capture_item", { title: "Task" }, actor).assignee_member_id, actor);
+  assert.equal(defaults.applySlackCreationActorDefaults("create_item", { kind: "task", title: "Task" }, actor).assignee_member_id, actor);
+  assert.equal(defaults.applySlackCreationActorDefaults("create_tasks", { titles: ["A"] }, actor).assignee_member_id, actor);
+  assert.equal(defaults.applySlackCreationActorDefaults("create_routine", { title: "Routine" }, actor).assignee_member_id, actor);
+  assert.equal(defaults.applySlackCreationActorDefaults("create_item", { kind: "project", title: "Project" }, actor).dri_member_id, actor);
+  assert.equal(defaults.applySlackCreationActorDefaults("manage_project", { action: "propose", title: "Project" }, actor).dri_member_id, actor);
+
+  assert.equal(defaults.applySlackCreationActorDefaults("create_item", {
+    kind: "task", title: "Task", assignee_member_id: explicit,
+  }, actor).assignee_member_id, explicit);
+  assert.equal(defaults.applySlackCreationActorDefaults("manage_project", {
+    action: "propose", title: "Project", dri_member_id: explicit,
+  }, actor).dri_member_id, explicit);
+  assert.equal(defaults.applySlackCreationActorDefaults("create_item", { kind: "ticket", title: "Ticket" }, actor).assignee_member_id, undefined);
+  assert.equal(defaults.applySlackCreationActorDefaults("manage_project", { action: "update" }, actor).dri_member_id, undefined);
+});
+
 test("Slack MCP agent reuses the authorized MCP server and publishes one updated thread reply", async () => {
   const [agent, mcp] = await Promise.all([
     readFile(new URL("../lib/slack-mcp-agent.ts", import.meta.url), "utf8"),
@@ -85,6 +111,8 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /Never compare one of those subsets with assignments and report the remainder as missing from Daily/);
   assert.match(mcp, /availableWork is the authoritative complete list/);
   assert.match(mcp, /latestSubmittedWork is only the most recently shared snapshot/);
+  assert.match(mcp, /assignee_member_id: memberIdInput\.optional\(\)\.describe\("Active workspace member ID for the Routine assignee"\)/);
+  assert.match(mcp, /assigneeMemberId: assignee_member_id/);
   assert.match(agent, /Slack MCP thread read failed/);
   assert.match(agent, /SlackWorkIntakeError/);
   assert.match(agent, /readError/);
