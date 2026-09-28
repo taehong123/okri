@@ -1530,6 +1530,32 @@ export const billingSessions = sqliteTable(
   (table) => [index("idx_billing_sessions_expiry").on(table.expiresAt)],
 );
 
+export const billingPaypleBridgeResults = sqliteTable("billing_payple_bridge_results", {
+  tokenHash: text("token_hash").primaryKey().references(() => billingSessions.tokenHash, { onDelete: "cascade" }),
+  encryptedResult: text("encrypted_result").notNull(),
+  createdAt: text("created_at").notNull(),
+});
+
+export const billingPaypleAttempts = sqliteTable(
+  "billing_payple_attempts",
+  {
+    orderId: text("order_id").primaryKey(),
+    workspaceId: text("workspace_id").notNull(),
+    keyHash: text("key_hash").notNull(),
+    priceWon: integer("price_won").notNull(),
+    payDate: text("pay_date").notNull(),
+    status: text("status", { enum: ["pending", "paid", "refund_pending", "refunded"] }).notNull(),
+    transactionId: text("transaction_id"),
+    receiptUrl: text("receipt_url"),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check("billing_payple_attempt_price", sql`${table.priceWon} > 0`),
+    check("billing_payple_attempt_status", sql`${table.status} IN ('pending', 'paid', 'refund_pending', 'refunded')`),
+  ],
+);
+
 export const billingTransactions = sqliteTable(
   "billing_transactions",
   {

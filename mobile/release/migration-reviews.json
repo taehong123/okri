@@ -27,6 +27,13 @@
     "dataPreservation": "Three ADD COLUMN statements preserve every existing Slack connection and default delegated credentials to empty until an Owner or Admin explicitly reauthorizes.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-23"
   },
+  "drizzle/0069_payple_bridge.sql": {
+    "sha256": "08841227ff4be5fe67c3d2308f7feb27f8c2c8333315772da9d3d3200edd1961",
+    "v1Compatibility": "Creates only a web-payment bridge staging table. No existing column, native route, authentication behavior or frozen mobile v1 consumer is changed.",
+    "rollbackPlan": "Disable checkout and remove only the dedicated bridge ingress if rolling back. Retain the additive table and immutable migration; older binaries ignore it.",
+    "dataPreservation": "ON DELETE CASCADE removes only newly staged encrypted card-registration results when their existing short-lived billing session is deleted. No existing business or transaction records are changed by this migration.",
+    "reviewedBy": "Codex payment bridge schema and mobile compatibility review, 2026-09-29"
+  },
   "drizzle/0067_android_test_portal.sql": {
     "sha256": "7b74c32beba98d98aaa191e9b447664a50be93d6c20d80334fa5df117260c8e9",
     "v1Compatibility": "The migration creates isolated web-only Android test recruitment, feedback, and aggregate-report tables. It does not alter `/api/mobile/v1`, native-session tables, existing item data, or the installed Android/iOS client contracts.",

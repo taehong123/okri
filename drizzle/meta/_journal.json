@@ -421,6 +421,20 @@
       "when": 1790398000000,
       "tag": "0067_android_test_portal",
       "breakpoints": true
+    },
+    {
+      "idx": 60,
+      "version": "6",
+      "when": 1790608800000,
+      "tag": "0068_payple_attempts",
+      "breakpoints": true
+    },
+    {
+      "idx": 61,
+      "version": "6",
+      "when": 1790611200000,
+      "tag": "0069_payple_bridge",
+      "breakpoints": true
     }
   ]
 }

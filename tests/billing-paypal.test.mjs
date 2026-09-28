@@ -106,7 +106,8 @@ function fixture(t) {
 
 test("Free has five editors and no checkout capability is invented", async (t) => {
   assert.match(await source("lib/billing.ts"), /free:.*editorLimit: 5/);
-  assert.match(await source("worker/index.ts"), /ctx.waitUntil\(import\("@\/lib\/billing"\).then\(\(\{ runBillingBatch \}\) => runBillingBatch\(\)\)\)/);
+  assert.match(await source("worker/index.ts"), /ctx.waitUntil\(runScheduledJobs/);
+  assert.match(await source("lib/scheduled-jobs.ts"), /\["billing", runBillingBatch\(\)\]/);
   const f = fixture(t);
   delete f.env.PAYPAL_CLIENT_SECRET;
   assert.equal(f.api.paypalConfigured(), false);

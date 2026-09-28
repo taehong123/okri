@@ -9,7 +9,8 @@ export async function POST(request: Request) {
   const plan = parseBillingPlan(payload?.plan);
   if (!plan || plan === "free") return Response.json({ error: "Team 또는 Business 플랜을 선택해 주세요." }, { status: 400 });
   try {
-    return Response.json(await createPaypleSession(authorization.ownerId, authorization.userId, plan, payload?.contractAccepted === true), { status: 201 });
+    return Response.json(await createPaypleSession(authorization.ownerId, authorization.userId, plan, payload?.contractAccepted === true,
+      { priceWon: payload?.priceWon, seats: payload?.seats }), { status: 201 });
   } catch (error) {
     const message = error instanceof Error ? error.message : "카드 등록 세션을 만들지 못했습니다.";
     return Response.json({ error: message, code: /운영 승인|설정/.test(message) ? "billing_not_configured" : "session_failed" }, { status: /운영 승인|설정/.test(message) ? 503 : 400 });

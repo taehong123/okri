@@ -61,6 +61,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
   const [paypalAccepted, setPaypalAccepted] = useState(false);
   const [paypalNotice, setPaypalNotice] = useState("");
   const returnHandled = useRef(false);
+  const bridgeHandled = useRef(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -81,6 +82,31 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
   }, []);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    if (!billing?.canManage || bridgeHandled.current) return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("payple") !== "return") return;
+    bridgeHandled.current = true;
+    const sessionToken = decodeURIComponent(url.hash.slice(1));
+    url.hash = "";
+    url.searchParams.delete("payple");
+    window.history.replaceState(window.history.state, "", url);
+    setWorking("checkout");
+    void (async () => {
+      try {
+        const response = await fetch("/api/billing/payple/complete-bridge", {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sessionToken }),
+        });
+        const data = await response.json() as { error?: string; code?: string; messageCode?: string };
+        if (!response.ok) throw new Error(apiError(data, "카드 등록을 완료하지 못했습니다."));
+        onNotice(t("결제를 확인했습니다. 요금제가 적용되었습니다."), "success");
+        await refresh();
+      } catch (error) {
+        onNotice(error instanceof Error ? error.message : t("카드 등록을 완료하지 못했습니다."), "error");
+      } finally { setWorking(null); }
+    })();
+  }, [billing?.canManage, onNotice, refresh]);
 
   const syncPayPal = useCallback(async () => {
     if (working) return;
@@ -154,20 +180,38 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
       const response = await fetch("/api/billing/payple/session", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ plan: selectedPlan, contractAccepted: true }),
+        body: JSON.stringify({ plan: selectedPlan, contractAccepted: true, seats: billing.billableEditors,
+          priceWon: (plans.find(plan => plan.id === selectedPlan)?.seatPrice ?? 0) * Math.max(1, billing.billableEditors) }),
       });
-      const session = await response.json() as { error?: string; messageCode?: string; sessionToken?: string; authUrl?: string; merchantId?: string; returnUrl?: string };
-      if (!response.ok || !session.sessionToken || !session.authUrl) throw new Error(apiError(session, "카드 등록을 시작하지 못했습니다."));
+      const session = await response.json() as { error?: string; messageCode?: string; sessionToken?: string; authUrl?: string; clientKey?: string; returnUrl?: string; bridgeUrl?: string | null };
+      if (response.ok && session.bridgeUrl) {
+        const bridge = new URL(session.bridgeUrl);
+        if (bridge.origin !== "https://mamuree.com" || bridge.pathname !== "/api/public/payple/okri/bridge"
+          || bridge.username || bridge.password || decodeURIComponent(bridge.hash.slice(1)) !== session.sessionToken) {
+          throw new Error(t("카드 등록을 시작하지 못했습니다."));
+        }
+        bridge.searchParams.set("lang", getClientLocale());
+        bridge.searchParams.set("theme", document.documentElement.dataset.theme || "white");
+        window.location.assign(bridge.href);
+        return;
+      }
+      if (!response.ok || !session.sessionToken || !session.clientKey || !session.authUrl
+        || !["https://cpay.payple.kr/js/v1/payment.js", "https://democpay.payple.kr/js/v1/payment.js"].includes(session.authUrl)
+        || session.returnUrl !== "/api/billing/payple/result") throw new Error(apiError(session, "카드 등록을 시작하지 못했습니다."));
       await loadExternalScript(session.authUrl);
       if (!window.PaypleCpayAuthCheck) throw new Error(t("Payple 카드 등록 모듈을 불러오지 못했습니다."));
       window.PaypleCpayAuthCheck({
-        clientKey: session.merchantId,
+        clientKey: session.clientKey,
         PCD_PAY_TYPE: "card",
         PCD_PAY_WORK: "AUTH",
         PCD_CARD_VER: "01",
         PCD_RST_URL: session.returnUrl,
         callbackFunction: async (result: Record<string, unknown>) => {
           try {
+            if (result.PCD_PAY_RST === "close") return;
+            if (result.PCD_PAY_RST !== "success" || result.PCD_PAY_WORK !== "AUTH" || result.PCD_PAY_TYPE !== "card") {
+              throw new Error(t("카드 등록을 완료하지 못했습니다."));
+            }
             const billingKey = String(result.PCD_PAYER_ID || "");
             const complete = await fetch("/api/billing/payple/result", {
               method: "POST",
@@ -189,7 +233,7 @@ export default function BillingView({ onNotice }: { onNotice: (message: string, 
             onNotice(completeError instanceof Error ? completeError.message : t("카드 등록을 완료하지 못했습니다."), "error");
           } finally { setWorking(null); }
         },
-      }, "prod");
+      });
     } catch (checkoutError) {
       onNotice(checkoutError instanceof Error ? checkoutError.message : t("카드 등록을 시작하지 못했습니다."), "error");
       setWorking(null);

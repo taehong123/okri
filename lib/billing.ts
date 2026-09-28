@@ -4,6 +4,9 @@ import { aiUsagePercent } from "@/lib/ai-usage";
 import { cancelPayPalSubscription, ensurePayPalSchema, expirePayPalEntitlement, getPayPalSubscription,
   payPalCheckoutOptions, reconcilePayPalSubscriptions, refundPayPalFirstPayment, withWorkspaceLock } from "@/lib/billing-paypal";
 import { withTimeout } from "@/lib/promise-timeout";
+import { inquirePaypleKey, paypleSdk, PaypleError } from "@/lib/payple-api";
+import { chargePaypleOnce, refundPaypleOnce, nextPaypleBillingMonth, paypleScheduledChargeReady } from "@/lib/billing-payple";
+import { paypleBridgeUrl, requirePaypleImmediateConsent } from "@/lib/payple-bridge";
 
 const MIB = 1024 ** 2;
 const GIB = 1024 ** 3;
@@ -23,6 +26,9 @@ export type SubscriptionStatus = "free" | "trialing" | "active" | "past_due" | "
 type BillingRuntimeEnv = typeof env & {
   BILLING_ENFORCEMENT_ENABLED?: string;
   PAYPLE_CST_ID?: string;
+  PAYPLE_CLIENT_KEY?: string;
+  PAYPLE_CHECKOUT_ORIGIN?: string;
+  PAYPLE_PILOT_USER_ID?: string;
   PAYPLE_CHECKOUT_VERIFIED?: string;
   PAYPLE_CUST_KEY?: string;
   PAYPLE_AUTH_URL?: string;
@@ -133,15 +139,20 @@ export function billingEnforcementEnabled() {
 
 export function paypleConfigured() {
   const runtime = env as BillingRuntimeEnv;
+  try { paypleSdk(runtime); } catch { return false; }
   return Boolean(
     runtime.PAYPLE_CHECKOUT_VERIFIED === "true"
       && runtime.PAYPLE_CST_ID
       && runtime.PAYPLE_CUST_KEY
-      && runtime.PAYPLE_AUTH_URL
       && runtime.PAYPLE_API_URL
       && runtime.PAYPLE_REFUND_KEY
       && runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY,
   );
+}
+
+export function paypleCheckoutAllowed(userId: string) {
+  const pilot = (env as BillingRuntimeEnv).PAYPLE_PILOT_USER_ID;
+  return paypleConfigured() && (!pilot || pilot === userId);
 }
 
 export async function ensureBillingSchema() {
@@ -364,8 +375,8 @@ export async function getBillingStatus(workspaceId: string, userId: string, role
     })),
     canManage: role === "owner",
     enforcementEnabled: billingEnforcementEnabled(),
-    checkoutAvailable: paypleConfigured() || paypalPlans.length > 0,
-    providers: { payple: paypleConfigured(), paypal: paypalPlans },
+    checkoutAvailable: paypleCheckoutAllowed(userId) || paypalPlans.length > 0,
+    providers: { payple: paypleCheckoutAllowed(userId), paypal: paypalPlans },
     paypal: paypal ? { plan: paypal.plan, status: paypal.status, paidThrough: paypal.paid_through,
       currency: paypal.currency, value: paypal.price_value, seatCount: Number(paypal.seat_count || 1),
       pendingSeatCount: paypal.pending_seat_count === null ? null : Number(paypal.pending_seat_count) } : null,
@@ -647,19 +658,25 @@ async function getAiMonthlyUsage(workspaceId: string, billingOwnerUserId: string
   return Number(row?.spent ?? 0);
 }
 
-export async function createPaypleSession(workspaceId: string, userId: string, plan: BillingPlan, contractAccepted: boolean) {
-  if (!paypleConfigured()) throw new Error("Payple 운영 승인이 완료되지 않아 카드 등록을 시작할 수 없습니다.");
+export async function createPaypleSession(workspaceId: string, userId: string, plan: BillingPlan, contractAccepted: boolean,
+  quote: { priceWon: unknown; seats: unknown }) {
+  if (!paypleCheckoutAllowed(userId)) throw new Error("Payple 운영 승인이 완료되지 않아 카드 등록을 시작할 수 없습니다.");
   if (plan === "free") throw new Error("유료 플랜을 선택해 주세요.");
   if (!contractAccepted) throw new Error("가격·자동 갱신·해지 및 환불 조건에 동의해 주세요.");
   await ensureBillingSchema();
   return withWorkspaceLock(workspaceId, async () => {
   if (await getPayPalSubscription(workspaceId)) throw new Error("진행 중인 구독을 먼저 확인해 주세요. 중복 결제는 진행하지 않습니다.");
+  const current = await getWorkspaceSubscription(workspaceId);
+  if (current.plan !== "free") throw new Error("진행 중인 구독을 먼저 확인해 주세요. 중복 결제는 진행하지 않습니다.");
   const token = crypto.randomUUID();
   const tokenHash = await sha256(token);
   const now = new Date();
   const runtime = env as BillingRuntimeEnv;
   const billableEditors = await getBillableEditorCount(workspaceId);
   const monthlyPriceWon = planMonthlyPriceWon(plan, billableEditors);
+  if (quote.priceWon !== monthlyPriceWon || quote.seats !== billableEditors) {
+    throw new Error("편집 멤버 수가 변경되었습니다. 현재 예상 요금을 확인하고 카드를 다시 등록해 주세요.");
+  }
   await runtime.DB.prepare(`INSERT INTO billing_sessions
     (token_hash, workspace_id, user_id, plan, price_won, consented_at, expires_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)`)
@@ -669,9 +686,9 @@ export async function createPaypleSession(workspaceId: string, userId: string, p
     expiresAt: new Date(now.getTime() + 30 * 60_000).toISOString(),
     provider: "payple",
     work: "AUTH",
-    authUrl: runtime.PAYPLE_AUTH_URL,
-    merchantId: runtime.PAYPLE_CST_ID,
-    returnUrl: `${billingPublicUrl(runtime)}/api/billing/payple/result`,
+    ...paypleSdk(runtime),
+    bridgeUrl: paypleBridgeUrl(runtime, token),
+    returnUrl: "/api/billing/payple/result",
     plan,
     seatPriceWon: BILLING_PLANS[plan].seatPriceWon,
     billableEditors,
@@ -684,7 +701,12 @@ export async function completePaypleRegistration(input: {
   workspaceId: string; userId: string; sessionToken: string; billingKey: string; payerId: string;
   maskedCard: string; cardCompany: string; paypleTransactionId?: string;
 }) {
-  if (!paypleConfigured()) throw new Error("Payple 운영 설정이 완료되지 않았습니다.");
+  if (!paypleCheckoutAllowed(input.userId)) throw new Error("Payple 운영 설정이 완료되지 않았습니다.");
+  await ensureBillingSchema();
+  return withWorkspaceLock(input.workspaceId, async () => {
+  if (await getPayPalSubscription(input.workspaceId)) throw new Error("진행 중인 구독을 먼저 확인해 주세요. 중복 결제는 진행하지 않습니다.");
+  const current = await getWorkspaceSubscription(input.workspaceId);
+  if (current.plan !== "free") throw new Error("진행 중인 구독을 먼저 확인해 주세요. 중복 결제는 진행하지 않습니다.");
   const runtime = env as BillingRuntimeEnv;
   const tokenHash = await sha256(input.sessionToken);
   const session = await runtime.DB.prepare(`SELECT * FROM billing_sessions
@@ -698,7 +720,7 @@ export async function completePaypleRegistration(input: {
   if (!claimed.meta.changes) throw new Error("카드 등록 세션이 이미 처리 중이거나 사용되었습니다.");
   try {
   const verified = await verifyPaypleBillingKey(runtime, input.billingKey, input.payerId);
-  const payerHash = await sha256(input.payerId);
+  const payerHash = await sha256(verified.billingKey);
   const owner = await runtime.DB.prepare("SELECT owner_user_id FROM workspaces WHERE id = ? LIMIT 1").bind(input.workspaceId).first<{ owner_user_id: string }>();
   if (!owner) throw new Error("워크스페이스를 찾을 수 없습니다.");
   const priorClaim = await runtime.DB.prepare(`SELECT id FROM billing_trial_claims
@@ -711,11 +733,11 @@ export async function completePaypleRegistration(input: {
   const monthlyPriceWon = planMonthlyPriceWon(plan, billableEditors);
   if (Number(session.price_won) !== monthlyPriceWon) throw new Error("편집 멤버 수가 변경되었습니다. 현재 예상 요금을 확인하고 카드를 다시 등록해 주세요.");
   const methodId = crypto.randomUUID();
-  const immediatePeriodEnd = new Date(now);
-  immediatePeriodEnd.setUTCMonth(immediatePeriodEnd.getUTCMonth() + 1);
+  const immediatePeriodEnd = nextPaypleBillingMonth(now);
   const immediateOrderId = `okri-first-${tokenHash.slice(0, 24)}`;
+  if (priorClaim) await requirePaypleImmediateConsent(runtime, tokenHash, monthlyPriceWon);
   const immediatePayment = priorClaim
-    ? await paypleCharge(runtime, verified.billingKey, immediateOrderId, monthlyPriceWon)
+    ? await paypleCharge(runtime, verified.billingKey, immediateOrderId, monthlyPriceWon, input.workspaceId)
     : null;
   await runtime.DB.batch([
     runtime.DB.prepare("UPDATE billing_payment_methods SET active = 0, revoked_at = ?, updated_at = ? WHERE workspace_id = ? AND active = 1")
@@ -766,6 +788,7 @@ export async function completePaypleRegistration(input: {
       .bind(tokenHash, sessionClaim).run().catch(() => undefined);
     throw error;
   }
+  });
 }
 
 export async function changePlan(workspaceId: string, plan: BillingPlan) {
@@ -794,10 +817,9 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
       .bind(workspaceId).first<{ encrypted_billing_key: string }>();
     if (!method) throw new Error("등록된 결제수단이 없습니다. 카드를 다시 등록해 주세요.");
     const periodStart = new Date();
-    const periodEnd = new Date(periodStart);
-    periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+    const periodEnd = nextPaypleBillingMonth(periodStart);
     const orderId = `okri-reactivate-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.updated_at)}`;
-    const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, nextPriceWon);
+    const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, nextPriceWon, workspaceId);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
         (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, payple_transaction_id, receipt_url,
@@ -826,7 +848,7 @@ export async function changePlan(workspaceId: string, plan: BillingPlan) {
     const difference = nextPriceWon - currentPriceWon;
     const priceWon = Math.max(1, Math.ceil((difference * remaining) / fullPeriod));
     const orderId = `okri-upgrade-${workspaceId.slice(0, 10)}-${plan}-${stableTimestamp(current.current_period_ends_at || current.updated_at)}`;
-    const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, priceWon);
+    const paid = await paypleCharge(runtime, await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!), orderId, priceWon, workspaceId);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
         (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, payple_transaction_id, receipt_url,
@@ -871,7 +893,7 @@ export async function refundFirstPayment(workspaceId: string) {
       (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at > ?) AS ai`)
     .bind(workspaceId, transaction.created_at, workspaceId, transaction.created_at).first<{ projects: number; ai: number }>();
   if (Number(activity?.projects ?? 0) > 0 || Number(activity?.ai ?? 0) > 0) throw new Error("결제 후 Project 생성 또는 AI 사용 기록이 있어 셀프 환불할 수 없습니다.");
-  await paypleOperation(runtime, "cancel", String(transaction.payple_transaction_id || ""), Number(transaction.price_won));
+  await refundPaypleOnce(runtime, String(transaction.order_id), Number(transaction.price_won));
   await runtime.DB.batch([
     runtime.DB.prepare("UPDATE billing_transactions SET status = 'refunded', updated_at = CURRENT_TIMESTAMP WHERE id = ?").bind(transaction.id),
     runtime.DB.prepare("UPDATE workspace_subscriptions SET plan = 'free', status = 'free', next_plan = NULL, cancel_at_period_end = 0, next_billing_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE workspace_id = ?").bind(workspaceId),
@@ -925,6 +947,11 @@ async function processDueSubscription(runtime: BillingRuntimeEnv, subscription: 
   }
   const plan = validPlan(subscription.plan) ? subscription.plan : "free";
   if (plan === "free") return;
+  if (!await paypleScheduledChargeReady(runtime, subscription.workspace_id,
+    subscription.status === "trialing" ? subscription.trial_started_at : null, now)) {
+    console.error("payple_scheduled_notice_required");
+    return;
+  }
   const method = await runtime.DB.prepare("SELECT * FROM billing_payment_methods WHERE workspace_id = ? AND active = 1 LIMIT 1")
     .bind(subscription.workspace_id).first<Record<string, string>>();
   if (!method) {
@@ -934,13 +961,12 @@ async function processDueSubscription(runtime: BillingRuntimeEnv, subscription: 
   const orderId = `okri-${subscription.workspace_id.slice(0, 10)}-${stableTimestamp(subscription.next_billing_at || subscription.updated_at)}-${subscription.retry_count}`;
   const existing = await runtime.DB.prepare("SELECT status FROM billing_transactions WHERE order_id = ? LIMIT 1").bind(orderId).first<{ status: string }>();
   if (existing?.status === "paid") return;
-  const periodEnd = new Date(now);
-  periodEnd.setUTCMonth(periodEnd.getUTCMonth() + 1);
+  const periodEnd = nextPaypleBillingMonth(now);
   try {
     const billableEditors = await getBillableEditorCount(subscription.workspace_id);
     const monthlyPriceWon = planMonthlyPriceWon(plan, billableEditors);
     const billingKey = await decryptPrivateValue(method.encrypted_billing_key, runtime.PAYPLE_BILLING_KEY_ENCRYPTION_KEY!);
-    const paid = await paypleCharge(runtime, billingKey, orderId, monthlyPriceWon);
+    const paid = await paypleCharge(runtime, billingKey, orderId, monthlyPriceWon, subscription.workspace_id);
     await runtime.DB.batch([
       runtime.DB.prepare(`INSERT INTO billing_transactions
         (id, workspace_id, order_id, idempotency_key, kind, plan, price_won, status, payple_transaction_id, receipt_url,
@@ -956,6 +982,10 @@ async function processDueSubscription(runtime: BillingRuntimeEnv, subscription: 
         .bind(now.toISOString(), now.toISOString(), now.toISOString(), periodEnd.toISOString(), periodEnd.toISOString(), now.toISOString(), subscription.workspace_id),
     ]);
   } catch (error) {
+    if (error instanceof PaypleError && error.uncertain) {
+      console.error("payple_reconciliation_required");
+      return;
+    }
     await markPaymentFailure(runtime, subscription, now, error instanceof Error ? error.message.slice(0, 120) : "payment_failed");
   }
 }
@@ -1012,20 +1042,7 @@ async function sendDueBillingNotifications(runtime: BillingRuntimeEnv, now: Date
 
 async function verifyPaypleBillingKey(runtime: BillingRuntimeEnv, billingKey: string, payerId: string) {
   if (!billingKey || !payerId) throw new Error("Payple 카드 등록 결과가 올바르지 않습니다.");
-  const response = await fetch(`${runtime.PAYPLE_API_URL!.replace(/\/$/, "")}/inquire`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Referer: billingPublicUrl(runtime) },
-    body: JSON.stringify({ cst_id: runtime.PAYPLE_CST_ID, custKey: runtime.PAYPLE_CUST_KEY, PCD_PAYPLE_PAYER_ID: payerId, PCD_PAYER_AUTHTYPE: "pwd" }),
-  });
-  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || String(data.PCD_PAY_RST ?? data.result ?? "") !== "success") throw new Error("Payple 서버에서 빌링키를 확인하지 못했습니다.");
-  const verifiedKey = String(data.PCD_PAYER_ID ?? data.billingKey ?? billingKey);
-  if (verifiedKey !== billingKey) throw new Error("Payple 빌링키 검증 결과가 일치하지 않습니다.");
-  return {
-    billingKey: verifiedKey,
-    cardCompany: String(data.PCD_PAY_CARDNAME ?? data.cardCompany ?? ""),
-    maskedCard: String(data.PCD_PAY_CARDNUM ?? data.maskedCard ?? ""),
-  };
+  return inquirePaypleKey(runtime, billingKey);
 }
 
 async function getEditorEnforcementState(workspaceId: string) {
@@ -1040,28 +1057,8 @@ async function getEditorEnforcementState(workspaceId: string) {
   return { enforced: Date.now() >= Date.parse(graceEndsAt), graceEndsAt };
 }
 
-async function paypleCharge(runtime: BillingRuntimeEnv, billingKey: string, orderId: string, priceWon: number) {
-  const response = await fetch(`${runtime.PAYPLE_API_URL!.replace(/\/$/, "")}/payment`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Referer: billingPublicUrl(runtime) },
-    body: JSON.stringify({ cst_id: runtime.PAYPLE_CST_ID, custKey: runtime.PAYPLE_CUST_KEY, PCD_PAY_TYPE: "card", PCD_PAY_WORK: "PAY",
-      PCD_PAYER_ID: billingKey, PCD_PAY_OID: orderId, PCD_PAY_GOODS: "OKRI subscription", PCD_PAY_TOTAL: priceWon }),
-  });
-  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || String(data.PCD_PAY_RST ?? "") !== "success") throw new Error(String(data.PCD_PAY_CODE ?? "payment_failed"));
-  return { transactionId: String(data.PCD_PAY_AUTHNO ?? data.PCD_PAY_OID ?? orderId), receiptUrl: String(data.PCD_PAY_RECEIPT ?? "") || null };
-}
-
-async function paypleOperation(runtime: BillingRuntimeEnv, operation: "cancel", transactionId: string, priceWon: number) {
-  if (!transactionId) throw new Error("Payple 거래번호가 없습니다.");
-  const response = await fetch(`${runtime.PAYPLE_API_URL!.replace(/\/$/, "")}/cancel`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Referer: billingPublicUrl(runtime) },
-    body: JSON.stringify({ cst_id: runtime.PAYPLE_CST_ID, custKey: runtime.PAYPLE_CUST_KEY, refundKey: runtime.PAYPLE_REFUND_KEY,
-      PCD_PAY_WORK: "CANCEL", PCD_PAY_AUTHNO: transactionId, PCD_REFUND_TOTAL: priceWon, operation }),
-  });
-  const data = await response.json().catch(() => ({})) as Record<string, unknown>;
-  if (!response.ok || String(data.PCD_PAY_RST ?? "") !== "success") throw new Error(String(data.PCD_PAY_CODE ?? "refund_failed"));
+async function paypleCharge(runtime: BillingRuntimeEnv, billingKey: string, orderId: string, priceWon: number, workspaceId: string) {
+  return chargePaypleOnce(runtime, billingKey, orderId, priceWon, workspaceId);
 }
 
 function validPlan(value: string): value is BillingPlan {

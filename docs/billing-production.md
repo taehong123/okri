@@ -1,5 +1,49 @@
 # OKRI 결제 운영 연결
 
+## 2026-09-29 재확인 및 준비 상태
+
+- 최초 점검에서 `okri-runtime`의 Payple 상점 키가 없었다. 이후 사용자 요청에 따라
+  기존 `mamuree` 상점 정보를 보안 저장소에 연결하고, OKRI 전용 암호화 키를 따로 만들었다.
+  운영 파트너 인증은 성공했으나 카드 등록·실제 청구·환불 성공을 의미하지 않는다.
+  한도 적용은 계속 꺼져 있다.
+- 이번 요청은 국내 웹 Payple 우선, 해외 iOS Apple 인앱결제다. PayPal 신규 연결은
+  진행하지 않는다. 아래 9월 10일 기록은 과거 상태다.
+- Payple SDK에는 상점 비밀 키가 아닌 별도 `PAYPLE_CLIENT_KEY`를 전달한다.
+  `PAYPLE_API_URL`은 운영 `https://cpay.payple.kr`, 검증
+  `https://democpay.payple.kr` 중 하나만 허용한다. SDK 경로는
+  `/js/v1/payment.js`로 고정하며 `PAYPLE_AUTH_URL`은 더 이상 사용하지 않는다.
+- 서버는 `/php/auth.php`의 임시 인증값으로 빌링키 조회·청구·원거래 조회·환불을
+  수행한다. 브라우저 콜백 자체를 결제 증거로 취급하지 않는다.
+- 새 마이그레이션 `0068_payple_attempts`, `0069_payple_bridge`가 먼저 적용되어야 한다. 동일 주문의
+  응답이 유실되면 저장된 주문을 조회하며 다시 청구하지 않는다. 환불 결과가
+  불명확하면 자동 재환불하지 않고 관리자 대조가 필요하다.
+- 모의 검증은 `npm run test:billing`. 운영 카드, 운영 고객 데이터로 테스트하지
+  않는다. Payple 검증 환경도 실제 카드 승인이 생길 수 있으므로 사용자 승인 없이
+  카드를 등록하거나 결제하지 않는다.
+- 결제창은 실제 등록된 `https://mamuree.com/api/public/payple/okri/bridge`에서 연다.
+  이 전용 접두 경로만 OKRI로 연결하며, 기존 마무리·OrderFlow·공용 웹훅은 변경하지 않는다.
+  상품은 OKRI로 표시하고 등록 결과는 암호화해 임시 보관한다. OKRI로 돌아온 원래 Owner의
+  인증·워크스페이스·일회성 세션·현재 금액을 다시 확인해야 구독이 반영된다.
+- 새 세션을 만들어도 미확정 청구가 있으면 재청구하지 않는다. 체험을 이미 사용한 고객은
+  오늘 결제 금액에 명시적으로 동의해야 즉시 청구한다. 월말 갱신일은 다음 달 말일로 보정한다.
+- 초기 운영 연결은 `PAYPLE_PILOT_USER_ID`에 지정한 요청자만 허용한다. 이 제한은 화면뿐 아니라
+  세션 발급·브리지·등록 완료에서 검사한다. `PAYPLE_CHECKOUT_VERIFIED=true`만으로 전체 공개
+  또는 실제 거래 검증 완료를 뜻하지 않는다. 상점 계약 범위의 별도 승인 사실은 확인되지 않았다.
+- 전체 공개 전 남은 항목: 사용자 카드로 등록 및 승인된 청구·취소 확인, 미확정 거래/환불 수동
+  대조, 예약 실행·알림 확인. 완료 후에만 pilot 제한 해제를 결정한다. 한도 적용은 별도 결정이다.
+- 현재 Kubernetes 예약 작업은 동작하지만 결제 안내 메일 자격 증명과 발신 주소는 없다.
+  예약 청구는 메일 설정이 없으면 실행하지 않는다. 체험 후 첫 청구는 계약 확인과 7일/1일 전
+  안내가 발송되고 각 예고 기간이 지난 경우에만 가능하다. 기존 취소 처리에는 이 조건을 적용하지 않는다.
+- Apple은 개인 1명 월 구독부터 준비한다. 가격은 미승인 상태이며 상품 초안과
+  다음 바이너리 구현 조건은 `docs/APPLE_SUBSCRIPTIONS.md`에 기록했다.
+  현재 심사 중인 iOS 바이너리에는 결제가 추가되지 않았다.
+
+공식 Payple 규격:
+- https://docs.payple.kr/integration/domestic-card/billing
+- https://docs.payple.kr/operation/domestic-card/billkey-inquiry
+- https://docs.payple.kr/operation/domestic-card/result
+- https://docs.payple.kr/operation/domestic-card/cancel
+
 ## 2026-09-10 확인 결과
 
 - 출시 순서는 국내 Payple 우선, 해외 PayPal 후속으로 결정했다. 운영값이 없는 결제수단은 고객 화면에 표시하지 않는다.
@@ -78,18 +122,22 @@ PayPal 거래 원문/이름/주소/카드는 저장하지 않고 식별번호·�
 
 ## 1. Payple 승인
 
-1. 기존 Payple 계약에 `okri.ai`과 OKRI 월 구독 상품을 추가하거나 별도 상점키를 발급받는다.
+1. 현재는 사용자 소유 `mamuree` 상점의 공용 결제 호스트를 사용한다. 실제 결제창을 등록된
+   도메인에서 제공하는 구조이며, 상품명을 숨기거나 Referer만 위조하는 방식이 아니다.
 2. 국내 카드 정기결제 `AUTH`, 결제, 전액 취소, 빌링키 해지를 모두 승인받는다.
-3. 등록 도메인과 브라우저 `Referer`가 `https://okri.ai`으로 일치하는지 확인한다.
-4. Orderflow의 상점키나 빌링키 암호화 키를 복사하지 않는다.
+3. 결제창과 서버 파트너 인증의 도메인은 `https://mamuree.com`으로 일치한다.
+4. 사용자가 승인한 동일 상점 자격 증명만 연결한다. 빌링키 암호화 키와 고객 빌링키는
+   다른 서비스에서 가져오지 않는다. 기존 다른 서비스의 결제 경로와 비밀값은 수정하지 않는다.
 
 Sites 운영 보안값:
 
 - `PAYPLE_CST_ID`
-- `PAYPLE_CHECKOUT_VERIFIED=true`: 아래 승인·실제 API 계약 검증이 완료된 경우에만 설정
+- `PAYPLE_CHECKOUT_VERIFIED=true`: 운영 연결 스위치. 초기에는 아래 pilot 제한을 반드시 함께 설정
+- `PAYPLE_PILOT_USER_ID`: 초기 카드 등록을 진행할 원래 요청자의 OKRI 사용자 ID
+- `PAYPLE_CHECKOUT_ORIGIN=https://mamuree.com`
 - `PAYPLE_CUST_KEY`
-- `PAYPLE_AUTH_URL`: Payple이 제공한 운영 카드 등록 SDK URL
-- `PAYPLE_API_URL`: Payple이 제공한 운영 정기결제 API 기준 URL
+- `PAYPLE_CLIENT_KEY`: Payple이 제공한 공개 결제창 클라이언트 키
+- `PAYPLE_API_URL`: `https://cpay.payple.kr` (운영)
 - `PAYPLE_REFUND_KEY`
 - `PAYPLE_BILLING_KEY_ENCRYPTION_KEY`: 다른 서비스·OAuth와 분리된 무작위 키
 - `RESEND_API_KEY`

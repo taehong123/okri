@@ -1,0 +1,14 @@
+{
+  "status": "draft-not-for-sale",
+  "bundleId": "ai.okri.app",
+  "scope": "single-editor-workspace",
+  "maxBillableEditors": 1,
+  "subscriptionPeriod": "ONE_MONTH",
+  "familySharing": false,
+  "products": [
+    { "proposedProductId": "ai.okri.app.team.personal.monthly", "plan": "team", "approvedPrice": null },
+    { "proposedProductId": "ai.okri.app.business.personal.monthly", "plan": "business", "approvedPrice": null }
+  ],
+  "purchaseEnabled": false,
+  "storeRegistrationConfirmed": false
+}

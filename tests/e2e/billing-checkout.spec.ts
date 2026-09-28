@@ -41,6 +41,31 @@ test("pricing table shows per-editor prices and the current workspace total", as
   await pricing.screenshot({ path: info.outputPath("pricing-desktop.png") });
 });
 
+test("Payple sends the displayed quote and closing the mocked SDK never registers a card", async ({ page }) => {
+  await installBilling(page, "ko", { ...billingFixture(), providers: { payple: true, paypal: [] } });
+  let quote: unknown;
+  let registrationCalls = 0;
+  await page.route("**/api/billing/payple/session", async route => {
+    quote = route.request().postDataJSON();
+    await json(route, { sessionToken: "mock-session", clientKey: "mock-public-key",
+      authUrl: "https://democpay.payple.kr/js/v1/payment.js", returnUrl: "/api/billing/payple/result" }, 201);
+  });
+  await page.route("https://democpay.payple.kr/js/v1/payment.js", route => route.fulfill({
+    contentType: "application/javascript",
+    body: 'window.PaypleCpayAuthCheck = options => options.callbackFunction({ PCD_PAY_RST: "close" });',
+  }));
+  await page.route("**/api/billing/payple/result", async route => { registrationCalls++; await json(route, {}, 400); });
+  await page.goto("/?view=billing");
+  const checkout = page.locator(".billing-checkout");
+  const pay = checkout.getByRole("button", { name: "국내 카드 등록하고 30일 체험", exact: true });
+  await expect(pay).toBeDisabled();
+  await checkout.getByRole("checkbox").check();
+  await pay.click();
+  await expect(pay).toBeEnabled();
+  expect(quote).toEqual({ plan: "team", contractAccepted: true, seats: 3, priceWon: 8700 });
+  expect(registrationCalls).toBe(0);
+});
+
 test("PayPal checkout requires explicit consent, sends the displayed price and preserves state on failure", async ({ page }) => {
   await installBilling(page);
   let body: Record<string, unknown> | null = null;

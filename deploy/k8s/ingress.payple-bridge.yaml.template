@@ -1,0 +1,23 @@
+# Apply only after the bridge build, TLS and merchant configuration are verified.
+# Do not change existing mamuree or OrderFlow routes, secrets or webhooks.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: okri-payple-bridge
+  namespace: okri
+  annotations:
+    traefik.ingress.kubernetes.io/router.entrypoints: websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+spec:
+  ingressClassName: traefik
+  rules:
+    - host: mamuree.com
+      http:
+        paths:
+          - path: /api/public/payple/okri
+            pathType: Prefix
+            backend:
+              service:
+                name: okri
+                port:
+                  name: http

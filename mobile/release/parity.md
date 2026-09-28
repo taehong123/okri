@@ -1,5 +1,21 @@
 # Native parity ledger
 
+- 2026-09-29: The user requested reuse of the existing mamuree merchant. Web
+  checkout now supports a dedicated mamuree.com payment bridge with a fragment
+  session token, encrypted staging, originating-owner confirmation, explicit
+  immediate-charge consent and per-workspace unresolved-payment exclusion.
+  Checkout can be restricted by PAYPLE_PILOT_USER_ID during live validation.
+  Native v1 and the submitted iOS binary remain unchanged; no Apple IAP or
+  Android Billing implementation is implied.
+
+- 2026-09-29: Payple web checkout uses the public SDK client key, authenticated
+  provider operations, quote checks and a durable payment-attempt ledger.
+  This is web/server-only; native v1 and the submitted iOS binary are unchanged.
+  Apple personal one-editor monthly products are draft-only, with unapproved
+  prices and purchases disabled. StoreKit purchase/restore, server verification
+  and entitlement enforcement are deferred to the next payment-enabled binary;
+  see `docs/APPLE_SUBSCRIPTIONS.md`. No live payment or native billing is claimed.
+
 - 2026-09-28: Default White actions now use charcoal instead of informational blue, with neutral backdrop/elevation colors. Web detail/settings drawers use the shared shadow role. Installed clients and API semantics are unchanged; future native builds inherit the shared action palette and still require their own device contrast evidence. No native release is claimed.
 
 - 2026-09-28: Release readiness fixes nullable tester links, scheduler environment typing, self-hosted binary/metadata adapters and mismatched browser-test dependencies. TestFlight upload resolves the protected API key directory explicitly. These are shared infrastructure and release-tooling fixes; native screens and frozen v1 semantics are unchanged. Physical-device evidence and public release are still pending.
