@@ -4,6 +4,7 @@ declare namespace Cloudflare {
     ASSETS: Fetcher;
     WORKSPACE_AVATARS: R2Bucket;
     OKRI_MIGRATION_EXPORT_TOKEN?: string;
+    OKRI_SCHEDULER_TOKEN?: string;
     OKRI_API_TOKEN?: string;
     OKRPTR_API_TOKEN?: string;
     OKITA_API_TOKEN?: string;

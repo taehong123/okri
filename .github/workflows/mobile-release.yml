@@ -134,6 +134,8 @@ jobs:
           if-no-files-found: error
       - name: Upload exact IPA to TestFlight
         if: inputs.destination == 'store'
+        env:
+          API_PRIVATE_KEYS_DIR: ${{ runner.temp }}/okri-signing
         run: xcrun altool --upload-app --type ios --file "$IOS_ARTIFACT" --apiKey "$ASC_KEY_ID" --apiIssuer "$ASC_ISSUER_ID"
       - name: Remove signing material
         if: always()
