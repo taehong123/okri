@@ -6,6 +6,7 @@ test("daily summaries merge completed work in five languages with keyboard acces
   test.setTimeout(120_000);
   await installApiMocks(page, { teamWorkspace: true });
   let language = "ko";
+  let classified = false;
   let completionOnly = false;
   let theme = "white";
   const doneTitle = "완료한 고객 인터뷰를 정리하고 다음 단계에 필요한 긴 결과 문서를 검토한 업무 123";
@@ -20,7 +21,8 @@ test("daily summaries merge completed work in five languages with keyboard acces
       expect(route.request().method()).toBe("GET");
       const date = "2026-09-05";
       const submission = { id: "submission", memberId: "member-1", memberName: "테스트 사용자", memberEmail: "owner@example.test", date, version: 1, yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: completionOnly, source: "slack", submittedAt: date + "T01:00:00Z", tasks: [], yesterdayWork: [makeWork("previous", "어제 마친 업무")], work: [makeWork("task-1", doneTitle, true), ...(completionOnly ? [] : [makeWork("planned", "앞으로 할 업무")])] };
-      return route.fulfill({ json: { date, member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, draft: { id: "draft", date, yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: true, selectedTaskIds: [], selectedWorkIds: [], selectedYesterdayWorkIds: [] }, candidates: { work: [], yesterdayWork: [], tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: false }, latestSubmission: submission, team: [{ memberId: "member-1", displayName: "테스트 사용자", status: "submitted", slackConnected: true, submission }], legacyWorkspaceNote: null } });
+      const displayed = classified ? { ...submission, mustDoWorkIds: ["task:planned"], work: [...submission.work, makeWork("optional", "여유가 생기면 진행할 업무")] } : submission;
+      return route.fulfill({ json: { date, member: { id: "member-1", displayName: "테스트 사용자", role: "owner" }, draft: { id: "draft", date, yesterdayNote: "", todayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: true, selectedTaskIds: [], selectedWorkIds: [], selectedYesterdayWorkIds: [] }, candidates: { work: [], yesterdayWork: [], tasks: [], groups: [] }, createTargets: { projects: [], routines: [], allowGeneral: false }, latestSubmission: displayed, team: [{ memberId: "member-1", displayName: "테스트 사용자", status: "submitted", slackConnected: true, submission: displayed }], legacyWorkspaceNote: null } });
     }
     return route.fallback();
   });
@@ -53,6 +55,16 @@ test("daily summaries merge completed work in five languages with keyboard acces
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
     await page.screenshot({ path: testInfo.outputPath(`daily-summary-${id}.png`), fullPage: true });
   }
+  classified = true;
+  language = "ko";
+  await page.goto("/?view=scrum");
+  const tierSummary = page.locator(".daily-submission-summary");
+  await expect(tierSummary.getByRole("list")).toHaveCount(3);
+  await expect(tierSummary.getByRole("list", { name: "오늘 꼭 할 일", exact: true })).toContainText("앞으로 할 업무");
+  await expect(tierSummary.getByRole("list", { name: "오늘 꼭 할 일", exact: true })).not.toContainText("여유가 생기면");
+  await expect(tierSummary.getByRole("list", { name: "여유되면 할 일", exact: true })).toContainText("여유가 생기면 진행할 업무");
+  await page.screenshot({ path: testInfo.outputPath("daily-plan-tiers.png"), fullPage: true });
+  classified = false;
   if (testInfo.project.name === "desktop-chromium") {
     language = "ko";
     completionOnly = true;

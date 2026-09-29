@@ -14,6 +14,39 @@ const work = (id, completedToday = false, kind = "task") => ({ id, key: `${kind}
 const submission = (overrides = {}) => ({ memberName: "Member", date: "2026-09-05", tasks: [], work: [], yesterdayWork: [], yesterdayNote: "", todayNote: "", blockersNote: "", workStatus: "office", skipReason: null, ...overrides });
 const sections = (card) => card.blocks.filter((block) => block.type === "section").map((block) => block.text.text);
 
+test("classified Slack summaries keep required and optional work in order with no duplicate Task or Project row", () => {
+  const value = submission({ mustDoWorkIds: ["task:Required"], yesterdayWork: [work("Finished")],
+    tasks: [{ id: "snapshot", taskId: "Required", taskTitle: "Required", parentId: "project", parentKind: "project", parentTitle: "Parent" }],
+    work: [work("Required"), work("Optional")] });
+  const original = structuredClone(value);
+  const card = dailyCard(value);
+  const [completed, required, optional] = sections(card);
+  assert.match(completed, /^\*완료한 일\*/);
+  assert.match(required, /^\*오늘 꼭 할 일\*/); assert.match(required, /• Required/);
+  assert.equal((required.match(/• Required/g) ?? []).length, 1);
+  assert.doesNotMatch(required, /Optional/);
+  assert.match(optional, /^\*여유되면 할 일\*/); assert.match(optional, /• Optional/);
+  assert.doesNotMatch(optional, /Required|Finished/);
+  assert.equal(card.blocks.filter((block) => block.type === "divider").length, 2);
+  assert.deepEqual(value, original);
+});
+
+test("classified public/private cards fit Slack limits for many parents and keep completion controls private", async () => {
+  const tasks = Array.from({ length: 50 }, (_, i) => ({ id: "s" + i, taskId: "t" + i, taskTitle: "업무 " + i, parentId: "p" + i, parentKind: "project", parentTitle: "Project " + i }));
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const t = await serverLanguage.serverTranslator(language);
+    const value = submission({ tasks, mustDoWorkIds: tasks.slice(0, 9).map((task) => "task:" + task.taskId), todayNote: "Note", blockersNote: "Blocker" });
+    for (const showCompletionButtons of [false, true]) {
+      const card = dailyCard(value, t, { publicationId: "pub", showCompletionButtons });
+      assert.ok(card.blocks.length <= 50);
+      const headings = sections(card);
+      assert.ok(headings.indexOf("*" + t("오늘 꼭 할 일") + "*") < headings.indexOf("*" + t("여유되면 할 일") + "*"));
+      assert.equal(card.blocks.filter((block) => block.accessory?.action_id === "daily_publication_complete").length, showCompletionButtons ? 18 : 0);
+      for (const block of card.blocks) if (block.text) assert.ok(block.text.text.length <= 3000);
+    }
+  }
+});
+
 test("Slack merges all completed work and keeps remaining plans separate without mutating snapshots", () => {
   const value = submission({ yesterdayWork: [work("Previous")], work: [work("Finished", true), work("Finished project", true, "project"), work("Planned")], tasks: [{ taskTitle: "Legacy plan", parentTitle: "Parent", parentKind: "project", parentId: "project" }] });
   const original = structuredClone(value);

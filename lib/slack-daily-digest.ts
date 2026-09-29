@@ -4,14 +4,14 @@ import { serverTranslator, type Translator } from "./server-language";
 
 type Member = { id: string; name: string };
 type Work = { id: string; kind: string; completedToday?: boolean; parentId?: string | null; parentKind?: string };
-type Submission = { id: string; member_id: string; work_snapshot_json: string; yesterday_work_snapshot_json: string; work_status?: string; skip_reason: string | null };
+type Submission = { id: string; member_id: string; work_snapshot_json: string; yesterday_work_snapshot_json: string; must_do_work_ids_json?: string | null; work_status?: string; skip_reason: string | null };
 type Item = { id: string; kind: string; title: string; parent_id: string | null; routine_id: string | null };
 type Snapshot = { submission_id: string; task_id: string | null; id: string; parent_id: string | null; parent_kind: string };
 type Settings = { owner_id: string; weekdays: string; timezone: string; summary_time: string };
-export type DailyDigest = {
-  date: string; members: Array<Member & { shared: boolean; skipped: boolean; completed: number; planned: number }>;
-  groups: Array<{ id: string; title: string; completed: number; planned: number }>;
-  completed: number; planned: number;
+type PlanCounts = { completed: number; planned: number; mustDo: number; ifTime: number; unclassified: number };
+export type DailyDigest = PlanCounts & {
+  date: string; classified: boolean; members: Array<Member & PlanCounts & { shared: boolean; skipped: boolean }>;
+  groups: Array<{ id: string; title: string } & PlanCounts>;
 };
 
 export function digestClock(now: Date, timezone: string) {
@@ -34,7 +34,7 @@ export async function loadDailyDigest(db: D1Database, ownerId: string, date: str
     WHERE m.workspace_id = ? AND m.status = 'active' AND COALESCE(p.enabled, 1) = 1 ORDER BY m.display_name, m.id`)
     .bind(ownerId).all<Member>();
   const [submissions, items, snapshots] = await Promise.all([
-    db.prepare(`SELECT s.id, s.member_id, s.work_snapshot_json, s.yesterday_work_snapshot_json, s.work_status, s.skip_reason
+    db.prepare(`SELECT s.id, s.member_id, s.work_snapshot_json, s.yesterday_work_snapshot_json, s.must_do_work_ids_json, s.work_status, s.skip_reason
       FROM daily_submissions s WHERE s.owner_id = ? AND s.scrum_date = ? AND NOT EXISTS
       (SELECT 1 FROM daily_submissions newer WHERE newer.owner_id = s.owner_id AND newer.member_id = s.member_id
         AND newer.scrum_date = s.scrum_date AND newer.version > s.version)`)
@@ -57,8 +57,9 @@ function workList(json: string): Work[] {
 export function aggregateDailyDigest(date: string, members: Member[], submissions: Submission[], items: Item[], snapshots: Snapshot[]): DailyDigest {
   const byId = new Map(items.map((item) => [item.id, item]));
   const byMember = new Map(submissions.map((submission) => [submission.member_id, submission]));
-  const groups = new Map<string, { id: string; title: string; completed: Set<string>; planned: Set<string> }>();
-  const totals = { completed: new Set<string>(), planned: new Set<string>() };
+  const counts = () => ({ completed: new Set<string>(), planned: new Set<string>(), mustDo: new Set<string>(), ifTime: new Set<string>(), unclassified: new Set<string>() });
+  const groups = new Map<string, { id: string; title: string } & ReturnType<typeof counts>>();
+  const totals = counts();
   const bucket = (work: Work) => {
     const task = byId.get(work.id);
     if (task?.routine_id || (!task && work.parentKind === "routine")) return { id: "routines", title: "Routines" };
@@ -79,20 +80,32 @@ export function aggregateDailyDigest(date: string, members: Member[], submission
       }
       for (const id of completed.keys()) planned.delete(id);
     }
-    for (const [kind, workMap] of [["completed", completed], ["planned", planned]] as const) {
+    const classified = submission?.must_do_work_ids_json != null;
+    const mustDoKeys = new Set<string>(JSON.parse(submission?.must_do_work_ids_json || "[]"));
+    const mustDo = new Map([...planned].filter(([id]) => mustDoKeys.has(`task:${id}`)));
+    const ifTime = new Map([...planned].filter(([id]) => classified && !mustDo.has(id)));
+    const unclassified = classified ? new Map<string, Work>() : planned;
+    for (const [kind, workMap] of [["completed", completed], ["planned", planned], ["mustDo", mustDo], ["ifTime", ifTime], ["unclassified", unclassified]] as const) {
       for (const work of workMap.values()) {
         const value = bucket(work);
-        const group = groups.get(value.id) ?? { ...value, completed: new Set<string>(), planned: new Set<string>() };
+        const group = groups.get(value.id) ?? { ...value, ...counts() };
         group[kind].add(work.id); totals[kind].add(work.id); groups.set(value.id, group);
       }
     }
-    return { ...member, shared: Boolean(submission), skipped: submission?.work_status === "skip" || Boolean(submission?.skip_reason), completed: completed.size, planned: planned.size };
+    return { ...member, shared: Boolean(submission), skipped: submission?.work_status === "skip" || Boolean(submission?.skip_reason), completed: completed.size, planned: planned.size, mustDo: mustDo.size, ifTime: ifTime.size, unclassified: unclassified.size };
   });
-  if (!groups.has("routines")) groups.set("routines", { id: "routines", title: "Routines", completed: new Set(), planned: new Set() });
-  return { date, members: rows, groups: [...groups.values()].sort((a, b) => {
+  if (!groups.has("routines")) groups.set("routines", { id: "routines", title: "Routines", ...counts() });
+  const sizes = (sets: ReturnType<typeof counts>): PlanCounts => {
+    // Shared tasks count once: completion wins, then a member's explicit commitment.
+    for (const id of sets.completed) { sets.planned.delete(id); sets.mustDo.delete(id); sets.ifTime.delete(id); sets.unclassified.delete(id); }
+    for (const id of sets.mustDo) { sets.ifTime.delete(id); sets.unclassified.delete(id); }
+    for (const id of sets.ifTime) sets.unclassified.delete(id);
+    return { completed: sets.completed.size, planned: sets.planned.size, mustDo: sets.mustDo.size, ifTime: sets.ifTime.size, unclassified: sets.unclassified.size };
+  };
+  return { date, classified: submissions.some((s) => s.must_do_work_ids_json != null), members: rows, groups: [...groups.values()].sort((a, b) => {
     const rank = (id: string) => id === "routines" ? 1 : id === "unlinked" ? 2 : 0;
     return rank(a.id) - rank(b.id) || a.title.localeCompare(b.title);
-  }).map((group) => ({ ...group, completed: group.completed.size, planned: group.planned.size })), completed: totals.completed.size, planned: totals.planned.size };
+  }).map((group) => ({ id: group.id, title: group.title, ...sizes(group) })), ...sizes(totals) };
 }
 
 function escaped(value: string) { return value.replace(/[\r\n]+/g, " ").replace(/[&<>*_`~]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "*": "＊", "_": "＿", "`": "｀", "~": "～" })[c]!); }
@@ -114,9 +127,10 @@ export function dailyDigestMessages(digest: DailyDigest, t: Translator) {
   };
   const missing = digest.members.filter((member) => !member.shared);
   if (missing.length) addLines(t("미공유 {count}명", { count: missing.length }), missing.map((member) => `*${escaped(member.name.slice(0, 100))} · ${t("미공유")}*`));
-  for (const kind of ["completed", "planned"] as const) {
-    if (kind === "planned") sections.push({ type: "divider" });
-    const title = t(kind === "completed" ? "완료한 일" : "오늘 할 일");
+  const kinds: Array<keyof PlanCounts> = digest.classified ? ["completed", "mustDo", "ifTime", ...(digest.unclassified ? ["unclassified" as const] : [])] : ["completed", "planned"];
+  for (const kind of kinds) {
+    sections.push({ type: "divider" });
+    const title = t({ completed: "완료한 일", planned: "오늘 할 일", mustDo: "오늘 꼭 할 일", ifTime: "여유되면 할 일", unclassified: "오늘 할 일 · 구분 전" }[kind]);
     addSection(`*${title} · ${t("{count}건", { count: digest[kind] })}*`);
     addLines(t("팀원별"), digest.members.map((member) => `${escaped(member.name.slice(0, 100))}: ${member.shared ? t("{count}건", { count: member[kind] }) + (member.skipped ? ` · ${t("스킵")}` : "") : `*${t("미공유")}*`}`));
     addLines(t("KR별"), digest.groups.map((group) => `${escaped((group.id === "unlinked" ? t("KR 미연결") : group.title).slice(0, 180))}: ${t("{count}건", { count: group[kind] })}`));

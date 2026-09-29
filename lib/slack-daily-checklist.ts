@@ -11,10 +11,10 @@ const metadataFor = (id: string, revision: number) => JSON.stringify({ id, revis
 
 export async function createDailyChecklist(ownerId: string, memberId: string, input: DailyChecklist, t: Translator) {
   const id = crypto.randomUUID();
-  const choices = { ...input.choices };
+  const choices = Object.fromEntries(Object.entries(input.choices).filter(([key]) => !input.taskFocused || !key.startsWith("project:")));
   const statusOptions = parseDailyWorkStatuses(input.workStatusOptions);
   const requestedStatus = input.skipReason ? "skip" as const : normalizeDailyWorkStatus(input.workStatus);
-  const value = { ...input, choices, work: orderDailyChecklist(input.work), page: 0,
+  const value = { ...input, formatVersion: 2 as const, choices, work: orderDailyChecklist(input.work), page: 0,
     ...(input.taskFocused ? { noPlannedTasks: false, workStatus: statusOptions.includes(requestedStatus) ? requestedStatus : statusOptions[0] } : {}) };
   const now = new Date().toISOString();
   await env.DB.prepare("DELETE FROM slack_daily_checklists WHERE expires_at <= ?").bind(now).run();
@@ -26,8 +26,13 @@ export async function createDailyChecklist(ownerId: string, memberId: string, in
 export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t: Translator) {
   const next: DailyChecklist = { ...input, choices: { ...input.choices } };
   const errors: Record<string, string> = {};
+  if (input.taskFocused) {
+    for (const key of Object.keys(next.choices)) if (key.startsWith("project:")) delete next.choices[key];
+    next.selectedYesterday = next.selectedYesterday.filter((key) => !key.startsWith("project:"));
+  }
   const start = input.page * DAILY_CHECKLIST_PAGE_SIZE;
   input.work.slice(start, start + DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
+    if (input.taskFocused && entry.kind === "project") return;
     const block = dailyChoiceBlockId(input, entry, start + offset);
     const field = state[block]?.selection ?? state[block]?.choice;
     if (!field) return;
@@ -35,7 +40,7 @@ export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t:
     const single = Object.prototype.hasOwnProperty.call(field, "selected_option");
     const choices = single ? (field.selected_option === null ? [] : [field.selected_option]) : field.selected_options ?? [];
     // Old open modals may still send "exclude"; never reinterpret it as deletion.
-    if ((single && field.selected_options !== undefined) || !Array.isArray(choices) || choices.some((option) => !["none", "today", "done", "archive", "delete", "exclude"].includes(option?.value)) || choices.length > 1) {
+    if ((single && field.selected_options !== undefined) || !Array.isArray(choices) || choices.some((option) => !["none", "must_do", "today", "done", "archive", "delete", "exclude"].includes(option?.value)) || choices.length > 1) {
       errors[block] = t("업무마다 한 가지 상태만 선택해 주세요."); return;
     }
     if (choices.some((option) => option.value === "delete" || option.value === "archive") && entry.kind !== "task") {
@@ -79,6 +84,7 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
   if (stored.revision !== parsed.revision) return dailyChecklistForm(input, metadataFor(parsed.id, stored.revision), t, t("다른 요청에서 목록이 변경되었습니다. 현재 선택을 확인해 주세요."));
   if (input.taskEntry?.creating) return dailyChecklistForm(input, metadata, t, t("처리 중"));
   const { next, errors } = mergeDailyChecklist(input, state, t);
+  if (input.formatVersion !== 2) return upgradeDailyChecklist(authorization.ownerId, member.id, parsed, next, t);
   // Opening/cancelling the editor must not validate unrelated, unfinished Task choices.
   if (action === "create" && Object.keys(errors).length) return dailyChecklistForm(next, metadata, t, Object.values(errors).join("\n"));
   if (!next.taskFocused || !next.taskTargets?.some((target) => target.key === parentKey)) throw new Error("본인이 담당한 Project 또는 Routine만 선택할 수 있습니다.");
@@ -89,7 +95,7 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
     if (!next.taskEntry || next.taskEntry.parentKey !== parentKey) throw new Error("Task 생성 요청을 다시 확인해 주세요.");
     if (!next.taskEntry.title.trim()) return dailyChecklistForm(next, metadata, t, t("새 Task 제목을 입력해 주세요."));
     if (next.workStatus === "skip" || next.skipReason) return dailyChecklistForm(next, metadata, t, t("스킵을 해제하면 Task를 만들 수 있습니다."));
-    if (Object.values(next.choices).filter((value) => ["today", "done", "delete"].includes(value)).length >= 50) {
+    if (Object.values(next.choices).filter((value) => ["must_do", "today", "done", "delete"].includes(value)).length >= 50) {
       return dailyChecklistForm(next, metadata, t, t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다."));
     }
     next.taskEntry.creating = true;
@@ -144,12 +150,13 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (input.taskEntry?.creating) return { view: dailyChecklistForm(input, metadataFor(parsed.id, stored.revision), t, t("처리 중")) };
   if (stored.revision !== parsed.revision) return { view: dailyChecklistForm(input, metadataFor(parsed.id, stored.revision), t, t("다른 요청에서 목록이 변경되었습니다. 현재 선택을 확인해 주세요.")) };
   const { next, errors } = mergeDailyChecklist(input, state, t);
+  if (input.formatVersion !== 2) return { view: await upgradeDailyChecklist(authorization.ownerId, member.id, parsed, next, t) };
   const problem = (errors: Record<string, string>) => ({ errors, view: dailyChecklistForm(next, metadata, t, [...new Set(Object.values(errors))].join("\n")) });
   if (Object.keys(errors).length) return problem(errors);
   const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
   const selected = (choice: string) => Object.entries(next.choices)
     .filter(([, value]) => value === choice).map(([key]) => key);
-  const today = selected("today"), done = selected("done"), deleted = selected("delete");
+  const mustDo = selected("must_do"), today = [...mustDo, ...selected("today")], done = selected("done"), deleted = selected("delete");
   const validationBlock = next.taskFocused ? "work_status" : "no_planned";
   if (today.length + done.length + deleted.length > 50) return problem({ [validationBlock]: t("오늘 할 업무는 최대 50개까지 선택할 수 있습니다.") });
   if (previous || input.page + 1 < pages) {
@@ -173,11 +180,22 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
     .bind(authorization.ownerId, member.id, parsed.id).first();
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
-      selectedWorkIds: today, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
+      selectedWorkIds: today, mustDoWorkIds: mustDo, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
       noPlannedTasks: (!next.taskFocused && next.noPlannedTasks) || (!today.length && done.length + deleted.length > 0), workStatus,
       skipReason, skipNote: next.skipNote, source: "slack" }, false);
   }
   return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done, deleted) };
+}
+
+async function upgradeDailyChecklist(ownerId: string, memberId: string, parsed: { id: string; revision: number }, next: DailyChecklist, t: Translator) {
+  next.formatVersion = 2;
+  next.taskFocused = true;
+  for (const key of Object.keys(next.choices)) if (key.startsWith("project:")) delete next.choices[key];
+  next.selectedYesterday = next.selectedYesterday.filter((key) => !key.startsWith("project:"));
+  const result = await env.DB.prepare("UPDATE slack_daily_checklists SET payload_json = ?, revision = revision + 1 WHERE id = ? AND owner_id = ? AND member_id = ? AND revision = ?")
+    .bind(JSON.stringify(next), parsed.id, ownerId, memberId, parsed.revision).run();
+  if (!result.meta.changes) throw new Error("다른 요청에서 목록이 변경되었습니다. 현재 선택을 확인해 주세요.");
+  return dailyChecklistForm(next, metadataFor(parsed.id, parsed.revision + 1), t, t("선택과 메모를 유지했습니다. 오늘 꼭 할 일과 여유되면 할 일을 확인한 뒤 제출해 주세요."));
 }
 
 export async function retryDailyChecklist(authorization: RequestAuthorization, metadata: string, state: ModalState, message: string, t: Translator) {

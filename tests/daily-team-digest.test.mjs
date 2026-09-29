@@ -34,7 +34,7 @@ function harness(t) {
     CREATE TABLE slack_member_links(owner_id TEXT, member_id TEXT, team_id TEXT);
     CREATE TABLE slack_daily_preferences(owner_id TEXT, member_id TEXT, enabled INTEGER);
     CREATE TABLE slack_daily_channels(owner_id TEXT, channel_id TEXT);
-    CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, work_snapshot_json TEXT, yesterday_work_snapshot_json TEXT, work_status TEXT DEFAULT 'office', skip_reason TEXT);
+    CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, work_snapshot_json TEXT, yesterday_work_snapshot_json TEXT, work_status TEXT DEFAULT 'office', skip_reason TEXT, must_do_work_ids_json TEXT);
     CREATE TABLE daily_task_snapshots(id TEXT, submission_id TEXT, task_id TEXT, parent_id TEXT, parent_kind TEXT);
     CREATE TABLE items(id TEXT PRIMARY KEY, owner_id TEXT, kind TEXT, title TEXT, parent_id TEXT, routine_id TEXT);`);
   db.exec(migration.replaceAll("--> statement-breakpoint", ""));
@@ -71,7 +71,7 @@ function harness(t) {
   const api = compile(source, { "./slack-bot-delivery": delivery, "./language-preferences": preferences, "./server-language": serverLanguage });
   const submit = (member, work = [], completed = [], skip = null, version = 1, date = "2026-09-07") => {
     const id = `${member}-${version}-${date}`;
-    db.prepare("INSERT INTO daily_submissions VALUES(?,?,?,?,?,?,?,?,?)").run(id, member[0], member, date, version, JSON.stringify(work), JSON.stringify(completed), skip ? "skip" : "office", skip);
+    db.prepare("INSERT INTO daily_submissions VALUES(?,?,?,?,?,?,?,?,?,NULL)").run(id, member[0], member, date, version, JSON.stringify(work), JSON.stringify(completed), skip ? "skip" : "office", skip);
     return id;
   };
   return { db, raw, api, delivery, submit, calls, behavior, SlackMessageError };
@@ -99,6 +99,34 @@ test("latest submitted Task snapshots, correct KR paths, Routine and unlinked bu
   assert.deepEqual(digest.members.map((member) => [member.name, member.completed, member.planned]), [["한글 이름 1", 1, 3], ["한글 이름 2", 0, 1]]);
   h.db.exec("UPDATE workspace_members SET display_name='바뀐 이름' WHERE id='a1'");
   assert.ok((await h.api.loadDailyDigest(h.raw, "a", "2026-09-07")).members.some((member) => member.name === "바뀐 이름"));
+});
+
+test("classified team digest deduplicates must-do and optional Tasks and updates after tier-only resubmission", async (t) => {
+  const h = harness(t);
+  const first = h.submit("a1", [task("a-t1"), task("a-t2")]);
+  h.db.prepare("UPDATE daily_submissions SET must_do_work_ids_json=? WHERE id=?").run(JSON.stringify(["task:a-t1"]), first);
+  const colleague = h.submit("a2", [task("a-t1")]);
+  h.db.prepare("UPDATE daily_submissions SET must_do_work_ids_json='[]' WHERE id=?").run(colleague);
+  const digest = await h.api.loadDailyDigest(h.raw, "a", "2026-09-07");
+  assert.equal(digest.mustDo, 1); assert.equal(digest.ifTime, 1); assert.equal(digest.planned, 2);
+  assert.equal(digest.groups.reduce((n, g) => n + g.mustDo, 0), 1);
+  await h.api.runDueDailyDigests(h.raw, NOW, "a");
+  assert.equal(h.calls.length, 1); assert.match(h.calls[0].text, /오늘 꼭 할 일 · 1건/); assert.match(h.calls[0].text, /여유되면 할 일 · 1건/);
+  const changed = h.submit("a1", [task("a-t1"), task("a-t2")], [], null, 2);
+  h.db.prepare("UPDATE daily_submissions SET must_do_work_ids_json='[]' WHERE id=?").run(changed);
+  await h.api.runDueDailyDigests(h.raw, NOON, "a");
+  assert.equal(h.calls.length, 2); assert.equal(h.calls[1].messageTs, "1.1");
+  assert.match(h.calls[1].text, /오늘 꼭 할 일 · 0건/); assert.match(h.calls[1].text, /여유되면 할 일 · 2건/);
+});
+
+test("mixed historical and classified team summaries do not invent priority for unclassified work", async (t) => {
+  const h = harness(t);
+  const classified = h.submit("a1", [task("a-t1")]);
+  h.db.prepare("UPDATE daily_submissions SET must_do_work_ids_json='[]' WHERE id=?").run(classified);
+  h.submit("a2", [task("a-t2")]);
+  const digest = await h.api.loadDailyDigest(h.raw, "a", "2026-09-07");
+  assert.equal(digest.ifTime, 1); assert.equal(digest.unclassified, 1);
+  assert.match(h.api.dailyDigestMessages(digest, translator).map((p) => p.text).join(" "), /오늘 할 일 · 구분 전/);
 });
 
 test("all submitted sends early once per channel and resubmission updates that message", async (t) => {
@@ -212,9 +240,9 @@ test("large teams and KR lists preserve every row within Slack limits, escape me
   const blocks = pages.flatMap((page) => page.blocks);
   const text = blocks.flatMap((block) => block.text ? [block.text.text] : []).join("\n");
   for (const page of pages) { assert.ok(page.blocks.length <= 50); for (const block of page.blocks) if (block.text) assert.ok(block.text.text.length <= 3000); }
-  assert.equal(blocks.filter((block) => block.type === "divider").length, 1);
+  assert.equal(blocks.filter((block) => block.type === "divider").length, 2);
   const completedIndex = blocks.findIndex((block) => block.text?.text?.startsWith("*완료한 일 ·"));
-  const dividerIndex = blocks.findIndex((block) => block.type === "divider");
+  const dividerIndex = blocks.findIndex((block, index) => index > completedIndex && block.type === "divider");
   const plannedIndex = blocks.findIndex((block) => block.text?.text?.startsWith("*오늘 할 일 ·"));
   assert.ok(completedIndex >= 0 && completedIndex < dividerIndex && dividerIndex < plannedIndex);
   for (let i = 0; i < 300; i++) assert.match(text, new RegExp(`KR-${i} `));

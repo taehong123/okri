@@ -7,7 +7,8 @@ const identityTranslator: Translator = (key) => key;
 
 export type DailyChecklist = {
   date: string; memberName: string; work: DailyWork[]; selectedYesterday: string[]; yesterdayCompleted?: DailyWork[];
-  choices: Record<string, "today" | "done" | "delete" | "exclude">;
+  choices: Record<string, "must_do" | "today" | "done" | "delete" | "exclude">;
+  formatVersion?: 2;
   todayNote: string; yesterdayNote: string; blockersNote: string;
   noPlannedTasks: boolean; skipReason: string | null; skipNote: string; page: number;
   workStatus?: DailyWorkStatus;
@@ -56,7 +57,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     const options = statuses.map((status) => ({ text: { type: "plain_text", text: t(dailyWorkStatusLabel(status)) }, value: status }));
     blocks.push({ type: "input", block_id: "work_status", label: { type: "plain_text", text: t("오늘 근무") },
       element: { type: "radio_buttons", action_id: "value", options, initial_option: options.find((option) => option.value === selectedStatus) } });
-    if (pages > 1) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("{page} / {pages} · 전체 {count}개", { page: input.page + 1, pages, count: input.work.length }) }] });
+    if (pages > 1) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("{page} / {pages} · 전체 {count}개", { page: input.page + 1, pages, count: input.work.filter((entry) => entry.kind !== "project").length }) }] });
   } else {
     blocks.push(
       { type: "section", text: { type: "plain_text", text: `${input.memberName} · ${input.date}\n${t("완료와 아카이브는 제출할 때 반영됩니다. 아카이브한 Task는 휴지통에서 복구할 수 있습니다.")}` } },
@@ -72,7 +73,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     const group = dailyWorkGroup(entry);
     if (group.key !== lastGroup) {
       const target = input.taskTargets?.find((target) => target.key === group.key);
-      const emptyContainer = input.taskFocused && (entry.kind === "project" || entry.kind === "routine")
+      const emptyContainer = input.taskFocused && entry.kind === "routine"
         && !input.work.some((task) => task.kind === "task" && task.parentKind === entry.kind && task.parentId === entry.id);
       const addButton = target && !input.taskEntry ? { type: "button", action_id: "daily_checklist_add_task", text: { type: "plain_text", text: t("Task 추가") }, value: target.key } : null;
       const containerKind = group.key.startsWith("project:") ? "project" : group.key.startsWith("ticket:") ? "ticket" : group.key.startsWith("routine:") ? "routine" : null;
@@ -92,15 +93,16 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
             element: { type: "plain_text_input", action_id: "title", max_length: 240, focus_on_load: true,
               ...(input.taskEntry.title ? { initial_value: input.taskEntry.title } : {}) } });
           blocks.push({ type: "actions", elements: [
-            { type: "button", action_id: "daily_checklist_create_task", text: { type: "plain_text", text: t("추가하고 오늘 할 일에 선택") }, style: "primary", value: group.key },
+            { type: "button", action_id: "daily_checklist_create_task", text: { type: "plain_text", text: t("추가하고 여유되면 할 일에 선택") }, style: "primary", value: group.key },
             { type: "button", action_id: "daily_checklist_cancel_task", text: { type: "plain_text", text: t("취소") }, value: group.key },
           ] });
         }
         if (error) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
       }
     }
+    if (input.taskFocused && entry.kind === "project") return;
     if (entry.kind === "task" && entry.title.length > 180) blocks.push({ type: "section", text: { type: "plain_text", text: entry.title.slice(0, 2900) } });
-    const options = [["none", "선택 안 함"], ["today", "오늘 할 일"], ["done", "완료"], ...(entry.kind === "task" ? [["archive", "아카이브"]] : [])]
+    const options = [["none", "선택 안 함"], ["must_do", "오늘 꼭 할 일"], ["today", "여유되면 할 일"], ["done", "완료"], ...(entry.kind === "task" ? [["archive", "아카이브"]] : [])]
       .map(([value, text]) => ({ text: { type: "plain_text", text: t(text) }, value }));
     const savedChoice = input.choices[entry.key];
     const initial = options.find((option) => option.value === (savedChoice === "delete" ? "archive" : savedChoice)) ?? options[0];
@@ -108,8 +110,8 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     blocks.push({ type: "input", block_id: dailyChoiceBlockId(input, entry, input.page * DAILY_CHECKLIST_PAGE_SIZE + offset), optional: true,
       label: { type: "plain_text", text: `${input.taskFocused && entry.kind === "task" ? "└ " : ""}${entry.title}`.slice(0, 180) || t(names[entry.kind]) },
       ...(!input.taskFocused || due ? { hint: { type: "plain_text", text: input.taskFocused ? due : `${t(names[entry.kind])}${due ? ` · ${due}` : ""}` } } : {}),
-      element: { type: "static_select", action_id: "selection", options, initial_option: initial } });
-    if (entry.key === input.createdTaskKey) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("Task를 추가하고 오늘 할 일에 선택했습니다.") }] });
+      element: { type: "radio_buttons", action_id: "selection", options, initial_option: initial } });
+    if (entry.key === input.createdTaskKey) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("Task를 추가하고 여유되면 할 일에 선택했습니다.") }] });
   });
   if (!input.work.length) blocks.push({ type: "section", text: { type: "plain_text", text: t("현재 배정된 미완료 업무가 없습니다.") } });
   if (!input.taskFocused) {

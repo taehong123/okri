@@ -1,4 +1,5 @@
 type DailyRevisionDraft = {
+  mustDoWorkIds?: string[];
   yesterdayNote: string;
   todayNote: string;
   blockersNote: string;
@@ -11,6 +12,7 @@ type DailyRevisionDraft = {
 };
 
 type DailyRevisionSubmission = {
+  mustDoWorkIds?: string[];
   yesterdayNote: string;
   todayNote: string;
   blockersNote: string;
@@ -34,6 +36,7 @@ function draftSnapshot(draft: DailyRevisionDraft) {
   const selectedWorkIds = draft.selectedWorkIds
     ?? draft.selectedTaskIds.map((taskId) => `task:${taskId}`);
   return {
+    mustDoWorkIds: normalizedKeys((draft.mustDoWorkIds ?? []).filter((key) => selectedWorkIds.includes(key))),
     yesterdayNote: normalizedText(draft.yesterdayNote),
     todayNote: normalizedText(draft.todayNote),
     blockersNote: normalizedText(draft.blockersNote),
@@ -51,6 +54,7 @@ function submissionSnapshot(submission: DailyRevisionSubmission) {
     .filter((work) => !work.completedToday)
     .map((work) => work.key);
   return {
+    mustDoWorkIds: normalizedKeys(submission.mustDoWorkIds ?? []),
     yesterdayNote: normalizedText(submission.yesterdayNote),
     todayNote: normalizedText(submission.todayNote),
     blockersNote: normalizedText(submission.blockersNote),

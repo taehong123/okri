@@ -1,4 +1,12 @@
 const messages = {
+  "오늘 꼭 할 일": "Must do today",
+  "여유되면 할 일": "If time permits",
+  "오늘 할 일 · 구분 전": "Today's work · unclassified",
+  "추가하고 여유되면 할 일에 선택": "Add to if time permits",
+  "Task를 추가하고 여유되면 할 일에 선택했습니다.": "Task added to if time permits.",
+  "선택과 메모를 유지했습니다. 오늘 꼭 할 일과 여유되면 할 일을 확인한 뒤 제출해 주세요.": "Your selections and notes are preserved. Review must-do and optional work, then submit.",
+  "오늘 꼭 할 일은 오늘 선택한 업무에 포함되어야 합니다.": "Must-do work must be included in today's selected work.",
+  "라디오 선택 · 오늘 꼭 할 일 / 여유되면 할 일": "Radio choices · must do / if time permits",
   "최근 Slack 스레드": "Recent Slack thread",
   "허들 메모 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.": "Could not check the Huddle notes status. Try again shortly.",
   "{value1}의 최근 허들 메모 본문을 읽을 수 있습니다.": "OKRI can read the latest Huddle notes in {value1}.",

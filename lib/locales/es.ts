@@ -1,5 +1,13 @@
 import type { Catalog } from "./en";
 const messages = {
+  "오늘 꼭 할 일": "Imprescindible hoy",
+  "여유되면 할 일": "Si queda tiempo",
+  "오늘 할 일 · 구분 전": "Trabajo de hoy · sin clasificar",
+  "추가하고 여유되면 할 일에 선택": "Añadir a «Si queda tiempo»",
+  "Task를 추가하고 여유되면 할 일에 선택했습니다.": "Task añadida a «Si queda tiempo».",
+  "선택과 메모를 유지했습니다. 오늘 꼭 할 일과 여유되면 할 일을 확인한 뒤 제출해 주세요.": "Se conservaron tus selecciones y notas. Revisa el trabajo imprescindible y opcional y envía.",
+  "오늘 꼭 할 일은 오늘 선택한 업무에 포함되어야 합니다.": "El trabajo imprescindible debe estar entre las tareas seleccionadas de hoy.",
+  "라디오 선택 · 오늘 꼭 할 일 / 여유되면 할 일": "Selección única · imprescindible / si queda tiempo",
   "최근 Slack 스레드": "Hilo reciente de Slack",
   "허들 메모 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.": "No se pudo comprobar el estado de las notas del Huddle. Inténtalo de nuevo en unos instantes.",
   "{value1}의 최근 허들 메모 본문을 읽을 수 있습니다.": "OKRI puede leer el contenido de las notas del Huddle más reciente en {value1}.",

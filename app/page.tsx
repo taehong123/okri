@@ -73,7 +73,7 @@ import {
   Zap,
   type LucideIcon,
 } from "lucide-react";
-import { startTransition, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
+import { Fragment, startTransition, useCallback, useEffect, useId, useMemo, useRef, useState, type ComponentType, type CSSProperties, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from "react";
 import { ConfirmationProvider, OverlayDialog, useAppConfirm } from "./overlay-dialog";
 import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
@@ -262,11 +262,11 @@ type TrashInitiativeOption = { id: string; title: string; cycleId: string };
 type ChecklistItem = { id: string; taskId: string; title: string; completed: boolean; sortOrder: number };
 type DailySkipReason = "workload" | "vacation" | "personal" | "other";
 type DailyTaskCandidate = { id: string; title: string; status: ItemStatus; dueDate: string | null; parentKind: "project" | "routine" | "general"; parentId: string | null; parentTitle: string };
-type DailySubmission = { work?: DailyWork[]; yesterdayWork?: DailyWork[]; newlyCompletedCount?: number; id: string; memberId: string | null; memberName: string; memberEmail: string; date: string; version: number; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; source: string; submittedAt: string; tasks: Array<{ id: string; taskId: string | null; taskTitle: string; parentKind: string; parentId: string | null; parentTitle: string; status: string; isNew: boolean; sortOrder: number }> };
+type DailySubmission = { mustDoWorkIds?: string[]; work?: DailyWork[]; yesterdayWork?: DailyWork[]; newlyCompletedCount?: number; id: string; memberId: string | null; memberName: string; memberEmail: string; date: string; version: number; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; source: string; submittedAt: string; tasks: Array<{ id: string; taskId: string | null; taskTitle: string; parentKind: string; parentId: string | null; parentTitle: string; status: string; isNew: boolean; sortOrder: number }> };
 type DailyDashboard = {
   date: string;
   member: { id: string; displayName: string; email: string; role: TeamRole };
-  draft: { id: string | null; date: string; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; selectedTaskIds: string[]; selectedWorkIds?: string[]; selectedYesterdayWorkIds?: string[]; source: string; updatedAt: string | null };
+  draft: { id: string | null; date: string; yesterdayNote: string; todayNote: string; blockersNote: string; noPlannedTasks: boolean; skipReason: DailySkipReason | null; skipNote: string; selectedTaskIds: string[]; selectedWorkIds?: string[]; mustDoWorkIds?: string[]; selectedYesterdayWorkIds?: string[]; source: string; updatedAt: string | null };
   latestSubmission: DailySubmission | null;
   candidates: { work?: DailyWork[]; yesterdayWork?: DailyWork[]; tasks: DailyTaskCandidate[]; groups: Array<{ key: string; kind: string; id: string | null; title: string; tasks: DailyTaskCandidate[] }> };
   createTargets: { projects: Array<{ id: string; title: string; needsTask: boolean; hasTasks?: boolean }>; routines: Array<{ id: string; title: string; needsTask?: boolean; hasTasks?: boolean }>; allowGeneral: boolean };
@@ -4824,6 +4824,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
     setSaving("draft");
     try {
       const response = await fetch("/api/daily-scrum", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...currentScrum.draft,
+        mustDoWorkIds: currentScrum.draft.mustDoWorkIds?.filter((key) => !currentScrum.draft.skipReason && !currentScrum.draft.noPlannedTasks && isDailyTaskKey(key) && (currentScrum.draft.selectedWorkIds ?? currentScrum.draft.selectedTaskIds.map((id) => `task:${id}`)).includes(key)),
         selectedWorkIds: currentScrum.draft.selectedWorkIds?.filter(isDailyTaskKey),
         selectedYesterdayWorkIds: currentScrum.draft.selectedYesterdayWorkIds?.filter(isDailyTaskKey), date }) });
       const data = await response.json() as DailyDashboard & { error?: string };
@@ -4934,12 +4935,21 @@ function DailySubmissionSummary({ submission, onOpenTask, onOpenWork }: { submis
   const workContext = (entry: DailyWork) => entry.kind === "task"
     ? parentContext(entry.parentKind, entry.parentTitle)
     : `${entry.kind === "project" ? t("Project") : t("Routine")} · ${entry.parentTitle}`;
+  const planSections = submission.mustDoWorkIds === undefined ? [{ title: "오늘 할 일", required: null }]
+    : [{ title: "오늘 꼭 할 일", required: true }, { title: "여유되면 할 일", required: false }];
+  const requiredKeys = new Set(submission.mustDoWorkIds ?? []);
   return <div className="daily-submission-summary">
     <b>{t("완료한 일")}</b>
     <ul aria-label={t("완료한 일")}>{completedWork.length ? completedWork.map((entry) => <li className="daily-submission-work" key={entry.key}><small>{workContext(entry)}</small><span className="daily-submission-task"><button onClick={() => onOpenWork(entry)}>{entry.title}</button></span></li>) : <li>{t("선택한 업무 없음")}</li>}</ul>
     {submission.yesterdayNote && <p><b>{t("완료 메모")}</b>{submission.yesterdayNote}</p>}
-    <b>{t("오늘 할 일")}</b>
-    <ul aria-label={t("오늘 할 일")}>{submission.tasks.map((task) => <li className="daily-submission-work" key={task.id}><small>{parentContext(task.parentKind, task.parentTitle)}</small><span className="daily-submission-task">{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button></span></li>)}{plannedWork.map((entry) => <li className="daily-submission-work" key={entry.key}><small>{workContext(entry)}</small><span className="daily-submission-task"><button onClick={() => onOpenWork(entry)}>{entry.title}</button></span></li>)}{!submission.tasks.length && !plannedWork.length && <li>{t("오늘 예정 없음")}</li>}</ul>
+    {planSections.map((section) => {
+      const matches = (key: string) => section.required === null || requiredKeys.has(key) === section.required;
+      const tasks = submission.tasks.filter((task) => matches(`task:${task.taskId}`));
+      const work = plannedWork.filter((entry) => matches(entry.key));
+      return <Fragment key={section.title}><b>{t(section.title)}</b>
+        <ul aria-label={t(section.title)}>{tasks.map((task) => <li className="daily-submission-work" key={task.id}><small>{parentContext(task.parentKind, task.parentTitle)}</small><span className="daily-submission-task">{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button></span></li>)}{work.map((entry) => <li className="daily-submission-work" key={entry.key}><small>{workContext(entry)}</small><span className="daily-submission-task"><button onClick={() => onOpenWork(entry)}>{entry.title}</button></span></li>)}{!tasks.length && !work.length && <li>{t("오늘 예정 없음")}</li>}</ul>
+      </Fragment>;
+    })}
     {submission.todayNote && <p><b>{t("오늘 메모")}</b>{submission.todayNote}</p>}
     {submission.blockersNote && <p className="blocker"><b>{t("블로커")}</b>{submission.blockersNote}</p>}
   </div>;

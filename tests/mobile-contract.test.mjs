@@ -16,6 +16,7 @@ function request(endpoint, method = "GET", body, extra = {}) {
 test("frozen 1.0.0 payloads preserve every consumed field; additive web fields are stripped", () => {
   assert.deepEqual(contracts.bootstrapV1.parse({ ...fixture.bootstrap, future: 1 }), fixture.bootstrap);
   assert.deepEqual(contracts.dailyV1.parse({ ...fixture.daily, future: 1 }), fixture.daily);
+  assert.deepEqual(contracts.dailyV1.parse({ ...fixture.daily, draft: { ...fixture.daily.draft, mustDoWorkIds: ["task:one"] } }), fixture.daily);
   for (const [key, value] of Object.entries(fixture.requests)) assert.deepEqual(contracts.requestsV1[key].parse(value), value);
   const groups = model.workGroups(contracts.dailyV1.parse(fixture.daily).candidates.work);
   assert.deepEqual(groups.map(g => [g.kind, g.children.length]), [["project", 0], ["routine", 1]]);

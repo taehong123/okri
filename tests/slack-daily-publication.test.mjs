@@ -69,7 +69,7 @@ function fixture(t) {
     "./server-language": { serverTranslator: async () => identity },
     "@/lib/daily-bot": { dailySkipReasonLabel: () => "휴가", normalizeDailySkipReason: (value) => value },
     "@/lib/daily-work-status": { dailyWorkStatusLabel: (value) => ({ office: "출근", remote: "재택", skip: "스킵" })[value], normalizeDailyWorkStatus: (value) => value || "office" },
-    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]") },
+    "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]"), parseDailyWorkKeys: JSON.parse },
     "@/lib/slack-daily-form": { dailyWorkContainerLabel: (work) => work.parentKind === "project" ? `Project · ${work.parentTitle}` : work.parentTitle },
     "@/lib/slack-daily-checklist": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-status": {},
     "@/lib/pace-data": {
@@ -85,6 +85,18 @@ function fixture(t) {
   });
   return { sqlite, db, api, calls, events, input };
 }
+
+test("publication reload retains required-work metadata when updating a classified Daily", async (t) => {
+  const { sqlite, api, calls, input } = fixture(t);
+  sqlite.exec("ALTER TABLE daily_submissions ADD COLUMN must_do_work_ids_json TEXT");
+  sqlite.prepare("UPDATE daily_submissions SET must_do_work_ids_json=?").run(JSON.stringify(["task:task"]));
+  await api.completePublishedDailyTask(input());
+  for (const call of calls) {
+    const body = JSON.stringify(call.body.blocks);
+    assert.match(body, /오늘 꼭 할 일/); assert.match(body, /여유되면 할 일/);
+    assert.match(body, /~Ship the release~/);
+  }
+});
 
 test("shared Daily completion updates the Task and every copy of the original Slack message once", async (t) => {
   const { sqlite, api, calls, events, input } = fixture(t);

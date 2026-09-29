@@ -27,6 +27,7 @@ const migration = await read("../drizzle/0045_daily_work_selection.sql");
 const yesterdayMigration = await read("../drizzle/0047_daily_yesterday_selection.sql");
 const checklistMigration = await read("../drizzle/0049_slack_daily_checklists.sql");
 const workStatusMigration = await read("../drizzle/0055_daily_work_status.sql");
+const planTiersMigration = await read("../drizzle/0070_daily_plan_tiers.sql");
 const checklistSource = await read("../lib/slack-daily-checklist.ts");
 const paceSource = await read("../lib/pace-data.ts");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
@@ -110,6 +111,7 @@ function fixture(t, options = {}) {
   db.exec(checklistMigration.replaceAll("--> statement-breakpoint", ""));
   assert.ok(!workStatusMigration.includes("\r"));
   db.exec(workStatusMigration.replaceAll("--> statement-breakpoint", ""));
+  db.exec(planTiersMigration);
   const raw = { prepare(sql) {
     const statement = db.prepare(sql); let args = [];
     return { bind(...values) { args = values; return this; }, async first() { return statement.get(...args) ?? null; },
@@ -351,7 +353,7 @@ test("Task creation rejects viewers, removed participants, foreign and closed pr
   assert.equal(db.prepare("SELECT COUNT(*) n FROM items").get().n, 6);
 });
 
-test("compact Slack checklist keeps every assigned Project, Task and Routine selectable", () => {
+test("compact Slack checklist keeps Project headers and only Task and Routine choices", () => {
   const project = { id: "p", key: "project:p", kind: "project", title: "Project" };
   const empty = { id: "e", key: "project:e", kind: "project", title: "Empty Project" };
   const task = { id: "t", key: "task:t", kind: "task", title: "My Task", parentId: "p", parentKind: "project", parentTitle: "Project" };
@@ -364,15 +366,14 @@ test("compact Slack checklist keeps every assigned Project, Task and Routine sel
   ] };
   const modal = form.dailyChecklistForm(input, "{}");
   assert.deepEqual(modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_")).map((block) => block.label.text),
-    ["Project", "└ My Task", "Empty Project", "Store management", "└ Routine Task", "Empty Routine"]);
+    ["└ My Task", "Store management", "└ Routine Task", "Empty Routine"]);
   assert.equal(modal.blocks[0].block_id, "work_status");
   assert.deepEqual(modal.blocks[0].element.options.map((option) => option.value), ["office", "remote", "skip"]);
   assert.doesNotMatch(JSON.stringify(modal), /today_note|yesterday_note|blockers_note|skip_reason|skip_note|no_planned|"value":"delete"/);
-  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 2);
+  assert.equal(modal.blocks.filter((block) => block.accessory?.action_id === "daily_checklist_add_task").length, 3);
   const emptyHeading = modal.blocks.findIndex((block) => block.text?.text === "Project · Empty Project");
-  assert.equal(modal.blocks[emptyHeading + 1].elements[0].text, "아직 Task가 없습니다.");
-  assert.equal(modal.blocks[emptyHeading + 2].elements[0].action_id, "daily_checklist_add_task");
-  assert.equal(modal.blocks[emptyHeading + 2].elements[0].value, "project:e");
+  assert.equal(modal.blocks[emptyHeading].accessory.action_id, "daily_checklist_add_task");
+  assert.equal(modal.blocks[emptyHeading].accessory.value, "project:e");
   const routineHeading = modal.blocks.findIndex((block) => block.text?.text === "Routine · Store management");
   assert.equal(modal.blocks[routineHeading + 1].block_id, "daily_choice_routine:r");
   assert.equal(modal.blocks[routineHeading + 2].block_id, "daily_choice_task:rt");
@@ -391,12 +392,12 @@ test("compact Slack checklist labels Ticket Tasks without offering container cre
   assert.equal(form.dailyWorkContainerLabel(ticketTask), "Ticket · Customer request");
 });
 
-test("compact Slack state preserves assigned Project and Routine choices", async (t) => {
+test("compact Slack state removes Project choices and preserves independent Routine choices", async (t) => {
   const { raw, checklist } = fixture(t);
   const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
     choices: { "project:project": "today", "routine:routine": "done", "task:task": "today" } };
   const merged = checklist.mergeDailyChecklist(input, {}, (key) => key).next;
-  assert.deepEqual(merged.choices, { "project:project": "today", "routine:routine": "done", "task:task": "today" });
+  assert.deepEqual(merged.choices, { "routine:routine": "done", "task:task": "today" });
 });
 
 test("compact Slack checklist stores an allowed work status and skip rejects selected work", async (t) => {
@@ -419,7 +420,7 @@ test("compact Slack checklist stores an allowed work status and skip rejects sel
   assert.match(invalid.errors.work_status, /업무/);
 });
 
-test("compact Slack checklist submits an assigned Project even when it has no Task", async (t) => {
+test("compact Slack checklist rejects Project-only submissions without inventing a Task", async (t) => {
   const { raw, checklist } = fixture(t);
   const entries = await work.listDailyWork(raw, "w", "me", date);
   const project = entries.find((entry) => entry.key === "project:project");
@@ -430,7 +431,8 @@ test("compact Slack checklist submits an assigned Project even when it has no Ta
     work_status: { value: { selected_option: { value: "office" } } },
     "daily_choice_project:project": choice("today"),
   }, false, (key) => key);
-  assert.deepEqual(submitted.submission.work.map((entry) => entry.key), ["project:project"]);
+  assert.equal(submitted.submission, undefined);
+  assert.match(submitted.errors.work_status, /하나 이상/);
 });
 
 test("empty-project buttons and their inline editor fit Slack limits in every language", async () => {
@@ -439,16 +441,16 @@ test("empty-project buttons and their inline editor fit Slack limits in every la
     const translate = await serverLanguage.serverTranslator(language);
     const input = { ...checklistInput(projects), taskFocused: true, taskTargets: projects.map((p) => ({ key: p.key, title: p.title, hasTasks: false })) };
     const initial = form.dailyChecklistForm(input, "{}", translate);
-    assert.equal(initial.blocks.filter((b) => b.block_id?.startsWith("daily_add_")).length, 20);
-    for (const block of initial.blocks.filter((b) => b.block_id?.startsWith("daily_add_"))) {
-      assert.equal(block.elements[0].text.text, translate("Task 추가"));
-      assert.ok(block.elements[0].text.text.length <= 75);
+    assert.equal(initial.blocks.filter((b) => b.accessory?.action_id === "daily_checklist_add_task").length, 20);
+    for (const block of initial.blocks.filter((b) => b.accessory?.action_id === "daily_checklist_add_task")) {
+      assert.equal(block.accessory.text.text, translate("Task 추가"));
+      assert.ok(block.accessory.text.text.length <= 75);
     }
     const opened = form.dailyChecklistForm({ ...input, taskEntry: { parentKey: "project:p-19", title: "", requestId: "request" } }, "{}", translate);
     const index = opened.blocks.findIndex((b) => b.block_id === "daily_new_task");
-    assert.equal(opened.blocks[index - 2].text.text, `${translate("Project")} · Project 19`);
+    assert.equal(opened.blocks[index - 1].text.text, `${translate("Project")} · Project 19`);
     assert.equal(opened.blocks[index].label.text, translate("새 Task 제목"));
-    assert.equal(opened.blocks[index + 1].elements[0].text.text, translate("추가하고 오늘 할 일에 선택"));
+    assert.equal(opened.blocks[index + 1].elements[0].text.text, translate("추가하고 여유되면 할 일에 선택"));
     assert.equal(opened.blocks.filter((b) => b.element?.focus_on_load).length, 1);
     assert.ok(initial.blocks.length <= 100 && opened.blocks.length <= 100);
   }
@@ -464,11 +466,11 @@ test("assigned Projects without Tasks remain available across every Slack page",
     .filter((block) => block.block_id?.startsWith("daily_choice_project:"))
     .map((block) => block.block_id);
   const createTargets = [...first.blocks, ...second.blocks]
-    .filter((block) => block.block_id?.startsWith("daily_add_project:"))
-    .map((block) => block.elements[0].value);
+    .filter((block) => block.accessory?.action_id === "daily_checklist_add_task")
+    .map((block) => block.accessory.value);
   assert.equal(first.submit.text, "다음");
   assert.equal(second.submit.text, "제출");
-  assert.equal(new Set(choices).size, 25);
+  assert.equal(new Set(choices).size, 0);
   assert.equal(new Set(createTargets).size, 25);
   assert.ok(first.blocks.length <= 100 && second.blocks.length <= 100);
 });
@@ -521,7 +523,7 @@ test("Slack Task creation uses real parent validation and D1 persistence for a P
   assert.equal(rows[0].title, "First real Task");
   assert.equal(created.blocks.find((b) => b.block_id === `daily_choice_task:${rows[0].id}`).element.initial_option.value, "today");
   const taskIndex = created.blocks.findIndex((b) => b.block_id === `daily_choice_task:${rows[0].id}`);
-  assert.equal(created.blocks[taskIndex + 1].elements[0].text, "Task를 추가하고 오늘 할 일에 선택했습니다.");
+  assert.equal(created.blocks[taskIndex + 1].elements[0].text, "Task를 추가하고 여유되면 할 일에 선택했습니다.");
   assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.selectedTaskIds, [rows[0].id]);
   assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
 });
@@ -584,7 +586,7 @@ test("Slack creation errors stay beside the editor and successes are translated 
     assert.equal(errorView.blocks.filter((b) => b.text?.text === message).length, 1);
     const successView = form.dailyChecklistForm({ ...input, taskEntry: undefined, createdTaskKey: task.key, choices: { [task.key]: "today" } }, "{}", translate);
     const taskIndex = successView.blocks.findIndex((b) => b.block_id === "daily_choice_task:t");
-    assert.equal(successView.blocks[taskIndex + 1].elements[0].text, translate("Task를 추가하고 오늘 할 일에 선택했습니다."));
+    assert.equal(successView.blocks[taskIndex + 1].elements[0].text, translate("Task를 추가하고 여유되면 할 일에 선택했습니다."));
   }
 });
 
@@ -653,7 +655,96 @@ test("Task retries repair a failed own assignment but never reclaim a reassigned
 const checklistInput = (entries) => ({ date, memberName: "Me", work: entries, choices: {}, selectedYesterday: [], page: 0,
   todayNote: "", yesterdayNote: "", blockersNote: "", skipReason: null, skipNote: "", noPlannedTasks: false });
 const choice = (...values) => ({ choice: { selected_options: values.map((value) => ({ value })) } });
-const selection = (value) => ({ selection: { type: "static_select", selected_option: value === null ? null : { value } } });
+const selection = (value) => ({ selection: { type: "radio_buttons", selected_option: value === null ? null : { value } } });
+
+test("daily tiers persist on drafts and immutable submissions, and omitted legacy writes preserve them", async (t) => {
+  const { db, api } = fixture(t);
+  const input = { date, selectedWorkIds: ["task:task", "routine:routine"], mustDoWorkIds: ["task:task"] };
+  await api.saveDailyDraft(authorization, input, false);
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.mustDoWorkIds, ["task:task"]);
+  const first = await api.submitDailyDraft(authorization, date, "slack", "tiers-first");
+  assert.deepEqual(first.mustDoWorkIds, ["task:task"]);
+  assert.equal(first.tasks.length, 1);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: input.selectedWorkIds, todayNote: "Legacy client edit" }, false);
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.mustDoWorkIds, ["task:task"]);
+  await api.saveDailyDraft(authorization, { ...input, mustDoWorkIds: [] }, false);
+  const dashboard = await api.getDailyDashboard(authorization, date);
+  assert.equal(dailyRevisionChanged(dashboard.draft, dashboard.latestSubmission), true);
+  const second = await api.submitDailyDraft(authorization, date, "slack", "tiers-second");
+  assert.deepEqual(second.mustDoWorkIds, []);
+  assert.deepEqual(JSON.parse(db.prepare("SELECT must_do_work_ids_json FROM daily_submissions WHERE id=?").get(first.id).must_do_work_ids_json), ["task:task"]);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='task'").get().status, "todo");
+  await api.saveDailyDraft(authorization, input, false);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: ["routine:routine"] }, false);
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.mustDoWorkIds, []);
+  await api.saveDailyDraft(authorization, input, false);
+  await api.saveDailyDraft(authorization, { date, workStatus: "skip" }, false);
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.mustDoWorkIds, []);
+});
+
+test("tier validation rejects unselected, foreign, malformed and conflicting work before writes", async (t) => {
+  const { db, api } = fixture(t);
+  for (const mustDoWorkIds of [["task:not-mine"], ["task:foreign-task"], ["project:project"], null, "invalid", Array(51).fill(0).map((_, i) => "task:" + i)]) {
+    await assert.rejects(api.saveDailyDraft(authorization, { date, selectedWorkIds: ["task:task"], mustDoWorkIds }, false));
+  }
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_scrums").get().n, 0);
+  await api.saveDailyDraft(authorization, { date, selectedWorkIds: ["task:task"] }, false);
+  const old = await api.submitDailyDraft(authorization, date);
+  assert.equal(old.mustDoWorkIds, undefined, "historical unclassified semantics are not fabricated");
+});
+
+test("legacy dropdown modal upgrades without creating work and keeps Task choices and notes", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  const input = { ...checklistInput(await work.listDailyWork(raw, "w", "me", date)), taskFocused: true,
+    choices: { "project:project": "today", "task:task": "today" }, todayNote: "Keep my note" };
+  const modal = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  const id = JSON.parse(modal.private_metadata).id;
+  db.prepare("UPDATE slack_daily_checklists SET payload_json=? WHERE id=?").run(JSON.stringify(input), id);
+  const result = await checklist.handleDailyChecklist(authorization, modal.private_metadata,
+    { "daily_choice_task:task": { selection: { type: "static_select", selected_option: { value: "today" } } },
+      "daily_choice_project:project": selection("done") }, false, (key) => key);
+  assert.ok(result.view); assert.equal(result.submission, undefined);
+  assert.equal(db.prepare("SELECT COUNT(*) n FROM daily_submissions").get().n, 0);
+  const upgraded = JSON.parse(db.prepare("SELECT payload_json FROM slack_daily_checklists WHERE id=?").get(id).payload_json);
+  assert.equal(upgraded.formatVersion, 2);
+  assert.equal(upgraded.todayNote, "Keep my note");
+  assert.deepEqual(upgraded.choices, { "task:task": "today" });
+  const submitted = await checklist.handleDailyChecklist(authorization, result.view.private_metadata,
+    { "daily_choice_task:task": selection("must_do") }, false, (key) => key);
+  assert.deepEqual(submitted.submission.mustDoWorkIds, ["task:task"]);
+  assert.deepEqual(submitted.submission.work, []);
+  assert.equal(db.prepare("SELECT status FROM items WHERE id='project'").get().status, "backlog");
+});
+
+test("my Task under another member's Project is a radio choice without requiring the Project", async (t) => {
+  const { raw, db, checklist } = fixture(t);
+  db.exec("UPDATE items SET parent_id='project' WHERE id='task'; UPDATE item_assignments SET member_id='colleague' WHERE item_id='project'");
+  const workItems = await work.listDailyWork(raw, "w", "me", date);
+  assert.ok(!workItems.some((entry) => entry.key === "project:project"));
+  const modal = await checklist.createDailyChecklist("w", "me", { ...checklistInput(workItems), taskFocused: true }, (key) => key);
+  assert.ok(modal.blocks.some((block) => block.text?.text === "Project · My project"));
+  assert.equal(modal.blocks.find((block) => block.block_id === "daily_choice_task:task").element.type, "radio_buttons");
+  const result = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { "daily_choice_task:task": selection("must_do") }, false, (key) => key);
+  assert.deepEqual(result.submission.mustDoWorkIds, ["task:task"]);
+  assert.equal(result.submission.tasks[0].parentId, "project");
+  assert.equal(db.prepare("SELECT member_id FROM item_assignments WHERE item_id='project'").get().member_id, "colleague");
+});
+
+test("must-do choices survive next/back pages and mutually exclude done, archive and optional choices", async (t) => {
+  const { checklist, db } = fixture(t);
+  const workItems = Array.from({ length: 48 }, (_, i) => ({ key: "task:" + i, id: String(i), kind: "task", title: "Task " + i, parentTitle: "General" }));
+  const modal = await checklist.createDailyChecklist("w", "me", { ...checklistInput(workItems), taskFocused: true }, (key) => key);
+  const next = await checklist.handleDailyChecklist(authorization, modal.private_metadata, { "daily_choice_task:0": selection("must_do") }, false, (key) => key);
+  const back = await checklist.handleDailyChecklist(authorization, next.view.private_metadata, { "daily_choice_task:23": selection("today") }, true, (key) => key);
+  assert.equal(back.view.blocks.find((block) => block.block_id === "daily_choice_task:0").element.initial_option.value, "must_do");
+  const stored = JSON.parse(db.prepare("SELECT payload_json FROM slack_daily_checklists").get().payload_json);
+  assert.deepEqual(stored.choices, { "task:0": "must_do", "task:23": "today" });
+  for (const value of ["today", "done", "archive", "none"]) {
+    const { next, errors } = checklist.mergeDailyChecklist(stored, { "daily_choice_task:0": selection(value) }, (key) => key);
+    assert.deepEqual(errors, {});
+    assert.equal(next.choices["task:0"], value === "archive" ? "delete" : value === "none" ? undefined : value);
+  }
+});
 
 test("single-choice Daily inputs replace or clear choices and reject malformed or legacy double selections", async (t) => {
   const { raw, db, checklist } = fixture(t);
@@ -663,11 +754,11 @@ test("single-choice Daily inputs replace or clear choices and reject malformed o
   const done = checklist.mergeDailyChecklist(input, { [key]: selection("done") }, (key) => key);
   assert.deepEqual(done.errors, {});
   assert.equal(done.next.choices["task:task"], "done");
-  assert.equal(done.next.choices["project:project"], "today");
+  assert.equal(done.next.choices["project:project"], undefined);
   for (const value of ["none", null]) {
     const cleared = checklist.mergeDailyChecklist(done.next, { [key]: selection(value) }, (key) => key);
     assert.equal(cleared.next.choices["task:task"], undefined);
-    assert.equal(cleared.next.choices["project:project"], "today");
+    assert.equal(cleared.next.choices["project:project"], undefined);
   }
   for (const invalid of [choice("today", "done"), selection("unknown"), { selection: { selected_option: { value: "today" }, selected_options: [{ value: "done" }] } }]) {
     const result = checklist.mergeDailyChecklist(input, { [key]: invalid }, (key) => key);
@@ -678,9 +769,9 @@ test("single-choice Daily inputs replace or clear choices and reject malformed o
     const translate = await serverLanguage.serverTranslator(language);
     const modal = form.dailyChecklistForm(input, "{}", translate);
     const field = modal.blocks.find((block) => block.block_id === key).element;
-    assert.equal(field.type, "static_select");
+    assert.equal(field.type, "radio_buttons");
     assert.equal(field.initial_option.value, "today");
-    assert.deepEqual(field.options.map((option) => option.value), ["none", "today", "done", "archive"]);
+    assert.deepEqual(field.options.map((option) => option.value), ["none", "must_do", "today", "done", "archive"]);
     assert.equal(field.options.at(-1).text.text, translate("아카이브"));
     assert.equal(field.initial_options, undefined);
   }
@@ -724,8 +815,8 @@ test("new checklist shows every task without search, grouped by stable project I
     assert.ok(!JSON.stringify(modal).includes("external_select"));
     assert.match(JSON.stringify(modal), /기한 초과/);
     for (const input of modal.blocks.filter((block) => block.block_id?.startsWith("daily_choice_"))) {
-      assert.equal(input.element.type, "static_select");
-      assert.deepEqual(input.element.options.map((option) => option.value), ["none", "today", "done", "archive"]);
+      assert.equal(input.element.type, "radio_buttons");
+      assert.deepEqual(input.element.options.map((option) => option.value), ["none", "must_do", "today", "done", "archive"]);
       seen.push(input.block_id);
     }
   }

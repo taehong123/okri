@@ -13,7 +13,7 @@ import {
 } from "@/db/schema";
 import { currentDailyMember, dailyMemberBySlack, dailySkipReasonLabel, getDailyDashboard, normalizeDailySkipReason, type DailySubmissionValue } from "@/lib/daily-bot";
 import { dailyWorkStatusLabel, normalizeDailyWorkStatus, parseDailyWorkStatuses, validateDailyWorkStatuses } from "@/lib/daily-work-status";
-import { dailyWorkSnapshots, listDailyWork } from "@/lib/daily-work";
+import { dailyWorkSnapshots, listDailyWork, parseDailyWorkKeys } from "@/lib/daily-work";
 import { dailyWorkContainerLabel, dailyWorkOption } from "@/lib/slack-daily-form";
 import { createDailyChecklist } from "@/lib/slack-daily-checklist";
 import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
@@ -896,7 +896,7 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
          workStatusOptions: preference.workStatuses,
         taskTargets: [...dashboard.createTargets.projects.map((project) => ({ key: `project:${project.id}`, title: project.title, hasTasks: project.hasTasks })),
           ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title, hasTasks: routine.hasTasks }))],
-        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.map((key) => [key, "today" as const])),
+        choices: Object.fromEntries(dashboard.draft.selectedWorkIds.map((key) => [key, dashboard.draft.mustDoWorkIds?.includes(key) ? "must_do" as const : "today" as const])),
         selectedYesterday: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday).slice(0, 50).map((entry) => entry.key),
         yesterdayCompleted: dashboard.candidates.yesterdayWork.filter((entry) => entry.completedYesterday), page: 0,
       }, t);
@@ -1042,6 +1042,7 @@ async function loadSubmission(id: string, ownerId: string) {
     skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
     source: String(row.source), submittedAt: String(row.submitted_at),
     work: dailyWorkSnapshots(String(row.work_snapshot_json || "[]")),
+    ...(row.must_do_work_ids_json != null ? { mustDoWorkIds: parseDailyWorkKeys(String(row.must_do_work_ids_json)) } : {}),
     yesterdayWork: dailyWorkSnapshots(String(row.yesterday_work_snapshot_json || "[]")),
     tasks: snapshots.results.map((snapshot) => ({ id: String(snapshot.id), taskId: snapshot.task_id ? String(snapshot.task_id) : null,
       taskTitle: String(snapshot.task_title), parentKind: String(snapshot.parent_kind), parentId: snapshot.parent_id ? String(snapshot.parent_id) : null,
@@ -1236,11 +1237,18 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
     ] };
   }
-  type CardWork = { taskId: string | null; taskTitle: string; parentTitle: string; parentKind?: string; groupKey: string; completedToday: boolean };
-  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, taskId: task.taskId, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ taskId: work.kind === "task" ? work.id : null, taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, completedToday: Boolean(work.completedToday) }))];
+  type CardWork = { key: string; taskId: string | null; taskTitle: string; parentTitle: string; parentKind?: string; groupKey: string; completedToday: boolean };
+  const allWork: CardWork[] = [...submission.tasks.map((task) => ({ ...task, key: `task:${task.taskId ?? task.id}`, taskId: task.taskId, groupKey: `${task.parentKind}:${task.parentId || "general"}`, completedToday: false })), ...(submission.work ?? []).map((work) => ({ key: work.key, taskId: work.kind === "task" ? work.id : null, taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, completedToday: Boolean(work.completedToday) }))];
   const completedSnapshots = [...new Map([...(submission.yesterdayWork ?? []), ...(submission.work ?? []).filter((work) => work.completedToday)].map((work) => [work.key, work])).values()];
-  const completedWork = completedSnapshots.map((work) => ({ taskId: work.kind === "task" ? work.id : null, taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, completedToday: true }));
-  const plannedWork = allWork.filter((work) => !work.completedToday);
+  const completedWork = completedSnapshots.map((work) => ({ key: work.key, taskId: work.kind === "task" ? work.id : null, taskTitle: work.title, parentTitle: work.kind === "project" || work.kind === "routine" ? work.title : work.parentTitle, parentKind: work.kind === "task" ? work.parentKind : work.kind, groupKey: work.kind === "task" ? `${work.parentKind}:${work.parentId || "general"}` : work.key, completedToday: true }));
+  const completedKeys = new Set(completedSnapshots.map((work) => work.key));
+  const plannedWork = [...new Map(allWork.filter((work) => !work.completedToday && !completedKeys.has(work.key)).map((work) => [work.key, work])).values()];
+  const classified = submission.mustDoWorkIds !== undefined;
+  const mustDo = new Set(submission.mustDoWorkIds ?? []);
+  const planSections = classified
+    ? [{ title: "오늘 꼭 할 일", work: plannedWork.filter((work) => mustDo.has(work.key)) },
+      { title: "여유되면 할 일", work: plannedWork.filter((work) => !mustDo.has(work.key)) }]
+    : [{ title: "오늘 할 일", work: plannedWork }];
   const groupedLines = (work: CardWork[], emptyText = t("오늘 예정 없음")) => {
     const groups = new Map<string, { title: string; lines: string[] }>();
     for (const task of work.slice(0, 20)) {
@@ -1258,8 +1266,13 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
   const interactiveTodayBlocks: Array<Record<string, unknown>> = [];
   if (options.publicationId) {
-    interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*` } });
-    const visible = plannedWork.slice(0, 20);
+    // Keep the whole message below Slack's 50-block limit, even with one parent per Task.
+    let remaining = classified ? 18 : 20;
+    for (const section of planSections) {
+    interactiveTodayBlocks.push({ type: "divider" });
+    interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `*${t(section.title)}*` } });
+    const visible = section.work.slice(0, remaining);
+    remaining -= visible.length;
     let currentGroup = "";
     for (const task of visible) {
       if (task.groupKey !== currentGroup) {
@@ -1273,15 +1286,19 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
           text: { type: "plain_text", text: t("완료") }, style: "primary",
           value: JSON.stringify({ publicationId: options.publicationId, taskId: task.taskId, privateControl: true }) } } : {}) });
     }
-    if (!visible.length) interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `• ${t("오늘 예정 없음")}` } });
-    if (plannedWork.length > 20) interactiveTodayBlocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `_${t("외 {count}개", { count: plannedWork.length - 20 })}_` }] });
+    if (!section.work.length) interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `• ${t("오늘 예정 없음")}` } });
+    if (section.work.length > visible.length) interactiveTodayBlocks.push({ type: "context", elements: [{ type: "mrkdwn", text: `_${t("외 {count}개", { count: section.work.length - visible.length })}_` }] });
+    }
     if (note || blocker) interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `${note}${blocker}`.trim().slice(0, 2900) } });
   }
   return { text, unfurl_links: false, unfurl_media: false, blocks: [
     { type: "header", text: { type: "plain_text", text: `${t("데일리 봇")} · ${submission.memberName} · ${submission.date}`.slice(0, 150) } },
     { type: "context", elements: [{ type: "mrkdwn", text: `*${t("오늘 근무")}:* ${t(dailyWorkStatusLabel(submission.workStatus))}` }] },
     { type: "section", text: { type: "mrkdwn", text: `*${t("완료한 일")}*\n${groupedLines(completedWork, t("선택한 업무 없음"))}${completedNote}`.slice(0, 2900) } },
-    ...(options.publicationId ? interactiveTodayBlocks : [{ type: "section", text: { type: "mrkdwn", text: `*${t("오늘 할 일")}*\n${groupedLines(plannedWork)}${note}${blocker}`.slice(0, 2900) } }]),
+    ...(options.publicationId ? interactiveTodayBlocks : planSections.flatMap((section, index) => [
+      { type: "divider" },
+      { type: "section", text: { type: "mrkdwn", text: `*${t(section.title)}*\n${groupedLines(section.work)}${index === planSections.length - 1 ? note + blocker : ""}`.slice(0, 2900) } },
+    ])),
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };
 }
@@ -1294,7 +1311,7 @@ function dailyPrivateCompletionCard(submission: DailySubmissionValue, t: Transla
     accessory?: { action_id?: string };
   }>;
   const start = blocks.findIndex((block) => block.type === "section"
-    && block.text?.type === "mrkdwn" && block.text.text === `*${t("오늘 할 일")}*`);
+    && block.text?.type === "mrkdwn" && ["오늘 할 일", "오늘 꼭 할 일"].some((title) => block.text!.text === `*${t(title)}*`));
   if (start < 0) return null;
   const controls = blocks.slice(start, -1).filter((block) => block.type !== "section"
     || block.text?.text !== `• ${t("오늘 예정 없음")}`);

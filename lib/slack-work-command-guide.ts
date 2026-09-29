@@ -37,7 +37,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
       { command: "!프로젝트조회 · !프로젝트수정 · !프로젝트상태", label: "Project 관리" },
       { command: "!테스크조회 · !테스크수정 · !테스크완료 · !테스크재열기", label: "Task 관리" },
       { command: "!도움말", label: "최신 사용법" },
-      { command: "/okri daily", label: "개인 데일리 작성" },
+      { command: "/okri daily", label: "개인 데일리 작성", fields: "라디오 선택 · 오늘 꼭 할 일 / 여유되면 할 일" },
     ],
   },
 ] as const;

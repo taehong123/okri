@@ -122,6 +122,7 @@ test("Slack manual questions read the manual without history/Canvas, writes or r
   const calls = [];
   const noWorkspaceAccess = () => { throw new Error("Manual questions must not read/write workspace context or sessions"); };
   const agent = compile(await read("lib/slack-mcp-agent.ts"), {
+    "@/lib/slack-creation-defaults": {},
     "cloudflare:workers": { env: { DB: { prepare: noWorkspaceAccess }, OPENAI_API_KEY: "mock-only" } },
     "@modelcontextprotocol/sdk/inMemory.js": { InMemoryTransport },
     "@/app/mcp/route": { createOkriServer: async (auth) => {
