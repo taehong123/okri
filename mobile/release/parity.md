@@ -1,5 +1,10 @@
 # Native parity ledger
 
+- 2026-09-29: Corrected self-hosted HTTPS protocol recognition behind Traefik
+  without relaxing billing or merchant-bridge origin/owner checks. Web error
+  and information toasts now pair semantic foreground/background colors.
+  Native v1 contracts and installed UI are unchanged; no native release.
+
 - 2026-09-29: The user requested reuse of the existing mamuree merchant. Web
   checkout now supports a dedicated mamuree.com payment bridge with a fragment
   session token, encrypted staging, originating-owner confirmation, explicit

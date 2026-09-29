@@ -77,6 +77,10 @@ spec:
               value: "3000"
             - name: HOST
               value: 0.0.0.0
+            # Only Traefik exposes this ClusterIP app and supplies the TLS protocol.
+            # Keep forwarded-host trust disabled; origin/CSRF checks stay intact.
+            - name: VINEXT_TRUST_PROXY
+              value: "1"
             - name: OKRI_DATA_PATH
               value: /var/lib/okri
             - name: OKRI_DB_PATH

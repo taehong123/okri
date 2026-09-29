@@ -88,6 +88,56 @@ test("PayPal checkout requires explicit consent, sends the displayed price and p
   await expect(page.locator(".billing-page")).not.toContainText("운영 보안값");
 });
 
+test("Payple checkout navigates only to the configured merchant bridge", async ({ page }) => {
+  await installBilling(page, "en", { ...billingFixture(), providers: { payple: true, paypal: [] } });
+  const token = "11111111-1111-4111-8111-111111111111";
+  await page.route("**/api/billing/payple/session", route => json(route, {
+    sessionToken: token, bridgeUrl: `https://mamuree.com/api/public/payple/okri/bridge#${token}`,
+  }, 201));
+  await page.route("https://mamuree.com/api/public/payple/okri/bridge?**", route => route.fulfill({
+    contentType: "text/html", body: "<h1>Mock card registration</h1>",
+  }));
+  await page.goto("/?view=billing");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await page.locator(".billing-checkout input[type=checkbox]").check();
+  await page.locator(".billing-checkout > button").click();
+  await expect(page.getByRole("heading", { name: "Mock card registration" })).toBeVisible();
+  const url = new URL(page.url());
+  expect(url.origin).toBe("https://mamuree.com");
+  expect(url.hash).toBe("#" + token);
+  expect(url.searchParams.get("lang")).toBe("en-US");
+});
+
+test("checkout failure remains readable in all themes and at enlarged mobile text", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium");
+  test.setTimeout(180_000);
+  await installBilling(page, "ko", { ...billingFixture(), providers: { payple: true, paypal: [] } });
+  await page.route("**/api/billing/payple/session", route => json(route, { error: "unknown diagnostic" }, 403));
+  for (const theme of ["white", "beige", "gray", "dark", "neon", "cyberpunk"]) {
+    await page.goto("/?view=billing");
+    await page.evaluate(value => localStorage.setItem("okri.theme", value), theme);
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+    for (const width of [320, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      await page.evaluate(() => document.documentElement.style.fontSize = "200%");
+      await page.locator(".billing-checkout input[type=checkbox]").check();
+      await page.locator(".billing-checkout > button").click();
+      const toast = page.locator(".toast-error");
+      await expect(toast).toContainText("카드 등록을 시작하지 못했습니다.");
+      const axe = await new AxeBuilder({ page: page as never }).include(".toast-error").analyze();
+      expect(axe.violations.filter(v => v.id === "color-contrast" || v.impact === "critical"), `${theme} ${width}`).toEqual([]);
+      const box = await toast.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(0);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(width);
+      await toast.screenshot({ path: info.outputPath(`error-${theme}-${width}.png`) });
+      await toast.getByRole("button").focus();
+      await page.keyboard.press("Enter");
+      await expect(toast).toHaveCount(0);
+    }
+  }
+});
+
 test("a provider return verifies only the authenticated workspace and never trusts URL subscription IDs", async ({ page }) => {
   await installBilling(page);
   let calls = 0;

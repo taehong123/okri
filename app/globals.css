@@ -308,8 +308,8 @@ nav { display: grid; gap: 1px; margin-top: 10px; }
 .quick-capture input::placeholder { color: var(--faint); }
 .quick-capture button { min-height: var(--control-height); padding: 0 10px; border: 0; border-radius: var(--radius-control); background: var(--button-primary-bg); color: var(--button-primary-fg); font-size: var(--type-label); cursor: pointer; }
 .toast { position: fixed; z-index: 80; left: 50%; bottom: 28px; min-width: min(420px, calc(100vw - 24px)); max-width: min(620px, calc(100vw - 24px)); display: flex; align-items: center; justify-content: space-between; gap: 12px; transform: translateX(-50%); padding: 9px 10px 9px 13px; border: 1px solid rgba(255, 255, 255, .12); border-radius: var(--radius-container); background: var(--toast-bg); color: var(--toast-fg); box-shadow: 0 7px 28px rgba(0, 0, 0, .18); font-size: var(--type-meta); }
-.toast-error { background: var(--danger-bg); }
-.toast-info { background: var(--info-bg); }
+.toast-error { --toast-bg: var(--danger-bg); --toast-fg: var(--danger-fg); border-color: var(--border-default); }
+.toast-info { --toast-bg: var(--info-bg); --toast-fg: var(--info-fg); border-color: var(--border-default); }
 .toast span { min-width: 0; line-height: 1.45; }
 .toast button { width: var(--control-height); min-height: var(--control-height); flex: 0 0 auto; display: grid; place-items: center; padding: 0; border: 0; border-radius: var(--radius-control); background: transparent; color: inherit; cursor: pointer; }
 .toast button:hover { background: transparent; outline: 1px solid currentColor; }

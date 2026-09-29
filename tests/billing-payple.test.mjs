@@ -48,6 +48,39 @@ function fixture(t) {
 }
 const migration = await source("drizzle/0068_payple_attempts.sql");
 
+test("Traefik HTTPS reaches billing authentication without weakening origin or host checks", async () => {
+  assert.match(await source("deploy/k8s/deployment.yaml"), /name: VINEXT_TRUST_PROXY\s+value: "1"/);
+  const previous = process.env.VINEXT_TRUST_PROXY;
+  const previousHosts = process.env.VINEXT_TRUSTED_HOSTS;
+  process.env.VINEXT_TRUST_PROXY = "1";
+  delete process.env.VINEXT_TRUSTED_HOSTS;
+  let proxy;
+  try {
+    proxy = await import("data:text/javascript;base64," + Buffer.from(await source("node_modules/vinext/dist/server/proxy-trust.js")).toString("base64"));
+  } finally {
+    if (previous === undefined) delete process.env.VINEXT_TRUST_PROXY; else process.env.VINEXT_TRUST_PROXY = previous;
+    if (previousHosts === undefined) delete process.env.VINEXT_TRUSTED_HOSTS; else process.env.VINEXT_TRUSTED_HOSTS = previousHosts;
+  }
+  let authCalls = 0;
+  const routes = compile(await source("lib/billing-route.ts"), {
+    "@/lib/pace-data": { authorizeRequest: async () => { authCalls++; return Response.json({}, { status: 401 }); } },
+    "./paypal-api": { PayPalError: class extends Error {} },
+  });
+  const headers = new Headers({ host: "okri.ai", "x-forwarded-proto": "https", "x-forwarded-host": "evil.example",
+    origin: "https://okri.ai", "sec-fetch-site": "same-origin" });
+  const url = `${proxy.resolveRequestProtocol(headers)}://${proxy.resolveRequestHost(headers, "localhost")}/api/billing/payple/session`;
+  assert.equal(url, "https://okri.ai/api/billing/payple/session");
+  assert.equal((await routes.authorizeBillingOwner(new Request(url, { headers }))).status, 401);
+  assert.equal(authCalls, 1);
+  for (const origin of [null, "http://okri.ai", "https://evil.example", "null"]) {
+    if (origin === null) headers.delete("origin"); else headers.set("origin", origin);
+    assert.equal((await routes.authorizeBillingOwner(new Request(url, { headers }))).status, 403);
+  }
+  headers.set("origin", "https://okri.ai"); headers.set("sec-fetch-site", "cross-site");
+  assert.equal((await routes.authorizeBillingOwner(new Request(url, { headers }))).status, 403);
+  assert.equal(authCalls, 1);
+});
+
 test("monthly renewal clamps month ends and preserves the UTC time", () => {
   for (const [start, expected] of [
     ["2026-01-31T12:34:56.000Z", "2026-02-28T12:34:56.000Z"],
