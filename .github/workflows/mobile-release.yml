@@ -78,7 +78,7 @@ jobs:
         run: |
           test -n "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON"
           gem install fastlane --no-document
-          fastlane supply --json_key_data "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" --package_name ai.okri.app --aab "$ANDROID_ARTIFACT" --track internal --release_status draft --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true
+          fastlane supply --json_key_data "$GOOGLE_PLAY_SERVICE_ACCOUNT_JSON" --package_name ai.okri.mobile --aab "$ANDROID_ARTIFACT" --track internal --release_status draft --skip_upload_metadata true --skip_upload_images true --skip_upload_screenshots true
       - name: Remove signing material
         if: always()
         run: rm -rf -- "$RUNNER_TEMP/okri-signing"

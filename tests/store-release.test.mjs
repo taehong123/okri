@@ -22,7 +22,7 @@ test("review packet matches native permissions, commerce and deletion behavior",
   const packet = JSON.parse(await read("mobile/release/review-readiness.json"));
   const config = await read("mobile/app.config.ts"), app = await read("mobile/App.tsx"), settings = await read("mobile/src/screens/settings.tsx");
   const deletionPage = await read("app/account-deletion/page.tsx"), deletionRoute = await read("app/api/account/deletion/route.ts"), googleSession = await read("lib/google-session.ts");
-  assert.equal(packet.identity.bundleId, "ai.okri.app"); assert.equal(packet.identity.accountDeletionUrl, "https://okri.ai/account-deletion?lang=en");
+  assert.equal(packet.identity.bundleId, "ai.okri.app"); assert.equal(packet.identity.packageName, "ai.okri.mobile"); assert.equal(packet.identity.accountDeletionUrl, "https://okri.ai/account-deletion?lang=en");
   assert.equal(packet.apple.supportsTablet, false); assert.match(config, /supportsTablet: false/); assert.match(config, /usesAppleSignIn: true/);
   assert.equal(packet.commerce.digitalPurchaseInApp, false); assert.doesNotMatch(app, /billing|paypal|purchase|subscription/i);
   assert.match(packet.googlePlay.appAccessInstructions, /App review access/); assert.equal(packet.access.demoCredentialCommitted, false);

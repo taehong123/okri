@@ -37,7 +37,7 @@ const config: ExpoConfig = {
     },
   },
   android: {
-    package: "ai.okri.app",
+    package: "ai.okri.mobile",
     versionCode: androidVersionCode,
     allowBackup: false,
     predictiveBackGestureEnabled: true,

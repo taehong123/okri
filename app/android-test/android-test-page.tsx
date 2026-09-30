@@ -9,7 +9,7 @@ import { applyGuestLanguage, chooseGuestLanguage, useLanguage } from "@/lib/clie
 import { isLanguage, languages, type Language } from "@/lib/language";
 import "./android-test.css";
 
-const PLAY_TEST_URL = "https://play.google.com/apps/testing/ai.okri.app";
+const PLAY_TEST_URL = "https://play.google.com/apps/testing/ai.okri.mobile";
 const subscribeHydration = () => () => {};
 
 export default function AndroidTestPage() {

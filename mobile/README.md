@@ -44,8 +44,8 @@ creates candidates, not automatic public releases. Store releases target a
 14-day cadence after device verification. Production updates are store binaries;
 there is no Expo account, EAS build or OTA dependency.
 
-1. Confirm `ai.okri.app` in both stores and keep store ownership independent from
-   build tooling.
+1. Confirm `ai.okri.app` for iOS and `ai.okri.mobile` for Android, and keep store
+   ownership independent from build tooling.
 3. Review and deploy the backend with migration `0063_native_sessions.sql` before
    enabling native login. Keep SQL LF and existing guards intact.
 4. Configure server secrets `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`
@@ -98,7 +98,8 @@ upstream patches before the release candidate and record the outcome.
 - Expo Doctor: 21/21 checks pass.
 - Android/iOS Hermes and web JavaScript exports succeed.
 - Android native release APK builds successfully from the generated project; the
-  emulator install and cold launch were verified with package `ai.okri.app`.
+  earlier emulator check used the retired package `ai.okri.app` and is not
+  evidence for the current `ai.okri.mobile` candidate.
 - The older verification APK uses the Android debug keystore and is not a Play
   Store artifact. Production uses the dedicated OKRI upload key.
 - That APK predates the API v1/release-policy changes. Its launch check is not

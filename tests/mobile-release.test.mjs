@@ -6,7 +6,7 @@ import { validateEvidence } from "../mobile/scripts/release-lib.mjs";
 import { iosExportOptions } from "../mobile/scripts/ios-export-options.mjs";
 const read = p => readFile(new URL("../" + p, import.meta.url), "utf8");
 const policy = compileLanguageModule(await read("lib/mobile/release-policy.ts"));
-const registry = () => ({ schemaVersion: 1, ios: { storeUrl: "https://apps.apple.com/app/id123456", releases: [], retirements: [] }, android: { storeUrl: "https://play.google.com/store/apps/details?id=ai.okri.app", releases: [], retirements: [] } });
+const registry = () => ({ schemaVersion: 1, ios: { storeUrl: "https://apps.apple.com/app/id123456", releases: [], retirements: [] }, android: { storeUrl: "https://play.google.com/store/apps/details?id=ai.okri.mobile", releases: [], retirements: [] } });
 test("unpublished/future store releases cannot prompt or retire an installed client", async () => {
   const actual = JSON.parse(await read("lib/mobile/releases.json")); policy.validateRegistry(actual);
   const r = registry();

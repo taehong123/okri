@@ -2,7 +2,7 @@
 
 ## Candidate scope
 
-- Bundle/package ID: `ai.okri.app`
+- iOS bundle ID: `ai.okri.app`; Android package ID: `ai.okri.mobile`.
 - Version: `1.0.0`; store build numbers are explicit environment values and only increase.
 - iOS: iPhone only for the first release. iPad is added only after separate layout,
   screenshot, text-size and VoiceOver verification.

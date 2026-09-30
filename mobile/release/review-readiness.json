@@ -4,7 +4,7 @@
   "identity": {
     "name": "OKRI",
     "bundleId": "ai.okri.app",
-    "packageName": "ai.okri.app",
+    "packageName": "ai.okri.mobile",
     "version": "1.0.0",
     "category": "PRODUCTIVITY",
     "supportEmail": "taehong0613@gmail.com",

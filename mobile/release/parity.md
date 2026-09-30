@@ -1,5 +1,12 @@
 # Native parity ledger
 
+- 2026-09-30: Android moved from the deleted zero-install draft package
+  `ai.okri.app` to `ai.okri.mobile` so the Yeniverse organization account can
+  receive a new internal-test release immediately. The iOS bundle remains
+  `ai.okri.app`; API, authentication, customer data and native feature behavior
+  are unchanged. A new signed Android artifact and physical-device evidence are
+  required before any public rollout.
+
 - 2026-09-29: Corrected self-hosted HTTPS protocol recognition behind Traefik
   without relaxing billing or merchant-bridge origin/owner checks. Web error
   and information toasts now pair semantic foreground/background colors.

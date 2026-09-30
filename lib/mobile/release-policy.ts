@@ -18,7 +18,7 @@ export function validStoreUrl(platform: "ios" | "android", value: unknown): valu
     const url = new URL(value);
     if (url.protocol !== "https:" || url.username || url.password || url.port || url.hash) return false;
     return platform === "android"
-      ? url.hostname === "play.google.com" && url.pathname === "/store/apps/details" && url.search === "?id=ai.okri.app"
+      ? url.hostname === "play.google.com" && url.pathname === "/store/apps/details" && url.search === "?id=ai.okri.mobile"
       : url.hostname === "apps.apple.com" && /^\/(?:[a-z]{2}\/)?app\/(?:[a-z0-9-]+\/)?id[0-9]+$/.test(url.pathname) && !url.search;
   } catch { return false; }
 }
