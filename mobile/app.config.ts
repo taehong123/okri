@@ -1,14 +1,14 @@
 import type { ExpoConfig } from "expo/config";
 
-const androidVersionCode = Number.parseInt(process.env.OKRI_ANDROID_VERSION_CODE ?? "2", 10);
-const iosBuildNumber = process.env.OKRI_IOS_BUILD_NUMBER ?? "1";
+const androidVersionCode = Number.parseInt(process.env.OKRI_ANDROID_VERSION_CODE ?? "5", 10);
+const iosBuildNumber = process.env.OKRI_IOS_BUILD_NUMBER ?? "2";
 if (!Number.isInteger(androidVersionCode) || androidVersionCode < 1 || !/^\d+$/.test(iosBuildNumber)) {
   throw new Error("Store build numbers must be positive integers");
 }
 const config: ExpoConfig = {
   name: "OKRI",
   slug: "okri",
-  version: "1.0.0",
+  version: "1.1.0",
   runtimeVersion: { policy: "fingerprint" },
   updates: {
     // Store binaries are the only production update lane. No Expo account or OTA service is used.
@@ -38,6 +38,7 @@ const config: ExpoConfig = {
   },
   android: {
     package: "ai.okri.mobile",
+    googleServicesFile: process.env.OKRI_GOOGLE_SERVICES_FILE,
     versionCode: androidVersionCode,
     allowBackup: false,
     predictiveBackGestureEnabled: true,
@@ -49,6 +50,7 @@ const config: ExpoConfig = {
   },
   plugins: [
     "expo-secure-store", "expo-web-browser", "expo-localization", "expo-apple-authentication", "expo-asset", "@react-native-community/datetimepicker",
+    ["expo-notifications", { icon: "./assets/notification-icon.png", color: "#525252", defaultChannel: "work-updates", enableBackgroundRemoteNotifications: false }],
     ["expo-font", { fonts: ["./assets/PretendardVariable.ttf"] }],
     ["expo-splash-screen", { image: "./assets/icon.png", imageWidth: 80, backgroundColor: "#FFFFFF" }],
   ],

@@ -30,8 +30,18 @@ export type Daily = {
   latestSubmission: { id: string; submittedAt: string } | null;
 };
 export type Session = { accessToken: string; expiresAt: string; user: { id: string; email: string; displayName: string } };
+export type WorkNotification = {
+  id: string; kind: "assignment" | "morning_brief"; itemId: string | null;
+  title: string; body: string; readAt: string | null; createdAt: string;
+};
+export type NotificationInbox = { unreadCount: number; notifications: WorkNotification[] };
+export type NotificationPreferences = {
+  assignmentPush: boolean; morningBriefPush: boolean; digestHour: number;
+  timezone: string; registeredDeviceCount: number;
+};
 export type Routes = {
   Main: undefined; Item: { id: string }; Routine: { id: string };
   Editor: { id?: string; kind?: Kind | "routine"; parentId?: string; routineId?: string };
   Gantt: undefined; Okr: undefined; Routines: undefined; Settings: undefined;
+  Notifications: undefined; NotificationSettings: undefined;
 };

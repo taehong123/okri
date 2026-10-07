@@ -1,8 +1,8 @@
-import React, { useState } from "react";
+import { useState } from "react";
 import { Alert, Linking, View } from "react-native";
 import { useNavigation } from "@react-navigation/native";
 import type { NativeStackNavigationProp } from "@react-navigation/native-stack";
-import { BookOpen, CalendarRange, CircleHelp, LogOut, Repeat2, Settings2, Target } from "lucide-react-native";
+import { Bell, BookOpen, CalendarRange, CircleHelp, LogOut, Repeat2, Settings2, Target } from "lucide-react-native";
 import { useApp, useBootstrap } from "../context";
 import { languages } from "../i18n";
 import { THEMES } from "../../../lib/themes";
@@ -14,11 +14,12 @@ import { ReleaseStatus } from "../release-status";
 
 export function MoreScreen() {
   const { t } = useApp(), nav = useNavigation<NativeStackNavigationProp<Routes>>();
-  const entries = [{ screen: "Okr", label: "OKR", icon: Target }, { screen: "Gantt", label: "간트", icon: CalendarRange }, { screen: "Routines", label: "Routine", icon: Repeat2 }, { screen: "Settings", label: "설정", icon: Settings2 }] as const;
+  const entries = [{ screen: "Notifications", label: "알림", icon: Bell }, { screen: "Okr", label: "OKR", icon: Target }, { screen: "Gantt", label: "간트", icon: CalendarRange }, { screen: "Routines", label: "Routine", icon: Repeat2 }, { screen: "Settings", label: "설정", icon: Settings2 }] as const;
   return <Screen><Txt role="title">{t("더보기")}</Txt><View>{entries.map(entry => <Row key={entry.screen} icon={entry.icon} onPress={() => nav.navigate(entry.screen)}><Txt>{t(entry.label)}</Txt></Row>)}</View><Row icon={BookOpen} onPress={() => void Linking.openURL("https://okri.ai/guide")}><Txt>{t("이용 안내")}</Txt></Row></Screen>;
 }
 export function SettingsScreen() {
   const { t, language, setLanguage, theme, setTheme, signOut, switchWorkspace, api, clear } = useApp(), data = useBootstrap().data;
+  const nav = useNavigation<NativeStackNavigationProp<Routes>>();
   const [busy, setBusy] = useState(false), [error, setError] = useState("");
   async function run(action: () => Promise<void>) {
     if (busy) return; setBusy(true); setError("");
@@ -41,7 +42,7 @@ export function SettingsScreen() {
     <Select label={t("워크스페이스")} value={data?.team.workspace?.id || ""} options={(data?.workspaces || []).filter(w => !w.scheduledDeletionAt).map(w => ({ id: w.id, label: w.name }))} onChange={id => void run(() => switchWorkspace(id))} enabled={!busy} />
     <Select label={t("언어")} value={language} options={languages.map(l => ({ id: l.id, label: l.name }))} onChange={id => void run(() => setLanguage(id as typeof language))} />
     <Select label={t("테마")} value={theme.mode} options={THEMES.map(th => ({ id: th.mode, label: t(th.label) }))} onChange={id => void run(() => setTheme(id as typeof theme.mode))} />
-    <View><Row icon={CircleHelp} onPress={() => void Linking.openURL("https://okri.ai/guide")}><Txt>{t("이용 안내")}</Txt></Row>
+    <View><Row icon={Bell} onPress={() => nav.navigate("NotificationSettings")}><Txt>{t("푸시 알림")}</Txt></Row><Row icon={CircleHelp} onPress={() => void Linking.openURL("https://okri.ai/guide")}><Txt>{t("이용 안내")}</Txt></Row>
       <Row onPress={() => void Linking.openURL("https://okri.ai/privacy")}><Txt>{t("개인정보 처리방침")}</Txt></Row>
       <Row onPress={() => void Linking.openURL("https://okri.ai/terms")}><Txt>{t("이용약관")}</Txt></Row>
     </View>

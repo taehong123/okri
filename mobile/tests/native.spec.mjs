@@ -37,7 +37,7 @@ test("release settings use native typography without forcing navigation or reloa
 test("native screens render, preserve failed drafts, and submit once", async ({ page }) => {
   const errors = []; page.on("pageerror", error => errors.push(error.message));
   await page.goto("/?lang=en");
-  await expect(page.getByText("Categorize signup failures", { exact: true })).toBeVisible();
+  await expect(page.getByText("Categorize signup failures", { exact: true }).first()).toBeVisible();
   await mkdir(screenshots, { recursive: true });
   await page.screenshot({ path: new URL("today-en.png", screenshots).pathname.replace(/^\/([A-Z]:)/, "$1") });
   await page.getByRole("tab", { name: /Daily/i }).click();
@@ -109,4 +109,22 @@ test("schedule and OKR tree open with keyboard-accessible controls", async ({ pa
   await page.keyboard.press("Enter");
   await expect(page.getByRole("button", { name: "펼치기", exact: true })).toBeVisible();
   await page.screenshot({ path: new URL("okr-ko-dark.png", screenshots).pathname.replace(/^\/([A-Z]:)/, "$1") });
+});
+test("notification inbox and settings stay readable on a narrow screen", async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 700 });
+  await page.goto("/?lang=en&theme=dark");
+  await page.getByRole("button", { name: "Notifications", exact: true }).click();
+  await expect(page.getByText("A new Task was assigned to you", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /A new Task was assigned to you.*Categorize signup failures/ })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await mkdir(screenshots, { recursive: true });
+  await page.screenshot({ path: new URL("notifications-en-dark.png", screenshots).pathname.replace(/^\/([A-Z]:)/, "$1") });
+  await page.goto("/?lang=en&theme=dark");
+  await page.getByRole("tab", { name: "More", exact: true }).click();
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Push notifications", exact: true }).click();
+  await expect(page.getByText("Immediate assignment alerts", { exact: true })).toBeVisible();
+  await expect(page.getByText("Morning work summary", { exact: true })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: new URL("notification-settings-en-dark.png", screenshots).pathname.replace(/^\/([A-Z]:)/, "$1") });
 });

@@ -15,6 +15,8 @@ are imported from the repository's `lib` directory.
 - System-browser Google login with PKCE and secure native token storage.
 - Native Apple sign-in, enabled only after server credentials are configured.
 - Recent-auth account deletion with an atomic guard against deleting shared teams.
+- Assignment inbox, unread state, item navigation and opt-in native push alerts.
+- A configurable morning summary of overdue, due-today and open assigned work.
 
 ## Local verification
 
@@ -51,6 +53,11 @@ there is no Expo account, EAS build or OTA dependency.
 4. Configure server secrets `APPLE_TEAM_ID`, `APPLE_KEY_ID`, `APPLE_PRIVATE_KEY`
    and `APPLE_BUNDLE_ID=ai.okri.app`; reuse the existing token encryption key.
    Keys belong in the server secret store, never `EXPO_PUBLIC_*`, Git or chat.
+   Push delivery additionally requires `PUSH_TOKEN_ENCRYPTION_KEY`,
+   `OKRI_FCM_SERVICE_ACCOUNT_JSON`, and the APNs values `OKRI_APNS_KEY_ID`,
+   `OKRI_APNS_TEAM_ID`, `OKRI_APNS_PRIVATE_KEY`, `OKRI_APNS_TOPIC=ai.okri.app`.
+   Android store builds materialize `OKRI_FIREBASE_GOOGLE_SERVICES_JSON_BASE64`
+   into `OKRI_GOOGLE_SERVICES_FILE`; iOS profiles must contain `aps-environment`.
 5. Build Android AAB locally on Windows with the stable upload key. GitHub Actions
    uses a macOS runner and Xcode to compile/sign iOS without an Expo cloud account.
 6. Test real Google and Apple auth, cancel/back, cold launch, session expiry,
@@ -69,14 +76,18 @@ there is no Expo account, EAS build or OTA dependency.
 Use `build:android` / `build:ios`, then verify the exact signed artifact SHA and
 store build number. Store upload is a separate protected workflow step.
 
-No payment purchase UI, advertising, analytics SDK or new push delivery is included
-in this first native companion. Existing server-side bot behavior is reused when
+No payment purchase UI, advertising or analytics SDK is included in the native
+companion. Push is opt-in and uses direct FCM/APNs device tokens without an Expo
+account or Expo Push Service. Existing server-side bot behavior is reused when
 the user explicitly submits. Website-only advanced property/document editing and
 integration administration have not been ported into this first native client.
 
 ## Data safety and deletion review
 
-The app transmits account identity and user-authored team work over TLS to OKRI.
+The app transmits account identity, user-authored team work and an optional native
+push token over TLS to OKRI. The push token is encrypted server-side and disabled
+when the user turns notifications off, the provider rejects it, or the account is
+deleted.
 The token is stored in Keychain/Keystore via SecureStore, not AsyncStorage. Only
 language and theme are saved in ordinary local preferences. Shared work remains
 with the team after account deletion; solo-owned workspaces are permanently

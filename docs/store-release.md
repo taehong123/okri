@@ -3,7 +3,8 @@
 ## Candidate scope
 
 - iOS bundle ID: `ai.okri.app`; Android package ID: `ai.okri.mobile`.
-- Version: `1.0.0`; store build numbers are explicit environment values and only increase.
+- Version: `1.1.0`; Android build `5` and iOS build `2` are the next reserved numbers.
+  Store build numbers are explicit environment values and only increase.
 - iOS: iPhone only for the first release. iPad is added only after separate layout,
   screenshot, text-size and VoiceOver verification.
 - Android: phone and tablet layouts supported by the same responsive native UI.
@@ -25,6 +26,10 @@
 - The app does not track users, display ads, use an advertising identifier, read
   contacts/media, record audio, or request location. It sends user-created work
   content, account identity and workspace operations to `https://okri.ai` over TLS.
+- Native push is optional. The permission prompt appears only after the user taps
+  `Turn on on this device`; the encrypted device token is linked to the account
+  solely for assignments and the configured morning work summary. Declare
+  `Device or other IDs` as optional, linked, and used for app functionality.
 - The app uses standard HTTPS encryption only and declares
   `ITSAppUsesNonExemptEncryption=false`.
 - Support: `taehong0613@gmail.com`; privacy: `https://okri.ai/privacy`; terms:

@@ -40,5 +40,12 @@
     "rollbackPlan": "Leave the additive tester tables and encrypted contact records in place when rolling back application code. Older web and native versions ignore these tables; do not drop data or rewrite the historical migration.",
     "dataPreservation": "Only new tables and indexes are created. The ON DELETE CASCADE clause applies solely to feedback that belongs to a newly created tester record; no existing account, workspace, item, routine, daily, or native data is mutated.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-26"
+  },
+  "drizzle/0071_notifications.sql": {
+    "sha256": "364c3883dc6ce40767cda926d2239f8da833202f4eded555397bf36fdc756c4c",
+    "v1Compatibility": "The migration adds isolated notification inbox, preference and encrypted native-device tables. Existing mobile v1 routes, payloads, business writes, authentication and Project/Task semantics remain unchanged; new notification endpoints are additive.",
+    "rollbackPlan": "Leave the additive tables and indexes in place when rolling application code back. Older clients ignore them, and pending inbox rows remain available for a forward fix without rewriting migration history.",
+    "dataPreservation": "Only new tables and indexes are created. ON DELETE clauses apply to notification records owned by an account or workspace and do not mutate existing users, workspaces, items, assignments, Daily records or native sessions during migration.",
+    "reviewedBy": "Codex native compatibility and notification security review, 2026-10-08"
   }
 }

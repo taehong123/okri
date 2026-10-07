@@ -32,7 +32,7 @@ try {
   let source;
   let buildNumber;
   if (platform === "android") {
-    for (const key of ["OKRI_UPLOAD_STORE_FILE", "OKRI_UPLOAD_STORE_PASSWORD", "OKRI_UPLOAD_KEY_ALIAS", "OKRI_UPLOAD_KEY_PASSWORD"]) required(key);
+    for (const key of ["OKRI_UPLOAD_STORE_FILE", "OKRI_UPLOAD_STORE_PASSWORD", "OKRI_UPLOAD_KEY_ALIAS", "OKRI_UPLOAD_KEY_PASSWORD", "OKRI_GOOGLE_SERVICES_FILE"]) required(key);
     run(process.execPath, [path.join(mobileRoot, "scripts", "configure-android-release.mjs")]);
     if (process.platform === "win32") {
       run(process.env.ComSpec ?? "C:\\Windows\\System32\\cmd.exe", ["/d", "/s", "/c", "gradlew.bat bundleRelease"], { cwd: path.join(mobileRoot, "android") });
@@ -40,7 +40,7 @@ try {
       run("./gradlew", ["bundleRelease"], { cwd: path.join(mobileRoot, "android") });
     }
     source = path.join(mobileRoot, "android", "app", "build", "outputs", "bundle", "release", "app-release.aab");
-    buildNumber = process.env.OKRI_ANDROID_VERSION_CODE ?? "2";
+    buildNumber = process.env.OKRI_ANDROID_VERSION_CODE ?? "5";
   } else if (platform === "ios") {
     if (process.platform !== "darwin") throw new Error("iOS must be compiled on the GitHub macOS runner");
     const teamId = required("APPLE_TEAM_ID");
@@ -62,7 +62,7 @@ try {
     const ipa = readdirSync(exportPath).find(file => file.endsWith(".ipa"));
     if (!ipa) throw new Error("Xcode did not produce an IPA");
     source = path.join(exportPath, ipa);
-    buildNumber = process.env.OKRI_IOS_BUILD_NUMBER ?? "1";
+    buildNumber = process.env.OKRI_IOS_BUILD_NUMBER ?? "2";
   } else {
     throw new Error("Select android or ios explicitly");
   }

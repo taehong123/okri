@@ -12,6 +12,13 @@ const words: Record<string, string[]> = {
   es: ["Ayudar a los clientes a descubrir el valor antes", "Alcanzar un 60% de activación la primera semana", "Mejorar la primera experiencia", "Mejorar el proceso de registro", "Resumir las entrevistas con clientes", "Clasificar los fallos de registro", "Revisar los textos de bienvenida", "Revisar comentarios de clientes", "Revisión operativa", "Revisar errores de pago"],
 };
 const w = words[lang] || words.en;
+const assignmentTitles: Record<string, string> = {
+  ko: "새 Task가 배정되었습니다",
+  en: "A new Task was assigned to you",
+  ja: "新しいTaskが割り当てられました",
+  zh: "你被分配了一个新 Task",
+  es: "Se te asignó una nueva Task",
+};
 const item = (id: string, kind: Item["kind"], title: string, parentId: string | null, dueDate = plusDays(today(), 3)): Item => ({ id, kind, title, parentId, dueDate, description: "", routineId: null, cycleId: "cycle", status: "todo", priority: "medium", progress: kind === "key_result" ? 42 : 25, archivedAt: null, createdByUserId: member.userId, assignments: [{ memberId: member.id, displayName: member.displayName, role: kind === "project" ? "project_dri" : "task_assignee" }] });
 const bootstrap: Bootstrap = {
   user: previewSession.user, workspaces: [{ id: "preview-workspace", name: "OKRI Studio", role: "owner" }], team: { workspace: { id: "preview-workspace", name: "OKRI Studio" }, members: [member], currentRole: "owner", canManage: true }, cycles: [{ id: "cycle", name: "Q3", status: "active" }],
@@ -56,6 +63,15 @@ export function installPreview() {
       const created = { ...item("new-" + bootstrap.items.length, body.kind, body.title, body.parentId), ...body };
       bootstrap.items.push(created); return Response.json({ item: created });
     }
+    if (url.pathname === "/api/mobile/v1/notifications") {
+      if (method === "PATCH") return Response.json({ ok: true });
+      const assigned = bootstrap.items.find(entry => entry.kind === "task");
+      return Response.json({ unreadCount: 1, notifications: [{ id: "notice-1", kind: "assignment", itemId: assigned?.id ?? null, title: assignmentTitles[lang] || assignmentTitles.en, body: assigned?.title ?? "Task", readAt: null, createdAt: new Date().toISOString() }] });
+    }
+    if (url.pathname === "/api/mobile/v1/notifications/preferences") {
+      return Response.json({ assignmentPush: true, morningBriefPush: true, digestHour: 9, timezone: "Asia/Seoul", registeredDeviceCount: 0 });
+    }
+    if (url.pathname === "/api/mobile/v1/notifications/devices") return Response.json({ registered: method === "POST" });
     if (url.pathname === "/api/mobile/v1/routine-completions") { const routine = bootstrap.routines.find(r => r.id === body.routineId); if (routine) routine.completed = body.completed; return Response.json({ routine }); }
     if (url.pathname === "/api/native/apple") return Response.json({ enabled: false });
     if (url.pathname === "/api/mobile/v1/workspaces" || url.pathname === "/api/native/session") return Response.json({ ok: true });

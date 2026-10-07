@@ -1,13 +1,13 @@
-import React, { useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Image, Platform, View, Linking, Pressable, useWindowDimensions } from "react-native";
 import * as Apple from "expo-apple-authentication";
-import { NavigationContainer, DefaultTheme } from "@react-navigation/native";
+import { NavigationContainer, DefaultTheme, createNavigationContainerRef } from "@react-navigation/native";
 import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { SafeAreaProvider, SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import { useFonts } from "expo-font";
 import { StatusBar } from "expo-status-bar";
-import { CalendarCheck, Ellipsis, FolderKanban, ListTodo } from "lucide-react-native";
+import { Bell, CalendarCheck, Ellipsis, FolderKanban, ListTodo } from "lucide-react-native";
 import { Providers, useApp, useBootstrap } from "./src/context";
 import { Button, ErrorState, Field, Loading, Screen, Txt } from "./src/ui";
 import { ProjectsScreen, RoutinesScreen, TodayScreen } from "./src/screens/work";
@@ -16,18 +16,31 @@ import { EditorScreen, Select } from "./src/screens/editor";
 import { DailyScreen } from "./src/screens/daily";
 import { GanttScreen, OkrScreen } from "./src/screens/schedule";
 import { MoreScreen, SettingsScreen } from "./src/screens/settings";
+import { NotificationsScreen, NotificationSettingsScreen, useNotificationInbox } from "./src/screens/notifications";
 import { languages } from "./src/i18n";
 import type { Routes, Session } from "./src/types";
 import { appleLogin, reviewLogin } from "./src/auth";
+import { useNotificationNavigation, usePushRegistration } from "./src/push";
 
 const Stack = createNativeStackNavigator<Routes>();
 const Tab = createBottomTabNavigator();
+const navigationRef = createNavigationContainerRef<Routes>();
+
+function NotificationHeaderButton() {
+  const { t, theme } = useApp(), query = useNotificationInbox();
+  const count = query.data?.unreadCount ?? 0;
+  return <Pressable accessibilityRole="button" accessibilityLabel={t("알림")} onPress={() => navigationRef.isReady() && navigationRef.navigate("Notifications")} style={({ pressed }) => ({ minWidth: 48, minHeight: 48, alignItems: "center", justifyContent: "center", opacity: pressed ? 0.6 : 1 })}>
+    <Bell size={22} color={theme.tokens["icon-default"]} />
+    {count > 0 && <View accessibilityLabel={t("읽지 않은 알림 {count}개", { count })} style={{ position: "absolute", top: 7, right: 5, minWidth: 18, height: 18, paddingHorizontal: 4, borderRadius: 9, alignItems: "center", justifyContent: "center", backgroundColor: theme.tokens["danger-fg"] }}><Txt role="meta" style={{ color: theme.tokens["button-danger-fg"], lineHeight: 16 }}>{count > 99 ? "99+" : count}</Txt></View>}
+  </Pressable>;
+}
 function Tabs() {
   const { t, theme } = useApp(), data = useBootstrap().data, insets = useSafeAreaInsets(), { fontScale } = useWindowDimensions();
   return <Tab.Navigator screenOptions={{
     headerTitle: data?.team.workspace?.name || "OKRI",
     headerTitleStyle: { fontFamily: "Pretendard", fontSize: 16, fontWeight: "600" },
     headerStyle: { backgroundColor: theme.tokens["bg-page"] }, headerTintColor: theme.tokens["text-primary"], headerShadowVisible: false,
+    headerRight: () => <NotificationHeaderButton />,
     tabBarActiveTintColor: theme.tokens["text-primary"], tabBarInactiveTintColor: theme.tokens["text-secondary"],
     tabBarStyle: { backgroundColor: theme.tokens["bg-page"], borderTopColor: theme.tokens["border-default"], height: Math.max(72, 48 + 24 * fontScale) + insets.bottom, paddingTop: 8, paddingBottom: Math.max(8, insets.bottom) },
     tabBarLabelStyle: { fontFamily: "Pretendard", fontSize: 13 }, tabBarLabelPosition: "below-icon",
@@ -76,12 +89,14 @@ function Login() {
   </SafeAreaView>;
 }
 function Root() {
-  const { ready, session, theme, t, workspace } = useApp(), c = theme.tokens;
+  const { ready, session, theme, t, workspace, api, language } = useApp(), c = theme.tokens;
   const [fonts, fontError] = useFonts({ Pretendard: require("./assets/PretendardVariable.ttf") });
+  usePushRegistration(api, language, !!session);
+  useNotificationNavigation(navigationRef, !!session);
   if (!ready || (!fonts && !fontError)) return <Loading />;
   if (fontError) return <Screen><ErrorState /></Screen>;
   return <><StatusBar style={theme.colorScheme === "dark" ? "light" : "dark"} />{!session ? <Login /> :
-    <NavigationContainer key={session.user.id + (workspace || "")} theme={{ ...DefaultTheme, dark: theme.colorScheme === "dark", colors: { ...DefaultTheme.colors, background: c["bg-page"], card: c["bg-page"], text: c["text-primary"], primary: c["text-link"], border: c["border-default"], notification: c["danger-fg"] } }}>
+    <NavigationContainer ref={navigationRef} key={session.user.id + (workspace || "")} theme={{ ...DefaultTheme, dark: theme.colorScheme === "dark", colors: { ...DefaultTheme.colors, background: c["bg-page"], card: c["bg-page"], text: c["text-primary"], primary: c["text-link"], border: c["border-default"], notification: c["danger-fg"] } }}>
       <Stack.Navigator screenOptions={{ contentStyle: { backgroundColor: c["bg-page"] }, headerStyle: { backgroundColor: c["bg-page"] }, headerTintColor: c["text-primary"], headerTitleStyle: { fontFamily: "Pretendard", fontSize: 18 }, headerShadowVisible: false, headerBackTitle: t("뒤로") }}>
         <Stack.Screen name="Main" component={Tabs} options={{ headerShown: false }} />
         <Stack.Screen name="Item" component={ItemScreen} options={{ title: t("상세") }} />
@@ -91,6 +106,8 @@ function Root() {
         <Stack.Screen name="Okr" component={OkrScreen} options={{ title: "OKR" }} />
         <Stack.Screen name="Routines" component={RoutinesScreen} options={{ title: "Routine" }} />
         <Stack.Screen name="Settings" component={SettingsScreen} options={{ title: t("설정") }} />
+        <Stack.Screen name="Notifications" component={NotificationsScreen} options={{ title: t("알림") }} />
+        <Stack.Screen name="NotificationSettings" component={NotificationSettingsScreen} options={{ title: t("푸시 알림") }} />
       </Stack.Navigator>
     </NavigationContainer>}</>;
 }

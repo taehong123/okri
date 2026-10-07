@@ -8,6 +8,7 @@ import { runDueDailyDigests } from "@/lib/slack-daily-digest";
 import { runDueWorkspaceManagementBots } from "@/lib/workspace-management-bot";
 import { runDueSlackDailyReminders } from "@/lib/slack-daily";
 import { runAndroidTestDailyReport } from "@/lib/android-test-feedback";
+import { runNotificationJobs } from "@/lib/notifications";
 
 export type ScheduledRuntime = {
   DB: D1Database;
@@ -16,6 +17,12 @@ export type ScheduledRuntime = {
   ANDROID_TEST_FEEDBACK_SLACK_TEAM_ID?: string;
   ANDROID_TEST_FEEDBACK_SLACK_CHANNEL_NAME?: string;
   STORE_FEEDBACK_SLACK_TEAM_ID?: string;
+  PUSH_TOKEN_ENCRYPTION_KEY?: string;
+  OKRI_FCM_SERVICE_ACCOUNT_JSON?: string;
+  OKRI_APNS_KEY_ID?: string;
+  OKRI_APNS_TEAM_ID?: string;
+  OKRI_APNS_PRIVATE_KEY?: string;
+  OKRI_APNS_TOPIC?: string;
 };
 
 export type ScheduledJobResult = {
@@ -36,6 +43,7 @@ export async function runScheduledJobs(runtime: ScheduledRuntime, scheduledAt = 
     ["daily_manual_runs", runDueDailyManualRuns(runtime.DB)],
     ["daily_digests", runDueDailyDigests(runtime.DB, scheduledAt)],
     ["android_test_daily_report", runAndroidTestDailyReport(runtime, scheduledAt)],
+    ["notifications", runNotificationJobs(runtime, scheduledAt)],
   ];
 
   if (scheduledAt.getUTCMinutes() % 15 === 0) {

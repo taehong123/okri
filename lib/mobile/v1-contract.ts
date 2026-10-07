@@ -44,6 +44,14 @@ export const dailyV1 = z.object({
   createTargets: z.object({ projects: z.array(z.object({ id, title: z.string() })), routines: z.array(z.object({ id, title: z.string() })), allowGeneral: z.boolean() }),
   latestSubmission: z.object({ id, submittedAt: z.string() }).nullable(),
 });
+const notificationV1 = z.object({
+  id, kind: z.enum(["assignment", "morning_brief"]), itemId: nullableId,
+  title: z.string(), body: z.string(), readAt: z.string().nullable(), createdAt: z.string(),
+});
+const notificationPreferencesV1 = z.object({
+  assignmentPush: z.boolean(), morningBriefPush: z.boolean(), digestHour: z.number().int().min(0).max(23),
+  timezone: z.string(), registeredDeviceCount: z.number().int().min(0),
+});
 const itemFields = {
   title: z.string().trim().min(1).max(300), description: z.string().max(10000),
   status: statuses, priority: priorities, dueDate: date.nullable(), parentId: nullableId,
@@ -61,6 +69,18 @@ export const requestsV1 = {
   "POST daily-scrum/submit": z.object({ date, requestId: id.max(200) }).strict(),
   "POST daily-scrum/tasks": z.object({ date, title: itemFields.title, parentKind: z.enum(["project", "routine", "general"]), parentId: nullableId, requestId: id.max(200) }).strict(),
   "PATCH workspaces": z.object({ workspaceId: id }).strict(),
+  "PATCH notifications": z.union([z.object({ id }).strict(), z.object({ all: z.literal(true) }).strict()]),
+  "PATCH notifications/preferences": z.object({
+    assignmentPush: z.boolean().optional(), morningBriefPush: z.boolean().optional(),
+    digestHour: z.number().int().min(0).max(23).optional(), timezone: z.string().min(1).max(100).optional(),
+  }).strict(),
+  "POST notifications/devices": z.object({
+    token: z.string().min(16).max(8192), platform: z.enum(["android", "ios"]), appId: z.enum(["ai.okri.mobile", "ai.okri.app"]),
+    locale: z.string().min(2).max(20), environment: z.enum(["production", "development"]),
+  }).strict(),
+  "DELETE notifications/devices": z.object({
+    token: z.string().min(16).max(8192), platform: z.enum(["android", "ios"]), appId: z.enum(["ai.okri.mobile", "ai.okri.app"]),
+  }).strict(),
 };
 // Commands whose response is not consumed return a stable acknowledgement.
 export const responsesV1: Record<string, z.ZodType> = {
@@ -72,6 +92,12 @@ export const responsesV1: Record<string, z.ZodType> = {
   "PATCH routines": z.object({ routine: routineV1 }),
   "POST daily-scrum/tasks": z.object({ task: z.object({ id }) }),
   "PATCH workspaces": z.object({ currentWorkspaceId: id }),
+  "GET notifications": z.object({ unreadCount: z.number().int().min(0), notifications: z.array(notificationV1) }),
+  "PATCH notifications": z.object({ ok: z.literal(true) }),
+  "GET notifications/preferences": notificationPreferencesV1,
+  "PATCH notifications/preferences": notificationPreferencesV1,
+  "POST notifications/devices": z.object({ registered: z.literal(true) }),
+  "DELETE notifications/devices": z.object({ registered: z.literal(false) }),
 };
 export const acknowledgementsV1 = new Set(["POST items", "PATCH items", "POST routines", "PATCH routines", "PUT daily-scrum", "POST daily-scrum/submit", "PUT routine-completions"]);
-export const readsV1 = new Set(["GET bootstrap", "GET daily-scrum"]);
+export const readsV1 = new Set(["GET bootstrap", "GET daily-scrum", "GET notifications", "GET notifications/preferences"]);

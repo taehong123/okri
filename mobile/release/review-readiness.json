@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
-  "reviewedAt": "2026-09-10",
+  "reviewedAt": "2026-10-08",
   "identity": {
     "name": "OKRI",
     "bundleId": "ai.okri.app",
     "packageName": "ai.okri.mobile",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "category": "PRODUCTIVITY",
     "supportEmail": "taehong0613@gmail.com",
     "supportUrl": "https://okri.ai/guide",
@@ -30,7 +30,8 @@
       { "type": "Email address", "required": true, "linkedToUser": true, "purpose": ["Account management", "App functionality"] },
       { "type": "Name", "required": true, "linkedToUser": true, "purpose": ["Account management", "App functionality"] },
       { "type": "User IDs", "required": true, "linkedToUser": true, "purpose": ["Account management", "App functionality"] },
-      { "type": "User content", "required": false, "linkedToUser": true, "purpose": ["App functionality"] }
+      { "type": "User content", "required": false, "linkedToUser": true, "purpose": ["App functionality"] },
+      { "type": "Device or other IDs", "required": false, "linkedToUser": true, "purpose": ["App functionality"] }
     ],
     "notCollected": ["Contacts", "Location", "Photos and videos", "Audio files", "Health and fitness", "Browsing history", "Advertising data"]
   },
@@ -53,7 +54,7 @@
     "supportsTablet": false,
     "signInWithApple": true,
     "usesNonExemptEncryption": false,
-    "reviewNotes": "OKRI is an authenticated team productivity companion. Sign in with Apple or Google to create an empty personal workspace. Core OKR, Project, Task, Routine and Daily features are available without payment. Account deletion is in More > Settings. No subscription purchase or external payment steering appears in the app."
+    "reviewNotes": "OKRI is an authenticated team productivity companion. Sign in with Apple or Google to create an empty personal workspace. Core OKR, Project, Task, Routine and Daily features are available without payment. Push notifications are optional and requested only after the user taps Turn on in More > Settings > Push notifications. Account deletion is in More > Settings. No subscription purchase or external payment steering appears in the app."
   },
   "googlePlay": {
     "targetAudience": "Adults and workplace teams; not designed for children",

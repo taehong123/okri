@@ -10,6 +10,12 @@ interface Env {
   DB: D1Database;
   WORKSPACE_AVATARS: R2Bucket;
   WORKSPACE_SUBDOMAINS_ENABLED?: string;
+  PUSH_TOKEN_ENCRYPTION_KEY?: string;
+  OKRI_FCM_SERVICE_ACCOUNT_JSON?: string;
+  OKRI_APNS_KEY_ID?: string;
+  OKRI_APNS_TEAM_ID?: string;
+  OKRI_APNS_PRIVATE_KEY?: string;
+  OKRI_APNS_TOPIC?: string;
   IMAGES: {
     input(stream: ReadableStream): {
       transform(options: Record<string, unknown>): {
@@ -96,6 +102,7 @@ const worker = {
     const response = await handler.fetch(request, env, ctx);
     if (response.ok && !["GET", "HEAD", "OPTIONS"].includes(request.method) && (url.pathname.startsWith("/api/") || url.pathname === "/mcp")) {
       ctx.waitUntil(import("@/lib/slack-task-changes").then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)));
+      ctx.waitUntil(import("@/lib/notifications").then(({ runPendingNotificationPushes }) => runPendingNotificationPushes(env)));
     }
     if (cacheableRequest && response.ok) return withCacheHeaders(request, response, url.pathname);
     if (url.pathname.startsWith("/api/") && !response.ok) return withPublicErrorDetails(response);

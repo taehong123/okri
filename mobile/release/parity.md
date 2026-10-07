@@ -1,5 +1,7 @@
 # Native parity ledger
 
+- 2026-10-08: Added a native notification inbox for new Project/Task assignments, unread state, item navigation, per-device push registration, immediate assignment alerts, and a configurable morning summary of overdue, due-today, and open assigned work. The server support is additive under `/api/mobile/v1/notifications*`; existing 1.0.0 payloads and business writes are unchanged. Android and iOS require the reviewed 1.1.0 store binary because notification permissions, FCM/APNs tokens, channels, and entitlements are native. Push delivery remains disabled until the protected Firebase/APNs and token-encryption secrets are configured; the in-app inbox remains usable independently. No OTA is used.
+
 - 2026-09-30: Android moved from the deleted zero-install draft package
   `ai.okri.app` to `ai.okri.mobile` so the Yeniverse organization account can
   receive a new internal-test release immediately. The iOS bundle remains

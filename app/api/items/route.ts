@@ -138,7 +138,7 @@ export async function POST(request: Request) {
       templateId: asNullableString(payload.templateId),
       createdByUserId: authorization.userId,
     });
-    await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload);
+    await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload, authorization.userId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
     return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? []) }, { status: 201 });
   } catch (error) {
@@ -172,7 +172,7 @@ export async function PATCH(request: Request) {
       routineId: payload.routineId === undefined ? undefined : asNullableString(payload.routineId),
       source: asOptionalString(payload.source) || "web",
     });
-    await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload);
+    await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload, authorization.userId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
     return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? []) });
   } catch (error) {
@@ -196,17 +196,17 @@ function taskPlacementRequired(placement: ReturnType<typeof reviewTaskGeneralPla
   }, { status: 409, headers: { "Cache-Control": "no-store" } });
 }
 
-async function saveAssignments(ownerId: string, itemId: string, kind: ItemKind, payload: Record<string, unknown>) {
+async function saveAssignments(ownerId: string, itemId: string, kind: ItemKind, payload: Record<string, unknown>, actorUserId: string) {
   if (kind === "project") {
     if (payload.driMemberId !== undefined) {
-      await replaceItemAssignmentRole(ownerId, itemId, "project_dri", asMemberIds(payload.driMemberId, 1));
+      await replaceItemAssignmentRole(ownerId, itemId, "project_dri", asMemberIds(payload.driMemberId, 1), { actorUserId });
     }
     if (payload.workerMemberIds !== undefined) {
-      await replaceItemAssignmentRole(ownerId, itemId, "project_worker", asMemberIds(payload.workerMemberIds));
+      await replaceItemAssignmentRole(ownerId, itemId, "project_worker", asMemberIds(payload.workerMemberIds), { actorUserId });
     }
   }
   if (kind === "task" && payload.assigneeMemberId !== undefined) {
-    await replaceItemAssignmentRole(ownerId, itemId, "task_assignee", asMemberIds(payload.assigneeMemberId, 1));
+    await replaceItemAssignmentRole(ownerId, itemId, "task_assignee", asMemberIds(payload.assigneeMemberId, 1), { actorUserId });
   }
 }
 

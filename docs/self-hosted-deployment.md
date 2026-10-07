@@ -50,6 +50,10 @@ currently configured variable, especially:
   `EMAIL_UNSUBSCRIBE_SECRET`, `BILLING_*`
 - Product URLs and limits: `OKRI_PUBLIC_URL=https://okri.ai`,
   `OKRI_APP_URL=https://okri.ai`, existing `OKRI_AI_*` limits/models
+- Native push: `PUSH_TOKEN_ENCRYPTION_KEY`, `OKRI_FCM_SERVICE_ACCOUNT_JSON`,
+  `OKRI_APNS_KEY_ID`, `OKRI_APNS_TEAM_ID`, `OKRI_APNS_PRIVATE_KEY`, and
+  `OKRI_APNS_TOPIC=ai.okri.app`. Keep the token-encryption key stable so existing
+  device registrations remain decryptable.
 
 Add a new random `OKRI_SCHEDULER_TOKEN`; it protects the internal scheduler
 route. The deployment bootstrap makes an initial token only for isolated health

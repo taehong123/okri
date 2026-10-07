@@ -132,6 +132,62 @@ export const nativeSessions = sqliteTable("native_sessions", {
   revokedAt: text("revoked_at"),
 }, table => [index("native_sessions_user").on(table.userId)]);
 
+export const notificationDevices = sqliteTable("notification_devices", {
+  id: text("id").primaryKey().notNull(),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  platform: text("platform").notNull(),
+  appId: text("app_id").notNull(),
+  tokenHash: text("token_hash").notNull(),
+  encryptedToken: text("encrypted_token").notNull(),
+  locale: text("locale").notNull().default("en"),
+  environment: text("environment").notNull().default("production"),
+  disabledAt: text("disabled_at"),
+  lastSeenAt: text("last_seen_at").notNull(),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, table => [
+  uniqueIndex("notification_devices_token_hash").on(table.tokenHash),
+  index("notification_devices_user_active").on(table.userId, table.disabledAt),
+]);
+
+export const notificationPreferences = sqliteTable("notification_preferences", {
+  id: text("id").primaryKey().notNull(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  assignmentPush: integer("assignment_push", { mode: "boolean" }).notNull().default(true),
+  morningBriefPush: integer("morning_brief_push", { mode: "boolean" }).notNull().default(true),
+  digestHour: integer("digest_hour").notNull().default(9),
+  timezone: text("timezone").notNull().default("Asia/Seoul"),
+  createdAt: text("created_at").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, table => [
+  uniqueIndex("notification_preferences_workspace_user").on(table.workspaceId, table.userId),
+  index("notification_preferences_digest").on(table.morningBriefPush, table.digestHour),
+  check("notification_preferences_digest_hour", sql`${table.digestHour} BETWEEN 0 AND 23`),
+]);
+
+export const notifications = sqliteTable("notifications", {
+  id: text("id").primaryKey().notNull(),
+  workspaceId: text("workspace_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  userId: text("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  memberId: text("member_id").references(() => workspaceMembers.id, { onDelete: "set null" }),
+  itemId: text("item_id").references(() => items.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(),
+  payloadJson: text("payload_json").notNull().default("{}"),
+  dedupeKey: text("dedupe_key").notNull(),
+  readAt: text("read_at"),
+  pushAfter: text("push_after"),
+  pushSentAt: text("push_sent_at"),
+  pushAttempts: integer("push_attempts").notNull().default(0),
+  pushLastErrorCode: text("push_last_error_code"),
+  createdAt: text("created_at").notNull(),
+}, table => [
+  uniqueIndex("notifications_user_dedupe").on(table.userId, table.dedupeKey),
+  index("notifications_workspace_user_created").on(table.workspaceId, table.userId, table.createdAt),
+  index("notifications_push_pending").on(table.pushSentAt, table.pushAfter, table.pushAttempts),
+  check("notifications_payload_json", sql`json_valid(${table.payloadJson})`),
+]);
+
 export const nativeAppleNonces = sqliteTable("native_apple_nonces", {
   nonceHash: text("nonce_hash").primaryKey().notNull(),
   expiresAt: text("expires_at").notNull(),

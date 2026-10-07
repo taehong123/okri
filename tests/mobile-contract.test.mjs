@@ -140,7 +140,7 @@ test("existing daily command handlers still accept frozen idempotency and parent
   assert.deepEqual(calls[0].body, fixture.requests["POST daily-scrum/tasks"]); assert.equal(calls.length, 1);
 });
 test("all exposed mobile business routes use the adapter and old client never falls back to web endpoints", async () => {
-  for (const endpoint of ["bootstrap", "items", "routines", "routine-completions", "workspaces", "daily-scrum", "daily-scrum/tasks", "daily-scrum/submit"]) {
+  for (const endpoint of ["bootstrap", "items", "routines", "routine-completions", "workspaces", "daily-scrum", "daily-scrum/tasks", "daily-scrum/submit", "notifications", "notifications/preferences", "notifications/devices"]) {
     assert.match(await read("app/api/mobile/v1/" + endpoint + "/route.ts"), /mobileV1\(/);
   }
   const api = compileLanguageModule(await read("mobile/src/api.ts"), { "./client-version": { clientHeaders: () => ({}) } });

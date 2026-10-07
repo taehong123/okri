@@ -442,6 +442,13 @@
       "when": 1790647200000,
       "tag": "0070_daily_plan_tiers",
       "breakpoints": true
+    },
+    {
+      "idx": 63,
+      "version": "6",
+      "when": 1791421200000,
+      "tag": "0071_notifications",
+      "breakpoints": true
     }
   ]
 }

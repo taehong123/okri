@@ -77,3 +77,13 @@ test("store review login is server-validated and localized without embedded cred
   assert.doesNotMatch(app + auth, /google-play-review@okri\.invalid|a-long-random-review-password/);
   for (const lang of ["ko", "en", "ja", "zh", "es"]) assert.notEqual(i18n.translator(lang)("앱 심사용 로그인"), "");
 });
+
+test("notifications use native device tokens without Expo account or OTA delivery", async () => {
+  const push = await read("../src/push.ts"), config = await read("../app.config.ts"), app = await read("../App.tsx");
+  assert.match(push, /getDevicePushTokenAsync/);
+  assert.doesNotMatch(push + config, /getExpoPushTokenAsync|projectId|easConfig/);
+  assert.match(config, /updates:\s*\{[\s\S]*enabled:\s*false/);
+  assert.match(config, /expo-notifications/);
+  assert.match(app, /NotificationHeaderButton/);
+  assert.match(app, /NotificationSettings/);
+});

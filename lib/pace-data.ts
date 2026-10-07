@@ -13,6 +13,7 @@ import { and, asc, desc, eq, inArray, isNull, like, lte, ne, or, sql } from "dri
 import { getDb } from "@/db";
 import { readGoogleSession } from "@/lib/google-session";
 import { completeOnboardingForInvitedWorkspace } from "@/lib/account-onboarding";
+import { enqueueAssignmentNotifications } from "@/lib/notifications";
 import {
   activityLog,
   aiUsageEvents,
@@ -4467,8 +4468,8 @@ export async function createItem(
     }
     const defaultDri = systemDefault("project_dri");
     const defaultWorkers = systemDefault("project_workers");
-    if (typeof defaultDri === "string") await replaceItemAssignmentRole(ownerId, created.id, "project_dri", [defaultDri]);
-    if (Array.isArray(defaultWorkers)) await replaceItemAssignmentRole(ownerId, created.id, "project_worker", defaultWorkers);
+    if (typeof defaultDri === "string") await replaceItemAssignmentRole(ownerId, created.id, "project_dri", [defaultDri], { actorUserId: input.createdByUserId });
+    if (Array.isArray(defaultWorkers)) await replaceItemAssignmentRole(ownerId, created.id, "project_worker", defaultWorkers, { actorUserId: input.createdByUserId });
     if (input.templateId) await applyProjectTemplate(ownerId, created.id, input.templateId, input.createdByUserId);
   }
 
@@ -4646,6 +4647,7 @@ export async function replaceItemAssignmentRole(
   itemId: string,
   role: ItemAssignmentRole,
   memberIds: string[],
+  context: { actorUserId?: string | null } = {},
 ) {
   if (!ITEM_ASSIGNMENT_ROLES.includes(role)) throw new Error("Unsupported assignment role");
   const item = await getItem(ownerId, itemId);
@@ -4655,6 +4657,14 @@ export async function replaceItemAssignmentRole(
   if (item.kind !== expectedKind) throw new Error(`${role} can only be used on ${expectedKind}`);
   const uniqueMemberIds = [...new Set(memberIds.filter(Boolean))];
   if (role !== "project_worker" && uniqueMemberIds.length > 1) throw new Error("Only one accountable member is allowed");
+
+  const existing = await getDb().select({ memberId: itemAssignments.memberId }).from(itemAssignments).where(and(
+    eq(itemAssignments.ownerId, ownerId),
+    eq(itemAssignments.itemId, itemId),
+    eq(itemAssignments.role, role),
+  ));
+  const existingMemberIds = new Set(existing.map(assignment => assignment.memberId));
+  const addedMemberIds = uniqueMemberIds.filter(memberId => !existingMemberIds.has(memberId));
 
   if (uniqueMemberIds.length) {
     const members = await getDb()
@@ -4679,6 +4689,16 @@ export async function replaceItemAssignmentRole(
       .bind(crypto.randomUUID(), ownerId, itemId, memberId, role, now, now, ownerId, itemId, memberId, role)),
   ]);
   await logActivity(ownerId, itemId, "assignments_updated", "web", { role, memberIds: uniqueMemberIds });
+  if (addedMemberIds.length) {
+    await enqueueAssignmentNotifications({
+      workspaceId: ownerId,
+      item: { id: item.id, kind: item.kind, title: item.title },
+      role,
+      memberIds: addedMemberIds,
+      actorUserId: context.actorUserId,
+      eventId: crypto.randomUUID(),
+    }).catch(error => console.error("assignment_notification_enqueue_failed", error instanceof Error ? error.message : "Unknown failure"));
+  }
   return (await getItemAssignmentMap(ownerId, [itemId]))[itemId] ?? [];
 }
 
