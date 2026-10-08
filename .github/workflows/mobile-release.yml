@@ -126,17 +126,22 @@ jobs:
           printf '%s' "$ASC_PRIVATE_KEY" > "$RUNNER_TEMP/okri-signing/AuthKey_${ASC_KEY_ID}.p8"
           chmod 600 "$RUNNER_TEMP/okri-signing/AuthKey_${ASC_KEY_ID}.p8"
           echo "ASC_KEY_PATH=$RUNNER_TEMP/okri-signing/AuthKey_${ASC_KEY_ID}.p8" >> "$GITHUB_ENV"
-      - name: Install approved Apple distribution identity
+      - name: Generate push-enabled Apple profile and install distribution identity
         env:
           IOS_CERTIFICATE_BASE64: ${{ secrets.OKRI_IOS_CERTIFICATE_BASE64 }}
           IOS_CERTIFICATE_PASSWORD: ${{ secrets.OKRI_IOS_CERTIFICATE_PASSWORD }}
-          IOS_PROFILE_BASE64: ${{ secrets.OKRI_IOS_PROFILE_BASE64 }}
+          APPLE_BUNDLE_IDENTIFIER: ai.okri.app
+          APPLE_PROFILE_NAME: OKRI App Store 1.1.0 Build 2 Push
+          IOS_PROFILE_PATH: ${{ runner.temp }}/okri-signing/app-store.mobileprovision
         run: |
           test -n "$IOS_CERTIFICATE_BASE64"
           test -n "$IOS_CERTIFICATE_PASSWORD"
-          test -n "$IOS_PROFILE_BASE64"
           printf '%s' "$IOS_CERTIFICATE_BASE64" | base64 --decode > "$RUNNER_TEMP/okri-signing/distribution.p12"
-          printf '%s' "$IOS_PROFILE_BASE64" | base64 --decode > "$RUNNER_TEMP/okri-signing/app-store.mobileprovision"
+          openssl pkcs12 -in "$RUNNER_TEMP/okri-signing/distribution.p12" -clcerts -nokeys -passin env:IOS_CERTIFICATE_PASSWORD -out "$RUNNER_TEMP/okri-signing/distribution.pem"
+          IOS_CERTIFICATE_SERIAL=$(openssl x509 -in "$RUNNER_TEMP/okri-signing/distribution.pem" -serial -noout | cut -d= -f2)
+          test -n "$IOS_CERTIFICATE_SERIAL"
+          export IOS_CERTIFICATE_SERIAL
+          node mobile/scripts/apple-provisioning-profile.mjs
           chmod 600 "$RUNNER_TEMP/okri-signing/"*
           security cms -D -i "$RUNNER_TEMP/okri-signing/app-store.mobileprovision" > "$RUNNER_TEMP/okri-signing/profile.plist"
           PROFILE_UUID=$(/usr/libexec/PlistBuddy -c 'Print UUID' "$RUNNER_TEMP/okri-signing/profile.plist")
