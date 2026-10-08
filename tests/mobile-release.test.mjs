@@ -80,7 +80,10 @@ test("iOS export uses the explicit app profile and never requires cloud signing"
   const workflow = await read(".github/workflows/mobile-release.yml");
   assert.match(workflow, /OKRI_IOS_CERTIFICATE_BASE64/);
   assert.match(workflow, /OKRI_IOS_CERTIFICATE_PASSWORD/);
-  assert.match(workflow, /OKRI_IOS_PROFILE_BASE64/);
+  assert.match(workflow, /APPLE_PROFILE_NAME/);
+  assert.match(workflow, /apple-provisioning-profile\.mjs/);
+  assert.doesNotMatch(workflow, /OKRI_IOS_PROFILE_BASE64/);
   assert.match(workflow, /Entitlements:application-identifier/);
+  assert.match(workflow, /Entitlements:aps-environment/);
   assert.match(workflow, /security delete-keychain/);
 });
