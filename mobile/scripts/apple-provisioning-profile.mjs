@@ -55,7 +55,7 @@ function normalizeSerial(value) {
 }
 
 async function ensurePushCapability(token, bundleId) {
-  const response = await apiRequest(token, `/bundleIds/${bundleId}/bundleIdCapabilities?limit=200`);
+  const response = await apiRequest(token, `/bundleIds/${bundleId}/bundleIdCapabilities`);
   const exists = response.data.some(
     (capability) => capability.attributes.capabilityType === "PUSH_NOTIFICATIONS",
   );
