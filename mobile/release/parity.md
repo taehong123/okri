@@ -187,3 +187,11 @@ not evidence that a web feature magically exists in React Native.
 - Web read surface: the existing submitted summary shows the same tiers; the web editor is unchanged and filters deselected keys before saving.
 - Native deliberately deferred: no new native editor or store binary. Frozen `/api/mobile/v1` shapes/semantics remain unchanged; no OTA.
 - Verification: mobile compatibility suite 113/113; normal self-hosted build and TypeScript pass; daily regression 102/102; one-worker browser suite 3/3 (1440, 390, 320px; five languages, white/dark, 200% text and actual fonts). Full root suite: pretest 115/115 and main 519/528; the same nine stale Sites/worker-test failures reproduce unchanged on clean production base `f3e302a`. No production test records or integration messages.
+
+## 2026-10-10 · Slack MCP multi-work batching
+
+- Slack MCP conversations batch multi-Task creation and recover internally when
+  a model proposes too many tool calls instead of asking the member to split or
+  repeat the request.
+- This is Slack agent orchestration only. `/api/mobile/v1` fixtures, semantics,
+  and native screens remain unchanged; no native release is required.
