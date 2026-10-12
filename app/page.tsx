@@ -4,6 +4,7 @@ import { DailyWorkPicker } from "@/app/daily-work-picker";
 import { SlackMemberConnections } from "@/app/slack-member-connections";
 import type { DailyWork } from "@/lib/daily-work";
 import { dailyRevisionChanged } from "@/lib/daily-revision";
+import { dailyCalendarTime, type DailyCalendarEvent } from "@/lib/daily-calendar";
 import { PropertyValueInput } from "@/app/property-value-input";
 import { DocumentProperties, type DocumentProperty } from "@/app/document-properties";
 import { dailyDeliveryHealth, dailyDeliveryLabel } from "@/lib/slack-daily-status";
@@ -4926,7 +4927,7 @@ function DailyScrumView({ workspaceId, onOpenTask, onOpenProject, onNavigate, on
   </section>;
 }
 
-function DailySubmissionSummary({ submission, onOpenTask, onOpenWork }: { submission: DailySubmission; onOpenTask: (id: string) => void; onOpenWork: (work: DailyWork) => void }) {
+function DailySubmissionSummary({ submission, onOpenTask, onOpenWork }: { submission: DailySubmission & { calendarEvents?: DailyCalendarEvent[] }; onOpenTask: (id: string) => void; onOpenWork: (work: DailyWork) => void }) {
   const completedWork = [...new Map([...(submission.yesterdayWork ?? []), ...(submission.work?.filter((entry) => entry.completedToday) ?? [])].map((entry) => [entry.key, entry])).values()];
   const plannedWork = submission.work?.filter((entry) => !entry.completedToday) ?? [];
   const parentContext = (parentKind: string | undefined, parentTitle: string) => parentKind === "project"
@@ -4950,6 +4951,7 @@ function DailySubmissionSummary({ submission, onOpenTask, onOpenWork }: { submis
         <ul aria-label={t(section.title)}>{tasks.map((task) => <li className="daily-submission-work" key={task.id}><small>{parentContext(task.parentKind, task.parentTitle)}</small><span className="daily-submission-task">{task.isNew && <em>{t("신규")}</em>}<button disabled={!task.taskId} onClick={() => task.taskId && onOpenTask(task.taskId)}>{task.taskTitle}</button></span></li>)}{work.map((entry) => <li className="daily-submission-work" key={entry.key}><small>{workContext(entry)}</small><span className="daily-submission-task"><button onClick={() => onOpenWork(entry)}>{entry.title}</button></span></li>)}{!tasks.length && !work.length && <li>{t("오늘 예정 없음")}</li>}</ul>
       </Fragment>;
     })}
+    {Boolean(submission.calendarEvents?.length) && <><b>{t("오늘 일정")}</b><ul aria-label={t("오늘 일정")}>{submission.calendarEvents!.map((event) => <li className="daily-submission-work" key={event.key}><small>{dailyCalendarTime(event, t("종일"))} · {event.timezone}</small><span className="daily-calendar-title">{event.title}</span></li>)}</ul></>}
     {submission.todayNote && <p><b>{t("오늘 메모")}</b>{submission.todayNote}</p>}
     {submission.blockersNote && <p className="blocker"><b>{t("블로커")}</b>{submission.blockersNote}</p>}
   </div>;

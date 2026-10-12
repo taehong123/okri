@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
 import { preferences, serverLanguage } from "./helpers/language-fixture.mjs";
+import { calendar, googleCalendar } from "./helpers/daily-calendar-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 function compile(source, dependencies = {}) {
@@ -47,7 +48,7 @@ function harness(t) {
     CREATE TABLE daily_submissions(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, scrum_date TEXT, version INTEGER, member_name TEXT, member_email TEXT,
       yesterday_note TEXT DEFAULT '', today_note TEXT DEFAULT '', blockers_note TEXT DEFAULT '', no_planned_tasks INTEGER DEFAULT 1,
       skip_reason TEXT, skip_note TEXT DEFAULT '', source TEXT DEFAULT 'web', submitted_at TEXT,
-      work_snapshot_json TEXT DEFAULT '[]', yesterday_work_snapshot_json TEXT DEFAULT '[]');
+      work_snapshot_json TEXT DEFAULT '[]', yesterday_work_snapshot_json TEXT DEFAULT '[]', calendar_events_json TEXT NOT NULL DEFAULT '[]');
     CREATE TABLE daily_task_snapshots(id TEXT PRIMARY KEY, owner_id TEXT, submission_id TEXT, task_id TEXT, task_title TEXT,
       parent_kind TEXT, parent_id TEXT, parent_title TEXT, status TEXT, is_new INTEGER, sort_order INTEGER);
     CREATE TABLE slack_daily_publications(id TEXT PRIMARY KEY, owner_id TEXT, member_id TEXT, submission_id TEXT, scrum_date TEXT, channel_id TEXT,
@@ -112,6 +113,7 @@ function harness(t) {
     "@/lib/slack-bot-delivery": api,
   });
   const daily = compile(dailySource, {
+    "@/lib/daily-calendar": calendar, "@/lib/google-daily-calendar": googleCalendar,
     "@/lib/slack-daily-digest": { runDueDailyDigests: async () => ({ checked: 0 }) },
     "./language-preferences": preferences, "./server-language": serverLanguage,
     "cloudflare:workers": { env: { DB: raw } }, "drizzle-orm": {}, "@/db": {}, "@/db/schema": {},

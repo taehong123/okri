@@ -16,6 +16,8 @@ import { dailyWorkStatusLabel, normalizeDailyWorkStatus, parseDailyWorkStatuses,
 import { dailyWorkSnapshots, listDailyWork, parseDailyWorkKeys } from "@/lib/daily-work";
 import { dailyWorkContainerLabel, dailyWorkOption } from "@/lib/slack-daily-form";
 import { createDailyChecklist } from "@/lib/slack-daily-checklist";
+import { loadDailyCalendar } from "@/lib/google-daily-calendar";
+import { dailyCalendarSnapshots, dailyCalendarTime } from "@/lib/daily-calendar";
 import { attachSlackMember, readSlackMemberMatches, synchronizeSlackMembers } from "@/lib/slack-member-matching";
 import { dispatchSlackAutomationEvent, ensureWorkspace, getSlackConnection, getSlackConnectionByTeam, type RequestAuthorization } from "@/lib/pace-data";
 import { decryptSlackSecret, slackDailyScopes, type SlackRuntimeEnv } from "@/lib/slack-oauth";
@@ -890,9 +892,15 @@ export async function openDailyModal(triggerId: string, authorization: RequestAu
     try {
       const preference = await getSlackDailyPreference(authorization);
       const dashboard = await getDailyDashboard(authorization, todayInTimezone(preference.timezone));
+      const calendar = await loadDailyCalendar(authorization, dashboard.date, preference.timezone);
+      const savedCalendarEvents = dashboard.draft.calendarEvents ?? [];
+      if (calendar.status !== "ready") calendar.events = savedCalendarEvents;
+      calendar.selected = savedCalendarEvents.filter((saved) => calendar.events.some((event) => event.key === saved.key)).map((event) => event.key);
+      const appOrigin = String((env as unknown as Record<string, unknown>).OKRI_APP_URL || "https://okri.ai").replace(/\/$/, "");
       const view = await createDailyChecklist(authorization.ownerId, dashboard.member.id, {
          ...dashboard.draft, date: dashboard.date, work: dashboard.candidates.work, memberName: dashboard.member.displayName,
          taskFocused: true,
+         calendar: { ...calendar, connectUrl: `${appOrigin}/?view=integrations` },
          workStatusOptions: preference.workStatuses,
         taskTargets: [...dashboard.createTargets.projects.map((project) => ({ key: `project:${project.id}`, title: project.title, hasTasks: project.hasTasks })),
           ...dashboard.createTargets.routines.map((routine) => ({ key: `routine:${routine.id}`, title: routine.title, hasTasks: routine.hasTasks }))],
@@ -1042,6 +1050,7 @@ async function loadSubmission(id: string, ownerId: string) {
     skipReason: normalizeDailySkipReason(row.skip_reason), skipNote: String(row.skip_note || ""),
     source: String(row.source), submittedAt: String(row.submitted_at),
     work: dailyWorkSnapshots(String(row.work_snapshot_json || "[]")),
+    ...(dailyCalendarSnapshots(row.calendar_events_json).length ? { calendarEvents: dailyCalendarSnapshots(row.calendar_events_json) } : {}),
     ...(row.must_do_work_ids_json != null ? { mustDoWorkIds: parseDailyWorkKeys(String(row.must_do_work_ids_json)) } : {}),
     yesterdayWork: dailyWorkSnapshots(String(row.yesterday_work_snapshot_json || "[]")),
     tasks: snapshots.results.map((snapshot) => ({ id: String(snapshot.id), taskId: snapshot.task_id ? String(snapshot.task_id) : null,
@@ -1264,10 +1273,25 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
   const completedNote = submission.yesterdayNote ? `\n*${t("완료 메모")}*\n${escapeSlack(submission.yesterdayNote)}` : "";
   const appUrl = `${String((env as unknown as Record<string, unknown>).OKRI_APP_URL || (env as unknown as Record<string, unknown>).OKRPTR_APP_URL || "https://okri.ai").replace(/\/$/, "")}/?view=scrum`;
   const text = `[${t("데일리 봇")}] ${t("{member}님의 {date} 데일리", { member: submission.memberName, date: submission.date })}`;
+  const calendarBlocks: Array<Record<string, unknown>> = [];
+  if (submission.calendarEvents?.length) {
+    calendarBlocks.push({ type: "divider" });
+    const heading = `${t("오늘 일정")} · ${submission.calendarEvents[0].timezone}`;
+    let body = heading;
+    for (const event of submission.calendarEvents) {
+      const line = `${dailyCalendarTime(event, t("종일"))} · ${event.title}`;
+      if (body.length + line.length > 2800) {
+        calendarBlocks.push({ type: "section", text: { type: "plain_text", text: body } });
+        body = heading;
+      }
+      body += `\n${line}`;
+    }
+    calendarBlocks.push({ type: "section", text: { type: "plain_text", text: body } });
+  }
   const interactiveTodayBlocks: Array<Record<string, unknown>> = [];
   if (options.publicationId) {
     // Keep the whole message below Slack's 50-block limit, even with one parent per Task.
-    let remaining = classified ? 18 : 20;
+    let remaining = (classified ? 18 : 20) - Math.ceil(calendarBlocks.length / 2);
     for (const section of planSections) {
     interactiveTodayBlocks.push({ type: "divider" });
     interactiveTodayBlocks.push({ type: "section", text: { type: "mrkdwn", text: `*${t(section.title)}*` } });
@@ -1299,6 +1323,7 @@ function dailyCard(submission: DailySubmissionValue, t: Translator = (key, value
       { type: "divider" },
       { type: "section", text: { type: "mrkdwn", text: `*${t(section.title)}*\n${groupedLines(section.work)}${index === planSections.length - 1 ? note + blocker : ""}`.slice(0, 2900) } },
     ])),
+    ...calendarBlocks,
     { type: "actions", elements: [{ type: "button", text: { type: "plain_text", text: t("OKRI에서 보기") }, url: appUrl }] },
   ] };
 }

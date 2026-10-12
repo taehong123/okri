@@ -41,6 +41,13 @@
     "dataPreservation": "Only new tables and indexes are created. The ON DELETE CASCADE clause applies solely to feedback that belongs to a newly created tester record; no existing account, workspace, item, routine, daily, or native data is mutated.",
     "reviewedBy": "Codex native compatibility integration review, 2026-09-26"
   },
+  "drizzle/0072_daily_calendar.sql": {
+    "sha256": "f6a6ae7034a838680cdc3ba062c39f251e9701a7cdb0090cbb3717f12d3d9205",
+    "v1Compatibility": "Adds defaulted JSON snapshot columns to Daily drafts and submissions only. Frozen mobile v1 payloads and all existing account, Task and Daily field meanings remain unchanged.",
+    "rollbackPlan": "Leave both additive columns and saved snapshots in place when rolling application code back. Older binaries ignore them. Never rewrite historical migrations or drop customer Daily data.",
+    "dataPreservation": "Two ADD COLUMN statements default existing reports to an empty array without replacing, deleting or rewriting existing notes, selections, submissions or integration credentials.",
+    "reviewedBy": "Codex Daily calendar schema and installed-client compatibility review, 2026-10-12"
+  },
   "drizzle/0071_notifications.sql": {
     "sha256": "364c3883dc6ce40767cda926d2239f8da833202f4eded555397bf36fdc756c4c",
     "v1Compatibility": "The migration adds isolated notification inbox, preference and encrypted native-device tables. Existing mobile v1 routes, payloads, business writes, authentication and Project/Task semantics remain unchanged; new notification endpoints are additive.",

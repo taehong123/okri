@@ -1,11 +1,14 @@
 import type { DailyWork } from "@/lib/daily-work";
 import { dailyWorkStatusLabel, normalizeDailyWorkStatus, parseDailyWorkStatuses, type DailyWorkStatus } from "@/lib/daily-work-status";
 import type { Translator } from "@/lib/server-language";
+import { dailyCalendarTime, MAX_DAILY_CALENDAR_EVENTS } from "@/lib/daily-calendar";
+import type { DailyCalendar } from "@/lib/google-daily-calendar";
 
 const names = { project: "Project", ticket: "Ticket", task: "Task", routine: "Routine" };
 const identityTranslator: Translator = (key) => key;
 
 export type DailyChecklist = {
+  calendar?: DailyCalendar & { version?: number; connectUrl?: string };
   date: string; memberName: string; work: DailyWork[]; selectedYesterday: string[]; yesterdayCompleted?: DailyWork[];
   choices: Record<string, "must_do" | "today" | "done" | "delete" | "exclude">;
   formatVersion?: 2;
@@ -18,10 +21,44 @@ export type DailyChecklist = {
   taskEntry?: { parentKey: string; title: string; requestId: string; creating?: boolean };
   createdTaskKey?: string;
 };
-// Slack modals allow at most 100 blocks. Twenty-three maximizes the common
-// Daily page while keeping the worst case (23 empty containers with inline
-// Task actions, navigation, and validation feedback) below that limit.
+// Leave room for calendar choices, empty containers and inline Task editing
+// within Slack's 100-block modal limit.
 export const DAILY_CHECKLIST_PAGE_SIZE = 23;
+export function dailyChecklistPageSize(input: DailyChecklist) {
+  return input.calendar ? 21 : DAILY_CHECKLIST_PAGE_SIZE;
+}
+
+export function dailyCalendarBlockId(input: DailyChecklist) {
+  return `daily_calendar_${input.calendar?.version ?? 0}`;
+}
+
+function dailyCalendarBlocks(input: DailyChecklist, t: Translator): Record<string, unknown>[] {
+  const calendar = input.calendar;
+  if (!calendar) return [];
+  const blocks: Record<string, unknown>[] = [{ type: "divider" }];
+  const connect = calendar.status === "not_connected" || calendar.status === "reconnect";
+  const title = connect ? t("Google Calendar 연결") : t("오늘 일정");
+  blocks.push({ type: "section", text: { type: "plain_text", text: title }, accessory: connect && calendar.connectUrl
+    ? { type: "button", action_id: "daily_calendar_connect", text: { type: "plain_text", text: t("연결 설정") }, url: calendar.connectUrl }
+    : { type: "button", action_id: "daily_calendar_refresh", text: { type: "plain_text", text: t("새로고침") }, value: "refresh" } });
+  if (calendar.status !== "ready") blocks.push({ type: "context", elements: [{ type: "plain_text", text: t(connect
+    ? "Google Calendar를 연결하면 오늘 일정을 선택할 수 있습니다."
+    : "일정을 불러오지 못했습니다. 업무는 그대로 제출할 수 있습니다.") }] });
+  if (calendar.events.length) {
+    const options = calendar.events.map((event) => ({ text: { type: "plain_text", text: event.title.slice(0, 75) },
+      description: { type: "plain_text", text: `${dailyCalendarTime(event, t("종일"))} · ${event.timezone}`.slice(0, 75) }, value: event.key }));
+    const initial = options.filter((option) => calendar.selected.includes(option.value));
+    blocks.push({ type: "input", block_id: dailyCalendarBlockId(input), optional: true,
+      label: { type: "plain_text", text: t("공유할 일정") },
+      hint: { type: "plain_text", text: t("선택한 일정의 제목과 시간만 공유됩니다.") },
+      element: { type: options.length <= 10 ? "checkboxes" : "multi_static_select", action_id: "selected_events", options,
+        ...(options.length > 10 ? { max_selected_items: MAX_DAILY_CALENDAR_EVENTS, placeholder: { type: "plain_text", text: t("공유할 일정 선택") } } : {}),
+        ...(initial.length ? { initial_options: initial } : {}) } });
+  } else if (calendar.status === "ready") blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("오늘 일정이 없습니다.") }] });
+  if (calendar.truncated) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("오늘 일정 중 처음 100개를 표시합니다.") }] });
+  blocks.push({ type: "divider" });
+  return blocks;
+}
 
 // Slack preserves inputs by block/action ID; inserting a Task must not shift another Task's choice.
 export function dailyChoiceBlockId(input: DailyChecklist, entry: DailyWork, index: number) {
@@ -48,7 +85,8 @@ export function orderDailyChecklist(work: DailyWork[]) {
 }
 
 export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: Translator = identityTranslator, error = "") {
-  const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
+  const pageSize = dailyChecklistPageSize(input);
+  const pages = Math.max(1, Math.ceil(input.work.length / pageSize));
   const blocks: Record<string, unknown>[] = [];
   if (input.taskFocused) {
     const statuses = parseDailyWorkStatuses(input.workStatusOptions);
@@ -65,7 +103,8 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     );
   }
   if (input.taskFocused) blocks.push({ type: "context", elements: [{ type: "plain_text", text: t("완료와 아카이브는 제출할 때 반영됩니다. 아카이브한 Task는 휴지통에서 복구할 수 있습니다.") }] });
-  const pageWork = input.work.slice(input.page * DAILY_CHECKLIST_PAGE_SIZE, (input.page + 1) * DAILY_CHECKLIST_PAGE_SIZE);
+  blocks.push(...dailyCalendarBlocks(input, t));
+  const pageWork = input.work.slice(input.page * pageSize, (input.page + 1) * pageSize);
   const editingOnPage = input.taskEntry && pageWork.some((entry) => dailyWorkGroup(entry).key === input.taskEntry!.parentKey);
   if (error && !editingOnPage) blocks.push({ type: "section", text: { type: "plain_text", text: error } });
   let lastGroup = "";
@@ -107,7 +146,7 @@ export function dailyChecklistForm(input: DailyChecklist, metadata: string, t: T
     const savedChoice = input.choices[entry.key];
     const initial = options.find((option) => option.value === (savedChoice === "delete" ? "archive" : savedChoice)) ?? options[0];
     const due = entry.dueDate ? `${entry.dueDate}${entry.dueDate < input.date ? ` · ${t("기한 초과")}` : ""}` : "";
-    blocks.push({ type: "input", block_id: dailyChoiceBlockId(input, entry, input.page * DAILY_CHECKLIST_PAGE_SIZE + offset), optional: true,
+    blocks.push({ type: "input", block_id: dailyChoiceBlockId(input, entry, input.page * pageSize + offset), optional: true,
       label: { type: "plain_text", text: `${input.taskFocused && entry.kind === "task" ? "└ " : ""}${entry.title}`.slice(0, 180) || t(names[entry.kind]) },
       ...(!input.taskFocused || due ? { hint: { type: "plain_text", text: input.taskFocused ? due : `${t(names[entry.kind])}${due ? ` · ${due}` : ""}` } } : {}),
       element: { type: "radio_buttons", action_id: "selection", options, initial_option: initial } });

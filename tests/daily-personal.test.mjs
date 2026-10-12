@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import ts from "typescript";
 import { serverLanguage } from "./helpers/language-fixture.mjs";
+import { calendar, googleCalendar, calendarEvent } from "./helpers/daily-calendar-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const require = createRequire(import.meta.url);
@@ -19,7 +20,7 @@ function compile(source, deps = {}) {
 const work = compile(await read("../lib/daily-work.ts"));
 const { dailyRevisionChanged } = compile(await read("../lib/daily-revision.ts"));
 const workStatus = compile(await read("../lib/daily-work-status.ts"));
-const form = compile(await read("../lib/slack-daily-form.ts"), { "@/lib/daily-work-status": workStatus });
+const form = compile(await read("../lib/slack-daily-form.ts"), { "@/lib/daily-work-status": workStatus, "@/lib/daily-calendar": calendar });
 const matching = compile(await read("../lib/slack-member-matching.ts"));
 const dailySource = await read("../lib/daily-bot.ts");
 const schema = JSON.parse(await read("../drizzle/meta/0038_snapshot.json"));
@@ -28,6 +29,7 @@ const yesterdayMigration = await read("../drizzle/0047_daily_yesterday_selection
 const checklistMigration = await read("../drizzle/0049_slack_daily_checklists.sql");
 const workStatusMigration = await read("../drizzle/0055_daily_work_status.sql");
 const planTiersMigration = await read("../drizzle/0070_daily_plan_tiers.sql");
+const calendarMigration = (await read("../drizzle/0072_daily_calendar.sql")).replaceAll("--> statement-breakpoint", "");
 const checklistSource = await read("../lib/slack-daily-checklist.ts");
 const paceSource = await read("../lib/pace-data.ts");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
@@ -112,6 +114,7 @@ function fixture(t, options = {}) {
   assert.ok(!workStatusMigration.includes("\r"));
   db.exec(workStatusMigration.replaceAll("--> statement-breakpoint", ""));
   db.exec(planTiersMigration);
+  db.exec(calendarMigration);
   const raw = { prepare(sql) {
     const statement = db.prepare(sql); let args = [];
     return { bind(...values) { args = values; return this; }, async first() { return statement.get(...args) ?? null; },
@@ -145,6 +148,7 @@ function fixture(t, options = {}) {
       const rows = db.prepare(`SELECT * FROM ${table.$table}`).all().map((row) => Object.fromEntries(Object.entries(row).map(([k, v]) => [k.replace(/_([a-z])/g, (_, x) => x.toUpperCase()), v])));
       return rows.filter((row) => conditions.every(({ key, value }) => row[key] === value)).slice(0, 1);
     } }) }) }) }) },
+    "@/lib/daily-calendar": calendar,
     "@/lib/daily-work": work, "@/lib/daily-work-status": workStatus, "@/lib/pace-data": { ensureWorkspace: async () => {}, dispatchSlackAutomationEvent: async () => {}, createItem: options.realPersistence ? realTaskPersistence(raw).createItem : async (ownerId, input) => {
       if (!options.allowCreation) throw new Error("Must never invent tasks");
       await options.beforeCreate?.();
@@ -157,9 +161,100 @@ function fixture(t, options = {}) {
       for (const memberId of memberIds) db.prepare("INSERT INTO item_assignments (id,owner_id,item_id,member_id,role) VALUES (?,?,?,?,?)").run(crypto.randomUUID(), ownerId, itemId, memberId, role);
     } },
   });
-  const checklist = compile(checklistSource, { "cloudflare:workers": { env: { DB: raw } }, "@/lib/daily-bot": api, "@/lib/slack-daily-form": form, "@/lib/daily-work-status": workStatus });
+  const checklist = compile(checklistSource, { "cloudflare:workers": { env: { DB: raw } }, "@/lib/daily-bot": api, "@/lib/slack-daily-form": form, "@/lib/daily-work-status": workStatus, "@/lib/daily-calendar": calendar, "@/lib/google-daily-calendar": googleCalendar });
   return { db, raw, api, checklist };
 }
+
+test("calendar choices are explicit, preserve task choices and reject forged selections", async (t) => {
+  const { checklist } = fixture(t);
+  const input = { ...checklistInput([]), taskFocused: true,
+    calendar: { status: "ready", timezone: "Asia/Seoul", events: [calendarEvent()], selected: [] } };
+  const modal = form.dailyChecklistForm(input, "{}");
+  const block = modal.blocks.find((block) => block.block_id === "daily_calendar_0");
+  assert.equal(block.element.type, "checkboxes"); assert.equal(block.optional, true);
+  assert.equal(block.element.initial_options, undefined);
+  assert.match(block.element.options[0].description.text, /10:00 - 11:00/);
+  assert.match(block.hint.text, /제목과 시간만/);
+  const selected = checklist.mergeDailyChecklist(input, { daily_calendar_0: { selected_events: { selected_options: [{ value: calendarEvent().key }] } } }, (key) => key);
+  assert.deepEqual(selected.next.calendar.selected, [calendarEvent().key]);
+  assert.deepEqual(input.calendar.selected, []);
+  const forged = checklist.mergeDailyChecklist(input, { daily_calendar_0: { selected_events: { selected_options: [{ value: "foreign-calendar" }] } } }, (key) => key);
+  assert.ok(forged.errors.daily_calendar_0);
+  const tooMany = Array.from({ length: 21 }, () => ({ value: calendarEvent().key }));
+  assert.ok(checklist.mergeDailyChecklist(input, { daily_calendar_0: { selected_events: { selected_options: tooMany } } }, (key) => key).errors.daily_calendar_0);
+});
+
+test("calendar-only Daily submissions are immutable, replay-safe and create no Tasks", async (t) => {
+  const { checklist, api, db } = fixture(t);
+  const input = { ...checklistInput([]), taskFocused: true,
+    calendar: { status: "ready", timezone: "Asia/Seoul", events: [calendarEvent()], selected: [] } };
+  const modal = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  const state = { daily_calendar_0: { selected_events: { selected_options: [{ value: calendarEvent().key }] } } };
+  const originalCount = db.prepare("SELECT COUNT(*) count FROM items").get().count;
+  const result = await checklist.handleDailyChecklist(authorization, modal.private_metadata, state, false, (key) => key);
+  assert.deepEqual(result.submission.calendarEvents, [calendarEvent()]);
+  assert.equal(db.prepare("SELECT COUNT(*) count FROM items").get().count, originalCount);
+  const repeat = await checklist.handleDailyChecklist(authorization, modal.private_metadata, state, false, (key) => key);
+  assert.equal(repeat.submission.id, result.submission.id);
+  await api.saveDailyDraft(authorization, { date, todayNote: "changed by an older client", noPlannedTasks: true });
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).draft.calendarEvents, [calendarEvent()]);
+  assert.deepEqual((await api.getDailyDashboard(authorization, date)).latestSubmission.calendarEvents, [calendarEvent()]);
+  await api.saveDailyDraft(authorization, { date, workStatus: "skip" });
+  assert.equal((await api.getDailyDashboard(authorization, date)).draft.calendarEvents, undefined);
+});
+
+test("calendar refresh preserves explicit choices on outages, fences stale requests and clears canceled choices", async (t) => {
+  const { checklist, db } = fixture(t);
+  const input = { ...checklistInput([]), taskFocused: true, calendar: { status: "ready", timezone: "Asia/Seoul", events: [calendarEvent()], selected: [] } };
+  const modal = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  const originalLoader = googleCalendar.loadDailyCalendar;
+  t.after(() => { googleCalendar.loadDailyCalendar = originalLoader; });
+  googleCalendar.loadDailyCalendar = async () => ({ status: "unavailable", timezone: "Asia/Seoul", events: [], selected: [] });
+  const state = { daily_calendar_0: { selected_events: { selected_options: [{ value: calendarEvent().key }] } } };
+  const refreshed = await checklist.refreshDailyChecklistCalendar(authorization, modal.private_metadata, state, (key) => key);
+  assert.match(JSON.stringify(refreshed), /일정을 불러오지 못했습니다/);
+  assert.equal(refreshed.blocks.find((block) => block.block_id === "daily_calendar_1").element.initial_options.length, 1);
+  const stale = await checklist.refreshDailyChecklistCalendar(authorization, modal.private_metadata, {}, (key) => key);
+  assert.match(JSON.stringify(stale), /다른 요청/);
+  await assert.rejects(checklist.refreshDailyChecklistCalendar({ ...authorization, userId: "foreign" }, refreshed.private_metadata, {}, (key) => key));
+  googleCalendar.loadDailyCalendar = async () => ({ status: "ready", timezone: "Asia/Seoul", events: [], selected: [] });
+  await checklist.refreshDailyChecklistCalendar(authorization, refreshed.private_metadata, {}, (key) => key);
+  const saved = JSON.parse(db.prepare("SELECT payload_json FROM slack_daily_checklists").get().payload_json);
+  assert.deepEqual(saved.calendar.selected, []); assert.deepEqual(saved.calendar.events, []);
+});
+
+test("calendar selection supports five languages and stays within Slack block limits", async () => {
+  const events = Array.from({ length: 100 }, (_, i) => calendarEvent({ key: "gcal:" + i.toString(16).padStart(64, "0"), title: "Long calendar title ".repeat(15) }));
+  const work = Array.from({ length: 45 }, (_, i) => ({ id: String(i), key: `routine:${i}`, kind: "routine", title: `Routine ${i}`, parentTitle: `Routine ${i}` }));
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const t = await serverLanguage.serverTranslator(language);
+    const input = { ...checklistInput(work), taskFocused: true, page: 1, taskEntry: { parentKey: "routine:21", title: "Draft", requestId: "request" },
+      taskTargets: work.map((entry) => ({ key: entry.key, title: entry.title, hasTasks: false })),
+      calendar: { status: "ready", timezone: "Asia/Seoul", events, selected: [], truncated: true } };
+    const modal = form.dailyChecklistForm(input, "{}", t, "Validation");
+    assert.ok(modal.blocks.length <= 100, `${language}: ${modal.blocks.length}`);
+    const select = modal.blocks.find((block) => block.block_id === "daily_calendar_0");
+    assert.equal(select.element.type, "multi_static_select"); assert.equal(select.element.max_selected_items, 20);
+    assert.equal(select.element.options.length, 100);
+    assert.equal(select.element.initial_options, undefined);
+    assert.equal(select.label.text, t("공유할 일정"));
+    for (const option of select.element.options) assert.ok(option.text.text.length <= 75 && option.description.text.length <= 75);
+  }
+});
+
+test("calendar selection is rolled back with failed draft writes and skip never shares selected events", async (t) => {
+  const { checklist, api, db } = fixture(t);
+  await api.saveDailyDraft(authorization, { date, todayNote: "Keep", noPlannedTasks: true });
+  const input = { ...checklistInput([]), taskFocused: true, workStatus: "skip", calendar: { status: "ready", timezone: "Asia/Seoul", events: [calendarEvent()], selected: [] } };
+  const modal = await checklist.createDailyChecklist("w", "me", input, (key) => key);
+  const state = { daily_calendar_0: { selected_events: { selected_options: [{ value: calendarEvent().key }] } }, work_status: { value: { selected_option: { value: "skip" } } } };
+  const rejected = await checklist.handleDailyChecklist(authorization, modal.private_metadata, state, false, (key) => key);
+  assert.match(rejected.errors.work_status, /일정/);
+  db.exec("CREATE TRIGGER fail_calendar BEFORE UPDATE OF calendar_events_json ON daily_scrums BEGIN SELECT RAISE(ABORT,'mock write failure'); END");
+  await assert.rejects(api.saveDailyDraft(authorization, { date, todayNote: "Changed", calendarEvents: [calendarEvent()] }));
+  const previous = db.prepare("SELECT today_note, calendar_events_json FROM daily_scrums").get();
+  assert.equal(previous.today_note, "Keep"); assert.equal(previous.calendar_events_json, "[]");
+});
 
 test("D1 submits a mixed daily with production backup and task-change triggers", async (t) => {
   const { Miniflare, convertV4MiniflareOptions } = await import("miniflare");
@@ -1140,7 +1235,8 @@ test("signed Task actions acknowledge first and update the same Slack modal with
   assert.equal(calls.length, 3);
 });
 
-test("Task buttons acknowledge before slow identity lookups and use block_actions state", async () => {
+for (const actionId of ["daily_checklist_create_task", "daily_calendar_refresh"]) {
+test(`${actionId} acknowledges before slow identity lookups and uses block_actions state`, async () => {
   const pending = [], edits = [], updates = [];
   let release;
   const lookup = new Promise((resolve) => { release = resolve; });
@@ -1151,13 +1247,16 @@ test("Task buttons acknowledge before slow identity lookups and use block_action
     "@/lib/language-preferences": { memberMessageLanguage: async () => "en", workspaceMessageLanguage: async () => "en" },
     "@/lib/server-language": serverLanguage,
     "@/lib/slack-daily": { dailyMemberBySlack: async () => ({ authorization, memberId: "me" }), updateDailyChecklistView: async (...args) => updates.push(args) },
-    "@/lib/slack-daily-checklist": { editDailyChecklistTask: async (...args) => { edits.push(args); return { type: "modal", blocks: [] }; } },
+    "@/lib/slack-daily-checklist": {
+      editDailyChecklistTask: async (...args) => { edits.push(args); return { type: "modal", blocks: [] }; },
+      refreshDailyChecklistCalendar: async (...args) => { edits.push(args); return { type: "modal", blocks: [] }; },
+    },
     "@/lib/slack-management-actions": {},
     "@/lib/slack-work-command": {}, "@/lib/daily-bot": {},
   });
   const response = await Promise.race([
     route.POST(new Request("https://example.test/api/slack/interactions", { method: "POST", body: new URLSearchParams({ payload: JSON.stringify({
-      type: "block_actions", team: { id: "T" }, user: { id: "U" }, actions: [{ action_id: "daily_checklist_create_task", value: "project:worker" }],
+      type: "block_actions", team: { id: "T" }, user: { id: "U" }, actions: [{ action_id: actionId, value: "project:worker" }],
       state: { values: { daily_new_task: { title: { value: "Typed title" } } } },
       view: { id: "V", hash: "hash", callback_id: "daily_checklist_submit", private_metadata: "metadata", state: { values: {} } },
     }) }) })),
@@ -1171,6 +1270,7 @@ test("Task buttons acknowledge before slow identity lookups and use block_action
   assert.equal(edits[0][2].daily_new_task.title.value, "Typed title");
   assert.equal(updates.length, 1);
 });
+}
 
 test("published Daily completion acknowledges before identity lookup and updates in the background", async () => {
   const pending = [], completions = [];

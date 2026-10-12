@@ -1,6 +1,8 @@
 import { env } from "cloudflare:workers";
 import { createExplicitDailyTask, currentDailyMember, normalizeDailySkipReason, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
-import { DAILY_CHECKLIST_PAGE_SIZE, dailyChecklistForm, dailyChoiceBlockId, dailyNoPlannedActionId, orderDailyChecklist, type DailyChecklist } from "@/lib/slack-daily-form";
+import { dailyChecklistPageSize, dailyChecklistForm, dailyChoiceBlockId, dailyNoPlannedActionId, dailyCalendarBlockId, orderDailyChecklist, type DailyChecklist } from "@/lib/slack-daily-form";
+import { MAX_DAILY_CALENDAR_EVENTS } from "@/lib/daily-calendar";
+import { loadDailyCalendar } from "@/lib/google-daily-calendar";
 import { normalizeDailyWorkStatus, parseDailyWorkStatuses } from "@/lib/daily-work-status";
 import type { RequestAuthorization } from "@/lib/pace-data";
 import type { Translator } from "@/lib/server-language";
@@ -26,12 +28,21 @@ export async function createDailyChecklist(ownerId: string, memberId: string, in
 export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t: Translator) {
   const next: DailyChecklist = { ...input, choices: { ...input.choices } };
   const errors: Record<string, string> = {};
+  const calendarField = state[dailyCalendarBlockId(input)]?.selected_events;
+  if (input.calendar && calendarField) {
+    const selected = calendarField.selected_options ?? [];
+    const available = new Set(input.calendar.events.map((event) => event.key));
+    if (!Array.isArray(selected) || selected.length > MAX_DAILY_CALENDAR_EVENTS || selected.some((option) => !available.has(option?.value))) {
+      errors[dailyCalendarBlockId(input)] = t("공유할 일정을 다시 선택해 주세요.");
+    } else next.calendar = { ...input.calendar, selected: [...new Set(selected.map((option) => option.value as string))] };
+  }
   if (input.taskFocused) {
     for (const key of Object.keys(next.choices)) if (key.startsWith("project:")) delete next.choices[key];
     next.selectedYesterday = next.selectedYesterday.filter((key) => !key.startsWith("project:"));
   }
-  const start = input.page * DAILY_CHECKLIST_PAGE_SIZE;
-  input.work.slice(start, start + DAILY_CHECKLIST_PAGE_SIZE).forEach((entry, offset) => {
+  const pageSize = dailyChecklistPageSize(input);
+  const start = input.page * pageSize;
+  input.work.slice(start, start + pageSize).forEach((entry, offset) => {
     if (input.taskFocused && entry.kind === "project") return;
     const block = dailyChoiceBlockId(input, entry, start + offset);
     const field = state[block]?.selection ?? state[block]?.choice;
@@ -69,6 +80,30 @@ export function mergeDailyChecklist(input: DailyChecklist, state: ModalState, t:
     else next.workStatus = normalizeDailyWorkStatus(selected.value);
   }
   return { next, errors };
+}
+
+export async function refreshDailyChecklistCalendar(authorization: RequestAuthorization, metadata: string, state: ModalState, t: Translator) {
+  const member = await currentDailyMember(authorization);
+  if (authorization.role === "viewer" || member.role === "viewer") throw new Error("읽기 전용 멤버는 데일리를 제출할 수 없습니다.");
+  const parsed = JSON.parse(metadata) as { id: string; revision: number };
+  if (!parsed || typeof parsed.id !== "string" || !Number.isSafeInteger(parsed.revision)) throw new Error("데일리를 다시 열어 주세요.");
+  const stored = await env.DB.prepare("SELECT payload_json, revision FROM slack_daily_checklists WHERE id = ? AND owner_id = ? AND member_id = ? AND expires_at > ?")
+    .bind(parsed.id, authorization.ownerId, member.id, new Date().toISOString()).first<StoredChecklist>();
+  if (!stored) throw new Error("데일리를 다시 열어 주세요.");
+  const input = JSON.parse(stored.payload_json) as DailyChecklist;
+  if (stored.revision !== parsed.revision || input.taskEntry?.creating) return dailyChecklistForm(input, metadataFor(parsed.id, stored.revision), t, t("다른 요청에서 목록이 변경되었습니다. 현재 선택을 확인해 주세요."));
+  const { next, errors } = mergeDailyChecklist(input, state, t);
+  if (Object.keys(errors).length) return dailyChecklistForm(next, metadata, t, Object.values(errors).join("\n"));
+  if (!next.calendar) throw new Error("데일리를 다시 열어 주세요.");
+  const loaded = await loadDailyCalendar(authorization, next.date, next.calendar.timezone);
+  // An outage must not erase a user's explicit selection. A successful refresh removes canceled events.
+  const events = loaded.status === "ready" ? loaded.events : next.calendar.events;
+  next.calendar = { ...loaded, events, selected: next.calendar.selected.filter((key) => events.some((event) => event.key === key)),
+    connectUrl: next.calendar.connectUrl, version: (next.calendar.version ?? 0) + 1 };
+  const result = await env.DB.prepare("UPDATE slack_daily_checklists SET payload_json = ?, revision = revision + 1 WHERE id = ? AND owner_id = ? AND member_id = ? AND revision = ?")
+    .bind(JSON.stringify(next), parsed.id, authorization.ownerId, member.id, parsed.revision).run();
+  if (!result.meta.changes) throw new Error("다른 요청에서 목록이 변경되었습니다. 현재 선택을 확인해 주세요.");
+  return dailyChecklistForm(next, metadataFor(parsed.id, parsed.revision + 1), t);
 }
 
 export async function editDailyChecklistTask(authorization: RequestAuthorization, metadata: string, state: ModalState,
@@ -119,7 +154,7 @@ export async function editDailyChecklistTask(authorization: RequestAuthorization
       next.choices[`task:${task.id}`] = "today";
       next.createdTaskKey = `task:${task.id}`;
       next.noPlannedTasks = false;
-      next.page = Math.floor(next.work.findIndex((entry) => entry.key === `task:${task.id}`) / DAILY_CHECKLIST_PAGE_SIZE);
+      next.page = Math.floor(next.work.findIndex((entry) => entry.key === `task:${task.id}`) / dailyChecklistPageSize(next));
       delete next.taskEntry;
       const saved = await env.DB.prepare("UPDATE slack_daily_checklists SET payload_json = ?, revision = revision + 1 WHERE id = ? AND owner_id = ? AND member_id = ? AND revision = ?")
         .bind(JSON.stringify(next), parsed.id, authorization.ownerId, member.id, revision).run();
@@ -153,7 +188,7 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (input.formatVersion !== 2) return { view: await upgradeDailyChecklist(authorization.ownerId, member.id, parsed, next, t) };
   const problem = (errors: Record<string, string>) => ({ errors, view: dailyChecklistForm(next, metadata, t, [...new Set(Object.values(errors))].join("\n")) });
   if (Object.keys(errors).length) return problem(errors);
-  const pages = Math.max(1, Math.ceil(input.work.length / DAILY_CHECKLIST_PAGE_SIZE));
+  const pages = Math.max(1, Math.ceil(input.work.length / dailyChecklistPageSize(input)));
   const selected = (choice: string) => Object.entries(next.choices)
     .filter(([, value]) => value === choice).map(([key]) => key);
   const mustDo = selected("must_do"), today = [...mustDo, ...selected("today")], done = selected("done"), deleted = selected("delete");
@@ -170,9 +205,11 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   const skipReason = normalizeDailySkipReason(next.skipReason);
   const workStatus = skipReason ? "skip" : normalizeDailyWorkStatus(next.workStatus);
   const skipping = workStatus === "skip";
+  const calendarEvents = next.calendar?.events.filter((event) => next.calendar!.selected.includes(event.key)) ?? [];
+  if (skipping && calendarEvents.length) return problem({ work_status: t("스킵하려면 선택한 일정을 먼저 해제해 주세요.") });
   if (skipping && (today.length || done.length || deleted.length)) return problem({ [next.taskFocused ? "work_status" : "skip_reason"]: t("스킵하려면 선택한 업무를 먼저 해제해 주세요.") });
   if (next.noPlannedTasks && today.length) return problem({ no_planned: t("오늘 예정 없음과 오늘 할 일을 함께 선택할 수 없습니다.") });
-  if (!skipping && next.taskFocused && !today.length && !done.length && !deleted.length) return problem({ work_status: t("오늘 진행·완료하거나 아카이브할 업무를 하나 이상 선택해 주세요.") });
+  if (!skipping && next.taskFocused && !today.length && !done.length && !deleted.length && !calendarEvents.length) return problem({ work_status: t(next.calendar ? "공유할 업무나 일정을 하나 이상 선택해 주세요." : "오늘 진행·완료하거나 아카이브할 업무를 하나 이상 선택해 주세요.") });
   if (!skipping && !next.taskFocused && !next.noPlannedTasks && !today.length && !done.length && !deleted.length && !next.todayNote.trim()) return problem({ no_planned: t("오늘 할 업무 또는 ‘오늘 예정 없음’을 선택해 주세요.") });
   if (skipReason === "other" && !next.skipNote.trim()) return problem({ skip_note: t("기타 스킵 사유를 입력해 주세요.") });
   // Replays return the durable submission before revalidating already-completed work.
@@ -181,8 +218,8 @@ export async function handleDailyChecklist(authorization: RequestAuthorization, 
   if (!receipt) {
     await saveDailyDraft(authorization, { date: next.date, todayNote: next.todayNote, yesterdayNote: next.yesterdayNote, blockersNote: next.blockersNote,
       selectedWorkIds: today, mustDoWorkIds: mustDo, selectedYesterdayWorkIds: next.selectedYesterday.filter((key) => !today.includes(key) && !done.includes(key) && !deleted.includes(key)),
-      noPlannedTasks: (!next.taskFocused && next.noPlannedTasks) || (!today.length && done.length + deleted.length > 0), workStatus,
-      skipReason, skipNote: next.skipNote, source: "slack" }, false);
+      noPlannedTasks: (!next.taskFocused && next.noPlannedTasks) || (!today.length && done.length + deleted.length + calendarEvents.length > 0), workStatus,
+      skipReason, skipNote: next.skipNote, source: "slack", calendarEvents }, false);
   }
   return { submission: await submitDailyDraft(authorization, next.date, "slack", parsed.id, done, deleted) };
 }

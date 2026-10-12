@@ -1,4 +1,5 @@
 type DailyRevisionDraft = {
+  calendarEvents?: Array<{ key: string; title: string; start: string; end: string; timezone: string; allDay: boolean }>;
   mustDoWorkIds?: string[];
   yesterdayNote: string;
   todayNote: string;
@@ -12,6 +13,7 @@ type DailyRevisionDraft = {
 };
 
 type DailyRevisionSubmission = {
+  calendarEvents?: DailyRevisionDraft["calendarEvents"];
   mustDoWorkIds?: string[];
   yesterdayNote: string;
   todayNote: string;
@@ -32,10 +34,16 @@ function normalizedText(value: string) {
   return value.trim();
 }
 
+function calendarSnapshot(events: DailyRevisionDraft["calendarEvents"]) {
+  return (events ?? []).map(({ key, title, start, end, timezone, allDay }) => ({ key, title, start, end, timezone, allDay }))
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
 function draftSnapshot(draft: DailyRevisionDraft) {
   const selectedWorkIds = draft.selectedWorkIds
     ?? draft.selectedTaskIds.map((taskId) => `task:${taskId}`);
   return {
+    calendarEvents: calendarSnapshot(draft.calendarEvents),
     mustDoWorkIds: normalizedKeys((draft.mustDoWorkIds ?? []).filter((key) => selectedWorkIds.includes(key))),
     yesterdayNote: normalizedText(draft.yesterdayNote),
     todayNote: normalizedText(draft.todayNote),
@@ -54,6 +62,7 @@ function submissionSnapshot(submission: DailyRevisionSubmission) {
     .filter((work) => !work.completedToday)
     .map((work) => work.key);
   return {
+    calendarEvents: calendarSnapshot(submission.calendarEvents),
     mustDoWorkIds: normalizedKeys(submission.mustDoWorkIds ?? []),
     yesterdayNote: normalizedText(submission.yesterdayNote),
     todayNote: normalizedText(submission.todayNote),

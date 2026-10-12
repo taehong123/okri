@@ -3,6 +3,20 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
+test("daily calendar migration preserves records and enforces bounded JSON arrays", async () => {
+  const db = new DatabaseSync(":memory:");
+  db.exec("CREATE TABLE daily_scrums(id TEXT, today_note TEXT); CREATE TABLE daily_submissions(id TEXT, today_note TEXT); INSERT INTO daily_scrums VALUES('draft','keep'); INSERT INTO daily_submissions VALUES('submission','keep');");
+  const migration = await readFile(new URL("../drizzle/0072_daily_calendar.sql", import.meta.url), "utf8");
+  assert.ok(!migration.includes("\r"));
+  db.exec(migration.replaceAll("--> statement-breakpoint", ""));
+  for (const table of ["daily_scrums", "daily_submissions"]) {
+    assert.equal(db.prepare(`SELECT today_note FROM ${table}`).get().today_note, "keep");
+    assert.equal(db.prepare(`SELECT calendar_events_json FROM ${table}`).get().calendar_events_json, "[]");
+    for (const invalid of ["{}", "not-json", JSON.stringify(Array(21).fill({}))]) assert.throws(() => db.prepare(`UPDATE ${table} SET calendar_events_json=?`).run(invalid));
+  }
+  db.close();
+});
+
 test("backup trigger migrations use LF and uppercase BEGIN for remote D1", async () => {
   const migration = await readFile(new URL("../drizzle/0036_workspace_backups.sql", import.meta.url), "utf8");
   const attributes = await readFile(new URL("../.gitattributes", import.meta.url), "utf8");

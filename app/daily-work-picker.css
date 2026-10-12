@@ -25,6 +25,7 @@
 .daily-submission-summary li em { justify-self: start; }
 .daily-submission-summary li.daily-submission-work { gap: var(--space-1); }
 .daily-submission-work > small { color: var(--text-secondary); font-weight: 600; }
+.daily-calendar-title { min-width: 0; overflow-wrap: anywhere; font-weight: 400; color: var(--text-primary); }
 .daily-submission-task { min-width: 0; display: flex; align-items: flex-start; gap: var(--space-2); margin-inline-start: var(--space-3); padding-inline-start: var(--space-3); border-inline-start: 1px solid var(--border-default); }
 .daily-submission-task > button { flex: 1; font-weight: 400; }
 .daily-project-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2) var(--space-3); }

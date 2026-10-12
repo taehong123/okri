@@ -3,16 +3,35 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import ts from "typescript";
 import { serverLanguage } from "./helpers/language-fixture.mjs";
+import { calendar, calendarEvent } from "./helpers/daily-calendar-fixture.mjs";
 
 const source = ts.createSourceFile("slack-daily.ts", await readFile(new URL("../lib/slack-daily.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
 const formSource = ts.createSourceFile("slack-daily-form.ts", await readFile(new URL("../lib/slack-daily-form.ts", import.meta.url), "utf8"), ts.ScriptTarget.Latest, true);
 const helper = formSource.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name?.text === "dailyWorkContainerLabel").map((node) => node.getFullText(formSource).replace(/\bexport\s+function/, "function")).join("\n");
 const functions = source.statements.filter((node) => ts.isFunctionDeclaration(node) && ["dailyCard", "escapeSlack"].includes(node.name?.text)).map((node) => node.getFullText(source)).join("\n");
 const code = ts.transpileModule(`${helper}\n${functions}`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
-const dailyCard = new Function("env", "dailySkipReasonLabel", "dailyWorkStatusLabel", code + "\nreturn dailyCard;")({}, () => "휴가", (status) => ({ office: "출근", remote: "재택", skip: "스킵" })[status]);
+const dailyCard = new Function("env", "dailySkipReasonLabel", "dailyWorkStatusLabel", "dailyCalendarTime", code + "\nreturn dailyCard;")({}, () => "휴가", (status) => ({ office: "출근", remote: "재택", skip: "스킵" })[status], calendar.dailyCalendarTime);
 const work = (id, completedToday = false, kind = "task") => ({ id, key: `${kind}:${id}`, title: id, kind, parentId: "project", parentKind: "project", parentTitle: "Parent", status: completedToday ? "done" : "todo", completedToday });
 const submission = (overrides = {}) => ({ memberName: "Member", date: "2026-09-05", tasks: [], work: [], yesterdayWork: [], yesterdayNote: "", todayNote: "", blockersNote: "", workStatus: "office", skipReason: null, ...overrides });
 const sections = (card) => card.blocks.filter((block) => block.type === "section").map((block) => block.text.text);
+
+test("selected calendar snapshots share title/time without markdown injection or truncated events", async () => {
+  const events = Array.from({ length: 20 }, (_, i) => calendarEvent({ key: "gcal:" + i.toString(16).padStart(64, "0"), title: `${i}: ${"Long calendar title ".repeat(11)} <@UALL>` }));
+  const tasks = Array.from({ length: 50 }, (_, i) => ({ id: "s" + i, taskId: "t" + i, taskTitle: "Task " + i, parentId: "p" + i, parentKind: "project", parentTitle: "Project " + i }));
+  for (const language of ["ko", "en", "ja", "zh", "es"]) {
+    const t = await serverLanguage.serverTranslator(language);
+    for (const publicationId of [undefined, "pub"]) {
+      const card = dailyCard(submission({ tasks, calendarEvents: events, mustDoWorkIds: ["task:t1"], todayNote: "Note", blockersNote: "Blocker" }), t, { publicationId });
+      assert.ok(card.blocks.length <= 50);
+      const calendarSections = card.blocks.filter((block) => block.type === "section" && block.text.type === "plain_text");
+      const body = calendarSections.map((block) => block.text.text).join("\n");
+      for (const event of events) assert.ok(body.includes(event.title));
+      assert.match(body, /10:00 - 11:00/);
+      for (const block of card.blocks) if (block.text) assert.ok(block.text.text.length <= 3000);
+      assert.ok(calendarSections.length >= 2);
+    }
+  }
+});
 
 test("classified Slack summaries keep required and optional work in order with no duplicate Task or Project row", () => {
   const value = submission({ mustDoWorkIds: ["task:Required"], yesterdayWork: [work("Finished")],

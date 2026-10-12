@@ -117,7 +117,7 @@ function addDays(value: string, amount: number) {
   return date.toISOString().slice(0, 10);
 }
 
-function zonedDayRange(value: string, timezone: string) {
+export function zonedDayRange(value: string, timezone: string) {
   const [year, month, day] = value.split("-").map(Number);
   const start = zonedDateTimeToEpoch({ year, month, day, hour: 0, minute: 0 }, timezone);
   const next = addDays(value, 1).split("-").map(Number);

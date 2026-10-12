@@ -2658,6 +2658,20 @@ const messages = {
 "완료와 아카이브는 제출할 때 반영됩니다. 아카이브한 Task는 휴지통에서 복구할 수 있습니다.": "Completion and archiving take effect on submit. Archived Tasks can be restored from Trash.",
 "데일리에서는 개별 Task만 아카이브할 수 있습니다.": "Only individual Tasks can be archived from Daily.",
 "오늘 진행·완료하거나 아카이브할 업무를 하나 이상 선택해 주세요.": "Select at least one item to work on today, complete, or archive.",
+"오늘 일정": "Today's schedule",
+"종일": "All day",
+"Google Calendar 연결": "Connect Google Calendar",
+"연결 설정": "Connection settings",
+"Google Calendar를 연결하면 오늘 일정을 선택할 수 있습니다.": "Connect Google Calendar to choose today's events.",
+"일정을 불러오지 못했습니다. 업무는 그대로 제출할 수 있습니다.": "Events could not be loaded. You can still submit your work.",
+"공유할 일정": "Events to share",
+"공유할 일정 선택": "Choose events to share",
+"선택한 일정의 제목과 시간만 공유됩니다.": "Only the title and time of selected events will be shared.",
+"오늘 일정이 없습니다.": "No events today.",
+"오늘 일정 중 처음 100개를 표시합니다.": "Showing the first 100 events for today.",
+"공유할 일정을 다시 선택해 주세요.": "Please select the events to share again.",
+"스킵하려면 선택한 일정을 먼저 해제해 주세요.": "Deselect events before skipping.",
+"공유할 업무나 일정을 하나 이상 선택해 주세요.": "Select at least one work item or event to share.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

@@ -1,5 +1,14 @@
 # Native parity ledger
 
+- 2026-10-12: Slack Daily reads the connected member's primary Google Calendar
+  for the Daily date and timezone. Explicit title/time selections are stored as
+  additive draft/submission snapshots and shown in Slack and the web team Daily.
+  Calendar access remains account/workspace scoped; attendees and descriptions
+  are not shared. Calendar picking is Slack-only in this release; native picker
+  and display parity are deliberately deferred. Supported mobile v1 clients
+  preserve saved snapshots when omitting the new fields. Frozen v1 payloads,
+  task counts and authentication remain unchanged. No native release or OTA.
+
 - 2026-10-08: Added a native notification inbox for new Project/Task assignments, unread state, item navigation, per-device push registration, immediate assignment alerts, and a configurable morning summary of overdue, due-today, and open assigned work. The server support is additive under `/api/mobile/v1/notifications*`; existing 1.0.0 payloads and business writes are unchanged. Android and iOS require the reviewed 1.1.0 store binary because notification permissions, FCM/APNs tokens, channels, and entitlements are native. Push delivery remains disabled until the protected Firebase/APNs and token-encryption secrets are configured; the in-app inbox remains usable independently. No OTA is used.
 
 - 2026-09-30: Android moved from the deleted zero-install draft package

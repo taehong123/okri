@@ -15,6 +15,7 @@ const routineMigration = await readFile(new URL("../drizzle/0042_routine_propert
 const dailyWorkMigration = await readFile(new URL("../drizzle/0045_daily_work_selection.sql", import.meta.url), "utf8");
 const dailyYesterdayMigration = await readFile(new URL("../drizzle/0047_daily_yesterday_selection.sql", import.meta.url), "utf8");
 const dailyWorkStatusMigration = await readFile(new URL("../drizzle/0055_daily_work_status.sql", import.meta.url), "utf8");
+const dailyCalendarMigration = await readFile(new URL("../drizzle/0072_daily_calendar.sql", import.meta.url), "utf8");
 const workDocumentsMigration = await readFile(new URL("../drizzle/0057_work_documents.sql", import.meta.url), "utf8");
 const clientDirectoryMigration = await readFile(new URL("../drizzle/0065_client_directory.sql", import.meta.url), "utf8");
 
@@ -34,6 +35,7 @@ function fixture() {
   sqlite.exec(dailyWorkMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(dailyYesterdayMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(dailyWorkStatusMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(dailyCalendarMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(workDocumentsMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(clientDirectoryMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
@@ -293,11 +295,11 @@ test("revision triggers cover all restored tables and business changes do not al
     const expectedColumns = clientColumns[name] ? [...clientColumns[name]] : Object.keys(currentSchema.tables[name].columns);
     if (name === "daily_scrums") {
       expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");
-      expectedColumns.push("yesterday_work_selection_json");
+      expectedColumns.push("yesterday_work_selection_json", "calendar_events_json");
     }
     if (name === "daily_submissions") {
       expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");
-      expectedColumns.push("yesterday_work_snapshot_json", "request_id");
+      expectedColumns.push("yesterday_work_snapshot_json", "request_id", "calendar_events_json");
     }
     if (name === "routines") {
       expectedColumns.splice(expectedColumns.indexOf("properties_json"), 0, "document_content", "document_plain_text", "document_version", "document_updated_at");

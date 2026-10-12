@@ -2,7 +2,7 @@ import { env, waitUntil } from "cloudflare:workers";
 import { createExplicitDailyTask, currentDailyMember, normalizeDailySkipReason, saveDailyDraft, submitDailyDraft } from "@/lib/daily-bot";
 import { getSlackConnectionByTeam } from "@/lib/pace-data";
 import { completePublishedDailyTask, createSlackMemberLinkUrl, dailyMemberBySlack, externalTaskOptions, openDailyModal, publishDailySubmission, reconcileDailyReminders, slackApi, slackTokenForConnection, updateDailyChecklistView } from "@/lib/slack-daily";
-import { editDailyChecklistTask, handleDailyChecklist, retryDailyChecklist } from "@/lib/slack-daily-checklist";
+import { editDailyChecklistTask, handleDailyChecklist, retryDailyChecklist, refreshDailyChecklistCalendar } from "@/lib/slack-daily-checklist";
 import { slackConfigured, verifySlackRequest, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { memberMessageLanguage, workspaceMessageLanguage } from "@/lib/language-preferences";
 import { serverTranslator, type Translator } from "@/lib/server-language";
@@ -40,11 +40,11 @@ export async function POST(request: Request) {
   try { payload = JSON.parse(encoded) as SlackInteraction; } catch { return new Response("invalid payload", { status: 400 }); }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return new Response("invalid payload", { status: 400 });
   if (payload?.type === "block_actions" && payload.actions?.length === 1
-    && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open"].includes(payload.actions[0].action_id ?? "")) {
+    && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open", "daily_calendar_connect"].includes(payload.actions[0].action_id ?? "")) {
     return new Response(null, { status: 200 });
   }
   const checklistButton = payload.type === "block_actions" && payload.view?.callback_id === "daily_checklist_submit"
-    && payload.actions?.some((action) => ["daily_checklist_previous", "daily_checklist_add_task", "daily_checklist_create_task", "daily_checklist_cancel_task"].includes(action.action_id ?? ""));
+    && payload.actions?.some((action) => ["daily_checklist_previous", "daily_checklist_add_task", "daily_checklist_create_task", "daily_checklist_cancel_task", "daily_calendar_refresh"].includes(action.action_id ?? ""));
   if (checklistButton) {
     // Slack's acknowledgement deadline includes identity and language lookups, not just writes.
     waitUntil(processInteraction(payload, request).catch((error) => logDailyInteractionFailure(payload, "resolve", error)));
@@ -143,8 +143,9 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
     return submitFromModal(payload, linked.authorization, t);
   }
   const previousPage = payload.type === "block_actions" && payload.actions?.some((action) => action.action_id === "daily_checklist_previous");
+  const refreshCalendar = payload.type === "block_actions" && payload.actions?.some((action) => action.action_id === "daily_calendar_refresh");
   const taskAction = payload.type === "block_actions" ? payload.actions?.find((action) => ["daily_checklist_add_task", "daily_checklist_create_task", "daily_checklist_cancel_task"].includes(action.action_id ?? "")) : undefined;
-  if (payload.view?.callback_id === "daily_checklist_submit" && (payload.type === "view_submission" || previousPage || taskAction)) {
+  if (payload.view?.callback_id === "daily_checklist_submit" && (payload.type === "view_submission" || previousPage || taskAction || refreshCalendar)) {
     if (linked.authorization.role === "viewer") return Response.json({ response_action: "errors", errors: { no_planned: t("읽기 전용 멤버는 데일리를 제출할 수 없습니다.") } });
     const { id: viewId, hash, private_metadata: metadata = "" } = payload.view;
     const state = payload.type === "block_actions"
@@ -155,6 +156,11 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
     // Acknowledge before D1 work and downstream automation can exceed Slack's deadline.
     waitUntil((async () => {
       try {
+        if (refreshCalendar) {
+          const view = await refreshDailyChecklistCalendar(linked.authorization, metadata, state?.values ?? {}, t);
+          await updateDailyChecklistView(linked.authorization.ownerId, viewId, hash, view);
+          return;
+        }
         if (taskAction) {
           const action = taskAction.action_id === "daily_checklist_add_task" ? "add" : taskAction.action_id === "daily_checklist_create_task" ? "create" : "cancel";
           const view = await editDailyChecklistTask(linked.authorization, metadata, state?.values ?? {}, action, taskAction.value ?? "", t);
@@ -183,7 +189,7 @@ async function processInteraction(payload: SlackInteraction, request: Request) {
         }
       }
     })());
-    return previousPage || taskAction ? new Response(null, { status: 200 }) : Response.json({ response_action: "update", view: statusView(t("처리 중")) });
+    return previousPage || taskAction || refreshCalendar ? new Response(null, { status: 200 }) : Response.json({ response_action: "update", view: statusView(t("처리 중")) });
   }
   if (payload.type === "view_submission" && payload.view?.callback_id === "work_command_submit") {
     try {

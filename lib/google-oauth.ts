@@ -95,11 +95,11 @@ export async function exchangeGoogleCode(runtime: GoogleRuntimeEnv, request: Req
   });
 }
 
-export async function refreshGoogleAccessToken(runtime: GoogleRuntimeEnv, refreshToken: string) {
+export async function refreshGoogleAccessToken(runtime: GoogleRuntimeEnv, refreshToken: string, signal?: AbortSignal) {
   return googleTokenRequest(runtime, {
     refresh_token: refreshToken,
     grant_type: "refresh_token",
-  });
+  }, signal);
 }
 
 export async function fetchGoogleProfile(accessToken: string): Promise<GoogleProfile> {
@@ -160,9 +160,10 @@ export async function decryptSecret(value: string, secret: string) {
   return new TextDecoder().decode(decrypted);
 }
 
-async function googleTokenRequest(runtime: GoogleRuntimeEnv, body: Record<string, string>) {
+async function googleTokenRequest(runtime: GoogleRuntimeEnv, body: Record<string, string>, signal?: AbortSignal) {
   const response = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: requireGoogleValue(runtime.GOOGLE_CLIENT_ID, "GOOGLE_CLIENT_ID"),
@@ -170,7 +171,7 @@ async function googleTokenRequest(runtime: GoogleRuntimeEnv, body: Record<string
       ...body,
     }),
   });
-  if (!response.ok) throw new Error("Google OAuth token exchange failed");
+  if (!response.ok) throw Object.assign(new Error("Google OAuth token exchange failed"), { status: response.status });
   return response.json() as Promise<GoogleTokenResponse>;
 }
 

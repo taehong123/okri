@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
 import { preferences, serverLanguage } from "./helpers/language-fixture.mjs";
+import { calendar, googleCalendar } from "./helpers/daily-calendar-fixture.mjs";
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
 const source = await read("../lib/slack-daily.ts");
@@ -101,6 +102,7 @@ function harness(t) {
     "@/lib/slack-oauth": { decryptSlackSecret: async (owner) => `mock-token-${owner}`, slackScopes: [] },
     "@/lib/slack-daily-status": status,
     "@/lib/daily-work-status": workStatus,
+    "@/lib/daily-calendar": calendar, "@/lib/google-daily-calendar": googleCalendar,
     "@/lib/daily-work": {}, "@/lib/slack-daily-form": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-checklist": {},
   });
   const calls = [], pending = [];

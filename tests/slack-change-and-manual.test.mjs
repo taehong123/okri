@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { compileLanguageModule as compile, d1Fixture, preferences, serverLanguage } from "./helpers/language-fixture.mjs";
+import { calendar, googleCalendar } from "./helpers/daily-calendar-fixture.mjs";
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), "utf8");
 const schema = JSON.parse(await read("drizzle/meta/0038_snapshot.json"));
@@ -56,6 +57,7 @@ function fixture(t) {
     "@/lib/slack-automation": transport,
   });
   const daily = compile(dailySource, {
+    "@/lib/daily-calendar": calendar, "@/lib/google-daily-calendar": googleCalendar,
     "cloudflare:workers": {}, "drizzle-orm": {}, "@/db": {}, "@/db/schema": {}, "@/lib/pace-data": {},
     "./language-preferences": preferences, "./server-language": serverLanguage,
     "@/lib/slack-daily-status": {}, "@/lib/slack-oauth": {}, "@/lib/slack-bot-delivery": {},

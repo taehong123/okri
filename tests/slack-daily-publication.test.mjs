@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import ts from "typescript";
+import { calendar, googleCalendar, calendarEvent } from "./helpers/daily-calendar-fixture.mjs";
 
 const source = await readFile(new URL("../lib/slack-daily.ts", import.meta.url), "utf8");
 
@@ -72,6 +73,7 @@ function fixture(t) {
     "@/lib/daily-work": { dailyWorkSnapshots: (raw) => JSON.parse(raw || "[]"), parseDailyWorkKeys: JSON.parse },
     "@/lib/slack-daily-form": { dailyWorkContainerLabel: (work) => work.parentKind === "project" ? `Project · ${work.parentTitle}` : work.parentTitle },
     "@/lib/slack-daily-checklist": {}, "@/lib/slack-member-matching": {}, "@/lib/slack-daily-status": {},
+    "@/lib/daily-calendar": calendar, "@/lib/google-daily-calendar": googleCalendar,
     "@/lib/pace-data": {
       getSlackConnection: async () => ({ ownerId: "workspace", teamId: "T", encryptedBotToken: "cipher" }),
       dispatchSlackAutomationEvent: async (...args) => events.push(args),
@@ -85,6 +87,19 @@ function fixture(t) {
   });
   return { sqlite, db, api, calls, events, input };
 }
+
+test("completion refresh retains the originally shared calendar snapshot after Google disconnect", async (t) => {
+  const { sqlite, api, calls, input } = fixture(t);
+  sqlite.exec("ALTER TABLE daily_submissions ADD COLUMN calendar_events_json TEXT DEFAULT '[]'");
+  sqlite.prepare("UPDATE daily_submissions SET calendar_events_json=?").run(JSON.stringify([calendarEvent()]));
+  await api.completePublishedDailyTask(input());
+  const updates = calls.filter((call) => call.url.endsWith("/chat.update"));
+  assert.equal(updates.length, 2);
+  for (const update of updates) {
+    assert.match(JSON.stringify(update.body.blocks), /고객 미팅/);
+    assert.match(JSON.stringify(update.body.blocks), /10:00 - 11:00/);
+  }
+});
 
 test("publication reload retains required-work metadata when updating a classified Daily", async (t) => {
   const { sqlite, api, calls, input } = fixture(t);
