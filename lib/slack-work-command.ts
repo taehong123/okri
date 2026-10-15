@@ -1,4 +1,4 @@
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import type { SlackConnection } from "@/db/schema";
 import {
   ITEM_PRIORITIES,
@@ -26,6 +26,7 @@ import { readLanguagePreferences, workspaceMessageLanguage } from "@/lib/languag
 import { serverTranslator, type Translator } from "@/lib/server-language";
 import {
   SLACK_WORK_COMMANDS,
+  slackWorkCommandFormContent,
   type ParsedSlackWorkCommand,
   type SlackWorkCommand,
 } from "@/lib/slack-work-command-parser";
@@ -59,6 +60,7 @@ type CommandMetadata = {
   createdAt: number;
   draft?: SlackWorkDraft;
   sourceThread?: { channel: string; ts: string };
+  sourceMessageTs?: string;
 };
 
 type SlackState = Record<string, Record<string, {
@@ -147,6 +149,8 @@ export async function handleSlackWorkCommandEvent(
     memberId: linked.memberId,
     createdAt: Date.now(),
     ...(isCreateCommand(parsed.command) && sourceThread(event) ? { sourceThread: sourceThread(event)! } : {}),
+    ...(isCreateCommand(parsed.command) && event.ts && /[\r\n\u2028\u2029]|.{241}/u.test(event.text)
+      ? { sourceMessageTs: event.ts } : {}),
   };
   const label = commandLabel(parsed.command, t);
   await postPrivate(token, event, `${label}${parsed.query ? ` · ${parsed.query}` : ""}`, [
@@ -161,8 +165,48 @@ export async function openSlackWorkCommandModal(triggerId: string, authorization
   if (!connection || connection.teamId !== metadata.teamId) throw new Error("Slack 연결이 변경되었습니다.");
   const token = await slackTokenForConnection(connection);
   const t = await memberTranslator(authorization);
+  if (metadata.sourceMessageTs && metadata.sourceThread && isCreateCommand(metadata.command)) {
+    const opened = await slackApi<{ view?: { id?: string; hash?: string } }>(token, "views.open", {
+      trigger_id: triggerId,
+      view: commandLoadingView(metadata, t, t("불러오는 중...")),
+    });
+    if (!opened.view?.id) throw new Error("Slack did not return the opened view");
+    const viewId = opened.view.id;
+    const hash = opened.view.hash;
+    // Acknowledge the button immediately; fetching the source must not expire its trigger.
+    waitUntil((async () => {
+      try {
+        const result = await slackApi<{ messages?: Array<{ ts?: string; user?: string; text?: string }> }>(token, "conversations.replies", {
+          channel: metadata.sourceThread!.channel, ts: metadata.sourceThread!.ts,
+          oldest: metadata.sourceMessageTs, latest: metadata.sourceMessageTs, inclusive: true, limit: 1,
+        });
+        const message = result.messages?.find((entry) => entry.ts === metadata.sourceMessageTs && entry.user === metadata.slackUserId);
+        if (!message?.text) throw new Error("Slack command source is unavailable");
+        const text = message.text.replace(/<@([A-Z0-9]+)(?:\|[^>]+)?>/giu,
+          (mention, id: string) => id === connection.botUserId ? " " : mention);
+        const content = slackWorkCommandFormContent(text);
+        if (!content || content.command !== metadata.command) throw new Error("Slack command source changed");
+        const link = `https://slack.com/archives/${metadata.sourceThread!.channel}/p${metadata.sourceMessageTs!.replace(".", "")}`;
+        const description = content.description.length <= 3_000 ? content.description
+          : `${content.description.slice(0, 3_000 - link.length - 2)}\n\n${link}`;
+        const view = await commandModal(metadata, authorization, t, { title: content.title, description });
+        await slackApi(token, "views.update", { view_id: viewId, ...(hash ? { hash } : {}), view });
+      } catch (error) {
+        console.error("Slack command source hydration failed", { name: error instanceof Error ? error.name : "unknown" });
+        await slackApi(token, "views.update", { view_id: viewId, view: commandLoadingView(metadata, t,
+          t("Slack 원문을 불러오지 못했습니다. 창을 닫고 양식 열기를 다시 눌러 주세요.")) });
+      }
+    })());
+    return;
+  }
   const view = await commandModal(metadata, authorization, t);
   await slackApi(token, "views.open", { trigger_id: triggerId, view });
+}
+
+function commandLoadingView(metadata: CommandMetadata, t: Translator, text: string) {
+  return { type: "modal", title: { type: "plain_text", text: commandLabel(metadata.command, t).slice(0, 24) },
+    close: { type: "plain_text", text: t("닫기") },
+    blocks: [{ type: "section", text: { type: "plain_text", text } }] };
 }
 
 export async function slackWorkCommandOptions(authorization: RequestAuthorization, memberId: string, actionId: string, query: string) {
@@ -358,7 +402,7 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
   throw new Error(t("지원하지 않는 명령입니다."));
 }
 
-async function commandModal(metadata: CommandMetadata, authorization: RequestAuthorization, t: Translator) {
+async function commandModal(metadata: CommandMetadata, authorization: RequestAuthorization, t: Translator, sourceContent?: { title: string; description: string }) {
   const members = (await getTeam(authorization.ownerId, authorization.userId)).members.slice(0, 100);
   const memberOptions = members.map((member) => option(member.displayName || member.email, member.id));
   const actor = memberOptions.find((entry) => entry.value === metadata.memberId);
@@ -366,7 +410,8 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
   const create = isCreateCommand(metadata.command);
   const project = metadata.command.startsWith("project_");
   const draft = create ? metadata.draft : undefined;
-  if (create) blocks.push(input("work_title", t("이름"), plainInput("work_title", draft?.title || metadata.query), false));
+  const description = draft?.description ?? sourceContent?.description ?? "";
+  if (create) blocks.push(input("work_title", t("이름"), plainInput("work_title", draft?.title || sourceContent?.title || metadata.query), false));
   if (metadata.command === "project_create") {
     blocks.push(input("work_initiative", t("상위 Initiative"), externalSelect(
       "work_initiative", t("Initiative 검색"),
@@ -379,7 +424,7 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     const initialOptions = memberOptions.filter((entry) => selected.has(entry.value));
     blocks.push(input("work_workers", t("참여자"), multiStaticSelect("work_workers", memberOptions, t("참여자 선택"), initialOptions), true));
     blocks.push(input("work_status", t("Project 상태"), staticSelect("work_status", projectStatusOptions(t), "in_progress", t("선택")), false));
-    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", draft?.description ?? ""), multiline: true }, true));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", description), multiline: true }, true));
   }
   if (metadata.command === "routine_create") {
     blocks.push(input("work_cadence", t("반복 주기"), staticSelect("work_cadence", routineCadenceOptions(t), "daily", t("선택")), false));
@@ -387,7 +432,7 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     blocks.push(input("work_place", t("장소"), plainInput("work_place", ""), true));
     blocks.push(input("work_steps", t("실행 방법"), { ...plainInput("work_steps", ""), multiline: true }, true));
     blocks.push(input("work_assignee", t("담당자"), staticSelect("work_assignee", memberOptions, undefined, t("담당자 선택")), true));
-    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", ""), multiline: true }, true));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", description), multiline: true }, true));
   }
   if (metadata.command === "ticket_create") {
     blocks.push(input("work_ticket_client", t("클라이언트"), externalSelect("work_ticket_client", t("클라이언트 검색")), true));
@@ -396,7 +441,7 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), "medium", t("선택")), false));
     blocks.push(input("work_due", t("기한"), datepicker("work_due", t("기한 선택")), true));
     blocks.push(input("work_status", t("Ticket 상태"), staticSelect("work_status", ticketStatusOptions(t), "backlog", t("선택")), false));
-    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", ""), multiline: true }, true));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", description), multiline: true }, true));
   }
   if (metadata.command === "task_create") {
     blocks.push(input("work_parent", t("연결 대상 · 선택 사항"), externalSelect(
@@ -409,7 +454,7 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), draft?.priority || "medium", t("선택")), false));
     blocks.push(input("work_due", t("기한"), datepicker("work_due", t("기한 선택"), draft?.dueDate), true));
     blocks.push(input("work_assignee", t("담당자"), staticSelect("work_assignee", memberOptions, draft?.responsibleMemberId || actor?.value, t("선택")), false));
-    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", draft?.description ?? ""), multiline: true }, true));
+    blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", description), multiline: true }, true));
   }
   if (!create) blocks.push(input("work_target", t("대상 업무"), externalSelect(targetAction(metadata.command), metadata.query || t("업무 검색")), false));
   if (metadata.command === "project_status") blocks.push(input("work_status", t("Project 상태"), staticSelect("work_status", projectStatusOptions(t), undefined, t("선택")), false));
@@ -540,6 +585,7 @@ function parseCommandMetadata(raw: string, authorization: RequestAuthorization, 
   if (!metadata.createdAt || Date.now() - metadata.createdAt > 15 * 60_000) throw new Error("명령 정보가 만료되었습니다. 다시 입력해 주세요.");
   if (metadata.sourceThread && (!/^[A-Z0-9]{1,32}$/i.test(metadata.sourceThread.channel)
     || !/^\d{1,16}\.\d{1,16}$/.test(metadata.sourceThread.ts))) throw new Error("Slack 스레드 정보가 올바르지 않습니다.");
+  if (metadata.sourceMessageTs && (!metadata.sourceThread || !/^\d{1,16}\.\d{1,16}$/.test(metadata.sourceMessageTs))) throw new Error("Slack 스레드 정보가 올바르지 않습니다.");
   return metadata;
 }
 async function claimOperation(metadata: CommandMetadata) {

@@ -48,12 +48,12 @@ function pendingProjectTurn(overrides = {}) {
   };
 }
 
-test("Slack mentions use MCP except deterministic help; DM manual questions also use MCP", async () => {
+test("Slack mentions use MCP except explicit commands; DM manual questions also use MCP", async () => {
   const source = await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8");
   assert.match(source, /commandEvent\?\.type === "app_mention"/);
   assert.match(source, /handleSlackMcpConversation/);
   assert.match(source, /mcpConversation \? null : parsedCommand/);
-  assert.match(source, /parsedCommand\?\.command !== "help"/);
+  assert.match(source, /const mcpConversation = !parsedCommand/);
   assert.match(source, /isOkriManualQuestion/);
   assert.ok(source.indexOf("if (mcpConversation && commandEvent)") < source.indexOf("else if (dailyMessage"));
 });

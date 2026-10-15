@@ -48,6 +48,7 @@ export function slackWorkGuideText(t: GuideTranslator) {
   const lines = [
     `*${t("OKRI Slack 업무 매뉴얼")}*`,
     t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요."),
+    t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다."),
   ];
   for (const group of SLACK_WORK_GUIDE_GROUPS) {
     lines.push("", `*${t(group.label)}*`, t(group.description));
@@ -67,7 +68,7 @@ export function slackWorkGuideBlocks(t: GuideTranslator) {
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.") },
+      text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}` },
     },
     ...SLACK_WORK_GUIDE_GROUPS.map((group) => ({
       type: "section",

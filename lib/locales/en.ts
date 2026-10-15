@@ -1,4 +1,6 @@
 const messages = {
+  "여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.": "Multi-line requests are supported. The first content line becomes the title, and the full content fills the description.",
+  "Slack 원문을 불러오지 못했습니다. 창을 닫고 양식 열기를 다시 눌러 주세요.": "Could not load the original Slack message. Close this window and click Open form again.",
   "오늘 꼭 할 일": "Must do today",
   "여유되면 할 일": "If time permits",
   "오늘 할 일 · 구분 전": "Today's work · unclassified",

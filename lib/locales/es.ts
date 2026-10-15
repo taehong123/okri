@@ -1,5 +1,7 @@
 import type { Catalog } from "./en";
 const messages = {
+  "여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.": "Se admiten solicitudes de varias líneas. La primera línea de contenido será el título y el contenido completo se incluirá en la descripción.",
+  "Slack 원문을 불러오지 못했습니다. 창을 닫고 양식 열기를 다시 눌러 주세요.": "No se pudo cargar el mensaje original de Slack. Cierra esta ventana y vuelve a pulsar Abrir formulario.",
   "오늘 꼭 할 일": "Imprescindible hoy",
   "여유되면 할 일": "Si queda tiempo",
   "오늘 할 일 · 구분 전": "Trabajo de hoy · sin clasificar",

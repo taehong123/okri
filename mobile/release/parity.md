@@ -1,5 +1,12 @@
 # Native parity ledger
 
+## 2026-10-16 · Multiline Slack creation commands
+
+- Slack creation forms recognize multiline commands, retain pasted details from
+  the exact source message, and route explicitly tagged commands to their forms.
+- Slack-only correction. Native screens and `/api/mobile/v1` contracts are
+  unchanged; no store binary or OTA update is required.
+
 - 2026-10-12: Slack Daily reads the connected member's primary Google Calendar
   for the Daily date and timezone. Explicit title/time selections are stored as
   additive draft/submission snapshots and shown in Slack and the web team Daily.

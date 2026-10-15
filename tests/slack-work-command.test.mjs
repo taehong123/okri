@@ -6,7 +6,8 @@ import { compileLanguageModule as compile } from "./helpers/language-fixture.mjs
 
 const source = await readFile(new URL("../lib/slack-work-command-parser.ts", import.meta.url), "utf8");
 const compiled = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
-const { parseSlackWorkCommand } = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const parser = await import(`data:text/javascript;base64,${Buffer.from(compiled).toString("base64")}`);
+const { parseSlackWorkCommand, slackWorkCommandFormContent } = parser;
 
 test("Slack work commands accept Task spelling and whitespace variants", () => {
   const cases = [
@@ -44,6 +45,154 @@ test("Slack work command parser ignores ordinary conversation and bot-like text"
 
 test("Slack work command query is bounded for interaction metadata", () => {
   assert.equal(parseSlackWorkCommand(`!프로젝트조회 ${"가".repeat(300)}`).query.length, 240);
+});
+
+test("multiline creation commands retain details and skip a mention-only title", () => {
+  for (const [alias, command] of [["티켓생성", "ticket_create"], ["프로젝트생성", "project_create"], ["루틴생성", "routine_create"], ["테스크생성", "task_create"], ["ticket create", "ticket_create"]]) {
+    for (const newline of ["\n", "\r\n", "\u2028"]) {
+      const message = `!${alias} <@UPERSON|팀원>${newline}> 업로드 오류 수정${newline}> 자세한 재현 과정${newline}> 완료 기준: 원본 파일 업로드 성공`;
+      assert.deepEqual(parseSlackWorkCommand(message), { command, query: "업로드 오류 수정" });
+      const content = slackWorkCommandFormContent(message);
+      assert.equal(content.title, "업로드 오류 수정");
+      assert.match(content.description, /자세한 재현 과정\n> 완료 기준/);
+    }
+  }
+  assert.deepEqual(parseSlackWorkCommand("!티켓생성"), { command: "ticket_create", query: "" });
+  assert.deepEqual(parseSlackWorkCommand("!티켓생성\n업로드 오류 수정\n1. 재현\n2. 검증"), { command: "ticket_create", query: "업로드 오류 수정" });
+  assert.equal(parseSlackWorkCommand("일반 대화\n!티켓생성 오류 수정"), null);
+});
+
+test("channel, private channel, DM and tagged multiline commands reach their form once", async () => {
+  const events = await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8");
+  for (const [type, channelType, prefix] of [["message", "channel", ""], ["message", "group", ""], ["message", "im", ""], ["app_mention", "channel", "<@UBOT> "], ["app_mention", "group", "<@UBOT|OKRI> "]]) {
+    const calls = [], pending = [], receipts = new Set();
+    const route = compile(events, {
+      "cloudflare:workers": { env: { DB: { prepare: () => ({ bind: (id) => ({ run: async () => {
+        const changes = receipts.has(id) ? 0 : 1;
+        receipts.add(id);
+        return { meta: { changes } };
+      } }) }) } }, waitUntil: (promise) => pending.push(promise) },
+      "@/lib/pace-data": { getSlackConnectionByTeam: async () => ({ botUserId: "UBOT" }) },
+      "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
+      "@/lib/slack-daily": {},
+      "@/lib/okri-manual": { isOkriManualQuestion: () => false },
+      "@/lib/slack-work-command": { ...parser, handleSlackWorkCommandEvent: async (_r, _c, event, parsed) => calls.push({ event, parsed }) },
+      "@/lib/slack-mcp-agent": { handleSlackMcpConversation: async () => assert.fail("Explicit form command must not start AI") },
+      "@/lib/slack-task-changes": { runDueTaskChanges: async () => {} },
+    });
+    const payload = { event_id: "E1", team_id: "T1", event: { type, channel_type: channelType, channel: "C1", user: "U1", ts: "1792000000.000001",
+      text: `${prefix}!티켓생성\n업로드 오류 수정\n원본 파일 재현\n완료 기준: 성공` } };
+    for (let retry = 0; retry < 2; retry++) {
+      const response = await route.POST(new Request("https://okri.test/api/slack/events", { method: "POST", body: JSON.stringify(payload) }));
+      assert.equal(response.status, 200);
+      await Promise.all(pending);
+    }
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].parsed, { command: "ticket_create", query: "업로드 오류 수정" });
+  }
+});
+
+function commandFixture(sourceText, options = {}) {
+  const calls = [], pending = [], writes = [], operations = new Set();
+  let releaseSource;
+  const sourceReady = options.slow ? new Promise((resolve) => { releaseSource = resolve; }) : Promise.resolve();
+  const authorization = { ownerId: "workspace", userId: "user", role: "member" };
+  const connection = { ownerId: "workspace", teamId: "T1", botUserId: "UBOT" };
+  const event = { channel: "C1", channelType: "channel", user: "U1", ts: "1792000000.000002", ...(options.reply ? { threadTs: "1792000000.000001" } : {}), text: sourceText };
+  const command = compile(options.domainSource, {
+    "cloudflare:workers": { waitUntil: (p) => pending.push(p), env: { DB: { prepare: (sql) => ({ bind: (...args) => ({
+      run: async () => {
+        if (sql.startsWith("INSERT OR IGNORE")) {
+          const changes = operations.has(args[0]) ? 0 : 1;
+          operations.add(args[0]);
+          return { meta: { changes } };
+        }
+        return { meta: { changes: 1 } };
+      }, first: async () => ({ status: "succeeded", result_json: JSON.stringify({ message: "Ticket 생성 완료" }) }),
+    }) }) } } },
+    "@/lib/pace-data": {
+      ITEM_PRIORITIES: ["medium"], ITEM_STATUSES: ["backlog", "todo", "done"],
+      getSlackConnection: async () => connection,
+      getTeam: async () => ({ members: [{ id: "member", displayName: "요청자" }] }),
+      createItem: async (_owner, fields) => { writes.push(fields); return { id: "ticket", ...fields }; },
+    },
+    "@/lib/client-directory": {},
+    "@/lib/slack-daily": {
+      slackTokenForConnection: async () => "test-token",
+      resolveSlackMemberForEvent: async () => ({ authorization, memberId: "member" }),
+      slackApi: async (_token, method, payload) => {
+        calls.push({ method, payload });
+        if (method === "views.open") return { view: { id: "view-1", hash: "hash-1" } };
+        if (method === "conversations.replies") {
+          await sourceReady;
+          return { messages: [{ ts: "1792000000.000001", user: "UOTHER", text: "다른 사람의 업무" },
+            ...(!options.missing ? [{ ts: event.ts, user: "U1", text: sourceText }] : [])] };
+        }
+        return { ok: true };
+      },
+    },
+    "@/lib/project-images": {},
+    "@/lib/language-preferences": { readLanguagePreferences: async () => ({ resolvedLanguage: "ko" }) },
+    "@/lib/server-language": { serverTranslator: async () => (key) => key },
+    "@/lib/slack-work-command-parser": parser,
+    "@/lib/slack-work-intake": {},
+    "@/lib/slack-work-command-guide": {},
+  });
+  return { command, authorization, connection, event, calls, pending, writes, releaseSource };
+}
+
+test("multiline Ticket form acknowledges before source lookup, preserves the source and creates once on submit", async () => {
+  const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
+  const sourceText = "!티켓생성 <@UOTHER>\n> 업로드 오류 수정\n> 상세 내용\n> 완료 기준: 실제 파일 업로드";
+  const f = commandFixture(sourceText, { domainSource, slow: true, reply: true });
+  await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(sourceText));
+  const button = f.calls.find((call) => call.method === "chat.postEphemeral").payload.blocks[1].elements[0];
+  assert.ok(button.value.length < 2_000);
+  await f.command.openSlackWorkCommandModal("trigger", f.authorization, "member", button.value, "T1", "U1");
+  assert.equal(f.calls.find((call) => call.method === "views.open").payload.view.submit, undefined);
+  assert.equal(f.writes.length, 0);
+  f.releaseSource();
+  await Promise.all(f.pending);
+  const sourceCall = f.calls.find((call) => call.method === "conversations.replies");
+  assert.equal(sourceCall.payload.ts, f.event.threadTs);
+  assert.equal(sourceCall.payload.oldest, f.event.ts);
+  assert.equal(sourceCall.payload.latest, f.event.ts);
+  const view = f.calls.find((call) => call.method === "views.update").payload.view;
+  const title = view.blocks.find((block) => block.block_id === "work_title").element.initial_value;
+  const description = view.blocks.find((block) => block.block_id === "work_description").element.initial_value;
+  assert.equal(title, "업로드 오류 수정");
+  assert.match(description, /완료 기준: 실제 파일 업로드/);
+  assert.doesNotMatch(description, /다른 사람의 업무/);
+  assert.ok(view.submit);
+  const state = { work_title: { work_title: { value: title } }, work_description: { work_description: { value: description } } };
+  for (let retry = 0; retry < 2; retry++) await f.command.submitSlackWorkCommand(f.authorization, "member", view.private_metadata, state, "T1", "U1");
+  assert.equal(f.writes.length, 1);
+  assert.equal(f.writes[0].kind, "ticket");
+  assert.equal(f.writes[0].description, description);
+});
+
+test("long Ticket details fit Slack bounds with an original link; missing sources and wrong members cannot submit", async () => {
+  const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
+  for (const missing of [false, true]) {
+    const text = `!티켓생성\n업로드 오류 수정\n${"자세한 내용과 완료 기준\n".repeat(500)}`;
+    const f = commandFixture(text, { domainSource, missing });
+    await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(text));
+    const raw = f.calls.find((call) => call.method === "chat.postEphemeral").payload.blocks[1].elements[0].value;
+    await assert.rejects(() => f.command.openSlackWorkCommandModal("trigger", f.authorization, "another-member", raw, "T1", "U1"));
+    await f.command.openSlackWorkCommandModal("trigger", f.authorization, "member", raw, "T1", "U1");
+    await Promise.all(f.pending);
+    const view = f.calls.find((call) => call.method === "views.update").payload.view;
+    if (missing) {
+      assert.equal(view.submit, undefined);
+      assert.match(view.blocks[0].text.text, /원문을 불러오지 못했습니다/);
+    } else {
+      const description = view.blocks.find((block) => block.block_id === "work_description").element.initial_value;
+      assert.ok(description.length <= 3_000);
+      assert.match(description, /https:\/\/slack.com\/archives\/C1\/p1792000000000002$/);
+    }
+    assert.ok(raw.length < 2_000);
+    assert.equal(f.writes.length, 0);
+  }
 });
 
 test("Slack channel events, private responses, permissions, and request idempotency stay wired", async () => {

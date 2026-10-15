@@ -80,6 +80,7 @@ HTTPS JSON 소스, 값 경로, 기준값·목표값, 갱신 주기를 지정하�
     content: `${slackWorkGuideText((text) => text)}
 생성·수정 명령은 보통 '양식 열기'를 누른 뒤 내용을 확인하고 생성/저장해야 완료됩니다. 명령 입력 자체가 생성 완료는 아닙니다.
 생성 별칭: !프로젝트생성, !루틴생성, !티켓생성, !테스크생성. 테스크 대신 태스크도 됩니다.
+생성 명령 아래에 여러 줄로 상세 내용을 붙여 넣어도 인식합니다. 양식 열기를 누르면 첫 내용 줄을 제목으로, 본문을 설명으로 가져옵니다. 사람 멘션만 있는 줄은 제목으로 쓰지 않습니다. 설명 길이를 넘는 내용은 Slack 원문 링크를 함께 남깁니다. @OKRI와 느낌표 명령을 같이 쓰면 해당 양식을 엽니다.
 도움말 별칭: !메뉴얼, !매뉴얼, !manual, !help, !okri. @OKRI !도움말도 같은 안내를 표시합니다.
 영어: !project [create|view|edit|status], !routine [create], !ticket [create], !task [create|view|edit|complete|reopen], !work create, !my work. 대괄호는 선택 표현이며 실제로 입력하지 않습니다.
 /okri 또는 /okri help는 슬래시 사용법, /okri daily는 데일리 작성, /okri <내용>은 업무 생성 초안입니다. !OKR, !데일리, !티켓삭제 같은 명령은 지원하지 않습니다.`,

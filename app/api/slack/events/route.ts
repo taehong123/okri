@@ -44,7 +44,8 @@ function slackCommandReceiptId(teamId: string, event: SlackCommandEvent) {
 }
 
 function withoutBotMention(text: string, botUserId: string) {
-  return text.replaceAll(`<@${botUserId}>`, " ").replace(/[ \t]{2,}/g, " ").trim();
+  return text.replace(/<@([A-Z0-9]+)(?:\|[^>]+)?>/giu, (mention, id: string) => id === botUserId ? " " : mention)
+    .replace(/[ \t]{2,}/g, " ").trim();
 }
 
 function slackBlockText(blocks: unknown[] | undefined) {
@@ -93,7 +94,7 @@ export async function POST(request: Request) {
     ? withoutBotMention(rawCommandText ?? "", connection.botUserId)
     : rawCommandText;
   const parsedCommand = commandText ? parseSlackWorkCommand(commandText) : null;
-  const mcpConversation = parsedCommand?.command !== "help" && (commandEvent?.type === "app_mention"
+  const mcpConversation = !parsedCommand && (commandEvent?.type === "app_mention"
     || (!parsedCommand && commandEvent?.channel_type === "im" && isOkriManualQuestion(commandText ?? "")));
   const naturalCreation = !parsedCommand && commandText?.trim()
     && commandEvent?.channel_type === "im"

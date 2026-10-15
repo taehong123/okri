@@ -26,10 +26,36 @@ const commandPatterns: Array<[SlackWorkCommand, RegExp]> = [
 ];
 
 export function parseSlackWorkCommand(input: string): ParsedSlackWorkCommand | null {
-  const normalized = input.normalize("NFC").trim();
+  const parsed = matchSlackWorkCommand(input);
+  if (!parsed) return null;
+  const query = isFormCreation(parsed.command) ? creationFields(parsed.content).title : parsed.content.slice(0, 240);
+  return { command: parsed.command, query };
+}
+
+export function slackWorkCommandFormContent(input: string) {
+  const parsed = matchSlackWorkCommand(input);
+  return parsed && isFormCreation(parsed.command)
+    ? { command: parsed.command, ...creationFields(parsed.content) }
+    : null;
+}
+
+function matchSlackWorkCommand(input: string) {
+  const normalized = input.normalize("NFC").replace(/\r\n?|\u2028|\u2029/g, "\n").trim();
   for (const [command, pattern] of commandPatterns) {
-    const match = normalized.match(pattern);
-    if (match) return { command, query: (match[1] ?? "").trim().slice(0, 240) };
+    // Match the command against its complete body, including pasted paragraphs.
+    const match = normalized.match(new RegExp(pattern.source, `${pattern.flags}s`));
+    if (match) return { command, content: (match[1] ?? "").trim() };
   }
   return null;
+}
+
+function isFormCreation(command: SlackWorkCommand) {
+  return ["project_create", "routine_create", "ticket_create", "task_create"].includes(command);
+}
+
+function creationFields(content: string) {
+  const title = content.split("\n")
+    .map((line) => line.replace(/<@[A-Z0-9]+(?:\|[^>]+)?>/giu, "").replace(/^\s*>+\s*/, "").trim())
+    .find(Boolean)?.slice(0, 240) ?? "";
+  return { title, description: content.includes("\n") || content.length > 240 ? content : "" };
 }
