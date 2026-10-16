@@ -4500,16 +4500,17 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
     if (cached && viewCacheIsFresh(key)) return () => { active = false; };
     fetch(`/api/routines?date=${date}`)
       .then(async (response) => response.ok ? response.json() as Promise<{ routines: Routine[] }> : Promise.reject())
-      .then((data) => { if (active) { routineMemoryCache.set(key, data.routines); markViewCacheFresh(key); setLoadError(false); setRows(data.routines); onRoutinesChange(data.routines); } })
+      .then((data) => { if (active) { routineMemoryCache.set(key, data.routines); markViewCacheFresh(key); setLoadError(false); setRows(data.routines); } })
       .catch(() => { if (active && rowsRef.current === null) setLoadError(true); });
     return () => { active = false; };
-  }, [date, loadAttempt, onRoutinesChange, workspaceId]);
+  }, [date, loadAttempt, workspaceId]);
   useEffect(() => {
     if (!rows) return;
     const key = `routines:${workspaceId}:${date}`;
     routineMemoryCache.set(key, rows);
     markViewCacheFresh(key);
-  }, [date, rows, workspaceId]);
+    onRoutinesChange(rows);
+  }, [date, rows, workspaceId, onRoutinesChange]);
 
   async function create(event: FormEvent) {
     event.preventDefault();
@@ -4525,7 +4526,6 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
       const data = await response.json() as { routine: Routine };
       setRows((current) => {
         const next = [...(current ?? []), data.routine];
-        onRoutinesChange(next);
         return next;
       });
       setTitle("");
@@ -4560,7 +4560,6 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
       const data = await response.json() as { routine: Routine };
       setRows((current) => {
         const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
-        onRoutinesChange(next);
         return next;
       });
     } catch (toggleError) {
@@ -4613,7 +4612,6 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
     const data = await response.json() as { routine: Routine };
     setRows((current) => {
       const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
-      onRoutinesChange(next);
       return next;
     });
     setDrafts((current) => {
@@ -4636,7 +4634,6 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
     if (response.ok) {
       setRows((current) => {
         const next = current?.filter((entry) => entry.id !== id) ?? [];
-        onRoutinesChange(next);
         return next;
       });
       onNotice(t("Routine을 삭제했습니다."));

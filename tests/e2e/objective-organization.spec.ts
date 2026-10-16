@@ -94,6 +94,8 @@ test("Objective editing organizes Projects without removing an Initiative and pr
 });
 
 test("Routine exposes edit/delete actions and saves name, cadence and assignee together", async ({ page }) => {
+  const renderErrors: string[] = [];
+  page.on("console", message => { if (message.type() === "error" && /Cannot update a component|Too many re-renders|Maximum update depth/.test(message.text())) renderErrors.push(message.text()); });
   const writes = await fixture(page);
   await page.goto("/?view=routines");
   await page.getByRole("button", { name: "Routine 수정", exact: true }).click();
@@ -108,6 +110,7 @@ test("Routine exposes edit/delete actions and saves name, cadence and assignee t
   expect(writes.filter(write => write.path === "/api/routines")).toHaveLength(1);
   expect(writes[0].data).toMatchObject({ title: "주간 점검 수정", cadence: "monthly", active: false, assigneeMemberId: "member-1" });
   await expect(page.getByRole("button", { name: "Routine 삭제", exact: true })).toBeVisible();
+  expect(renderErrors).toEqual([]);
 });
 
 test("Objective, KR and Initiative controls align across sizes, themes and larger text", async ({ page }, info) => {
