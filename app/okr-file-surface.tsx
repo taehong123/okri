@@ -92,7 +92,7 @@ type Draft = {
   objective: Objective;
 };
 
-type Resolution = { action: "move" | "trash"; targetInitiativeRef?: string };
+type Resolution = { action: "move" | "trash" | "routine"; targetInitiativeRef?: string };
 type ConfirmOptions = { title: string; message: string; confirmLabel: string; danger?: boolean };
 
 export type OkrExecutionItem = {
@@ -107,6 +107,8 @@ export type OkrExecutionItem = {
   createdAt: string;
   updatedAt: string;
   archivedAt: string | null;
+  creatorDisplayName?: string;
+  assignments?: { role: string; displayName: string }[];
 };
 
 const editableOkrRequests = new Map<string, Promise<OkrFile>>();
@@ -247,6 +249,7 @@ export function OkrFileSurface({
   const [editLoading, setEditLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [conflict, setConflict] = useState(false);
   const [expandedRows, setExpandedRows] = useState<Set<string>>(() => new Set(okrExpandedRows.get(fileCacheKey) ?? []));
   const focusedKeyResultId = readFile?.objective?.keyResults.find((row) => row.initiatives.some((initiative) => initiative.id === focusId))?.id;
   useEffect(() => {
@@ -280,15 +283,17 @@ export function OkrFileSurface({
   const retainedInitiativeIds = new Set(draftInitiatives.map((initiative) => initiative.id).filter(Boolean));
   const removedInitiatives = originalInitiatives.filter((initiative) => initiative.id && !retainedInitiativeIds.has(initiative.id));
   const impactedProjects = removedInitiatives.flatMap((initiative) => initiative.linkedProjects);
+  const linkedProjects = originalInitiatives.flatMap((initiative) => initiative.linkedProjects.map((project) => ({ ...project, initiativeTitle: initiative.title })));
+  const changedProjects = linkedProjects.filter((project) => resolutions[project.id]);
   const originalKeyResultIds = new Set(file?.objective?.keyResults.map((keyResult) => keyResult.id).filter(Boolean) ?? []);
   const retainedKeyResultIds = new Set(draft.objective.keyResults.map((keyResult) => keyResult.id).filter(Boolean));
   const removedKeyResultCount = [...originalKeyResultIds].filter((id) => !retainedKeyResultIds.has(id)).length;
-  const resolutionOptions = useMemo(() => {
+  const resolutionOptions = (() => {
     const removedIds = new Set(removedInitiatives.map((initiative) => initiative.id));
     const local = draftInitiatives.map((initiative) => ({ ref: initiative.clientId, label: `${draft.metadata.name || "현재 파일"} · ${initiative.title || "새 Initiative"}` }));
     const external = (file?.initiativeOptions ?? []).filter((initiative) => !removedIds.has(initiative.id) && !draftInitiatives.some((entry) => entry.id === initiative.id)).map((initiative) => ({ ref: initiative.id, label: `${initiative.cycleName} · ${initiative.title}` }));
     return [...local, ...external];
-  }, [draft.metadata.name, draftInitiatives, file?.initiativeOptions, removedInitiatives]);
+  })();
   const executionTree = useMemo(() => {
     const completed = new Set<ItemStatus>(["done", "development_done"]);
     const tasksByProject = new Map<string, OkrExecutionItem[]>();
@@ -322,6 +327,7 @@ export function OkrFileSurface({
     if (!readFile || !cycleId || editLoading) return;
     setEditLoading(true);
     setError("");
+    setConflict(false);
     try {
       const editableFile = await fetchEditableOkrFile(workspaceId, cycleId);
       setFile(editableFile);
@@ -349,6 +355,7 @@ export function OkrFileSurface({
     setResolutions({});
     setEditing(false);
     setError("");
+    setConflict(false);
   }
 
   async function save() {
@@ -363,17 +370,17 @@ export function OkrFileSurface({
     }
     const unresolved = impactedProjects.filter((project) => {
       const resolution = resolutions[project.id];
-      return !resolution || resolution.action === "move" && !resolution.targetInitiativeRef;
+      return !resolution || resolution.action === "move" && !resolutionOptions.some((option) => option.ref === resolution.targetInitiativeRef);
     });
     if (unresolved.length) {
-      setError(t("연결된 Project {value1}개의 이동 또는 휴지통 처리를 선택해 주세요.", { value1: messageValue(unresolved.length) }));
+      setError(t("연결된 Project {count}개의 이동·Routine 전환·휴지통 처리를 선택해 주세요.", { count: unresolved.length }));
       return;
     }
-    if (removedKeyResultCount || removedInitiatives.length || impactedProjects.length) {
-      const taskCount = impactedProjects.reduce((total, project) => total + project.taskCount, 0);
+    if (removedKeyResultCount || removedInitiatives.length || changedProjects.some((project) => resolutions[project.id].action !== "move")) {
+      const taskCount = changedProjects.reduce((total, project) => total + project.taskCount, 0);
       const confirmed = await onConfirm({
         title: "OKR 파일 변경사항 저장",
-        message: t("KR {value1}개와 Initiative {value2}개가 삭제됩니다.\n영향받는 Project는 {value3}개, 하위 Task는 {value4}개입니다.\n선택한 Project 이동·휴지통 처리와 함께 저장할까요?", { value1: messageValue(removedKeyResultCount), value2: messageValue(removedInitiatives.length), value3: messageValue(impactedProjects.length), value4: messageValue(taskCount) }),
+        message: t("KR {krCount}개와 Initiative {initiativeCount}개가 삭제됩니다.\nProject {projectCount}개와 하위 Task {taskCount}개에 선택한 처리를 적용합니다. Task는 Project를 자동으로 따라갑니다.", { krCount: removedKeyResultCount, initiativeCount: removedInitiatives.length, projectCount: changedProjects.length, taskCount }),
         confirmLabel: "전체 변경 저장",
         danger: true,
       });
@@ -398,7 +405,7 @@ export function OkrFileSurface({
           initiatives: keyResult.initiatives.map((initiative) => ({ id: initiative.id, clientId: initiative.clientId, title: initiative.title, status: initiative.status })),
         })),
       },
-      projectResolutions: impactedProjects.map((project) => ({ projectId: project.id, ...resolutions[project.id] })),
+      projectResolutions: changedProjects.map((project) => ({ projectId: project.id, ...resolutions[project.id] })),
     };
     try {
       const response = await fetch(creating ? "/api/okr-files" : `/api/okr-files/${encodeURIComponent(cycleId!)}`, {
@@ -408,7 +415,14 @@ export function OkrFileSurface({
       });
       const data = await response.json() as { file?: OkrFile; error?: string };
       if (!response.ok || !data.file) {
-        if (response.status === 409) throw new Error(t("다른 사용자가 이 파일을 먼저 수정했습니다. 다시 불러온 뒤 변경해 주세요."));
+        if (response.status === 409) {
+          const latest = data.file ?? await fetchEditableOkrFile(workspaceId, cycleId!);
+          setFile(latest);
+          setDraft((current) => preserveDraftAfterConflict(current, latest));
+          setConflict(true);
+          setError(t("다른 사용자가 수정한 내용이 있습니다. 작성한 내용은 유지했습니다. 내 변경사항으로 덮어쓸 수 있습니다."));
+          return;
+        }
         throw new Error(apiError(data, "OKR 파일을 저장하지 못했습니다."));
       }
       const next = draftFromFile(data.file);
@@ -417,6 +431,7 @@ export function OkrFileSurface({
       setResolutions({});
       setInitialDraft(JSON.stringify({ draft: next, resolutions: {} }));
       setEditing(false);
+      setConflict(false);
       onDirtyChange(false);
       onSaved(data.file);
       onNotice(creating ? t("OKR 파일을 만들었습니다.") : t("OKR 파일 전체를 저장했습니다."));
@@ -456,21 +471,21 @@ export function OkrFileSurface({
           <label><span>{t("종료일")}</span><input type="date" value={draft.metadata.endDate} onChange={(event) => setDraft((current) => ({ ...current, metadata: { ...current.metadata, endDate: event.target.value } }))} /></label>
         </section>
         <section className="okr-file-objective-editor">
-          <header><span className="type-icon type-objective">O</span><div><small>{t("Objective")}</small><textarea rows={2} value={draft.objective.title} onChange={(event) => setDraft((current) => ({ ...current, objective: { ...current.objective, title: event.target.value } }))} placeholder={t("이번 주기에 달성할 하나의 목표")} /></div><StatusSelect value={draft.objective.status} onChange={(status) => setDraft((current) => ({ ...current, objective: { ...current.objective, status } }))} /></header>
+          <header><span className="type-icon type-objective">O</span><label className="okr-file-title-field"><small>{t("Objective")}</small><textarea rows={2} value={draft.objective.title} onChange={(event) => setDraft((current) => ({ ...current, objective: { ...current.objective, title: event.target.value } }))} placeholder={t("이번 주기에 달성할 하나의 목표")} /></label><label className="okr-file-control"><small>{t("상태")}</small><StatusSelect value={draft.objective.status} onChange={(status) => setDraft((current) => ({ ...current, objective: { ...current.objective, status } }))} /></label></header>
           <div className="okr-file-key-results">
             {draft.objective.keyResults.map((keyResult, keyResultIndex) => <section className="okr-file-key-result-editor" key={keyResult.clientId}>
               <header>
                 <span className="type-icon type-key_result">KR</span>
-                <div><small>{t("Key Result")}{keyResultIndex + 1}</small><textarea rows={2} value={keyResult.title} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { title: event.target.value })} placeholder={t("측정 가능한 핵심 결과")} /></div>
+                <label className="okr-file-title-field"><small>{t("Key Result")} {keyResultIndex + 1}</small><textarea rows={2} value={keyResult.title} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { title: event.target.value })} placeholder={t("측정 가능한 핵심 결과")} /></label>
                 <div className="okr-file-row-tools"><button type="button" disabled={keyResultIndex === 0} onClick={() => moveKeyResult(setDraft, keyResultIndex, -1)} aria-label={t("KR 위로 이동")}><ArrowUp size={13} /></button><button type="button" disabled={keyResultIndex === draft.objective.keyResults.length - 1} onClick={() => moveKeyResult(setDraft, keyResultIndex, 1)} aria-label={t("KR 아래로 이동")}><ArrowDown size={13} /></button><button type="button" className="danger" disabled={draft.objective.keyResults.length === 1} onClick={() => setDraft((current) => ({ ...current, objective: { ...current.objective, keyResults: current.objective.keyResults.filter((entry) => entry.clientId !== keyResult.clientId) } }))} aria-label={t("KR 삭제")}><Trash2 size={13} /></button></div>
               </header>
               <div className="okr-file-kr-metrics"><StatusSelect value={keyResult.status} onChange={(status) => patchKeyResult(setDraft, keyResult.clientId, { status, ...(status === "done" || status === "development_done" ? { progress: 100 } : {}) })} /><label><span>{t("진척도")}</span><input type="range" min="0" max="100" step="5" value={keyResult.progress} onChange={(event) => patchKeyResult(setDraft, keyResult.clientId, { progress: Number(event.target.value) })} /><b>{keyResult.progress}%</b></label></div>
               <div className="okr-file-initiatives">
                 {keyResult.initiatives.map((initiative, initiativeIndex) => <div className="okr-file-initiative-editor" key={initiative.clientId}>
                   <span className="type-icon type-initiative">I</span>
-                  <div><small>{t("Initiative")}{initiativeIndex + 1}</small><textarea rows={2} value={initiative.title} onChange={(event) => patchInitiative(setDraft, initiative.clientId, { title: event.target.value })} placeholder={t("이 KR을 움직일 실행 방향")} /></div>
-                  <select value={keyResult.clientId} onChange={(event) => moveInitiativeToKeyResult(setDraft, initiative.clientId, event.target.value)} aria-label={t("상위 KR 변경")}>{draft.objective.keyResults.map((target, index) => <option value={target.clientId} key={target.clientId}>KR {index + 1}</option>)}</select>
-                  <StatusSelect value={initiative.status} onChange={(status) => patchInitiative(setDraft, initiative.clientId, { status })} />
+                  <label className="okr-file-title-field"><small>{t("Initiative")} {initiativeIndex + 1}</small><textarea rows={2} value={initiative.title} onChange={(event) => patchInitiative(setDraft, initiative.clientId, { title: event.target.value })} placeholder={t("이 KR을 움직일 실행 방향")} /></label>
+                  <label className="okr-file-control"><small>{t("상위 KR")}</small><select value={keyResult.clientId} onChange={(event) => moveInitiativeToKeyResult(setDraft, initiative.clientId, event.target.value)} aria-label={t("상위 KR 변경")}>{draft.objective.keyResults.map((target, index) => <option value={target.clientId} key={target.clientId}>KR {index + 1}</option>)}</select></label>
+                  <label className="okr-file-control"><small>{t("상태")}</small><StatusSelect value={initiative.status} onChange={(status) => patchInitiative(setDraft, initiative.clientId, { status })} /></label>
                   <div className="okr-file-row-tools"><button type="button" disabled={initiativeIndex === 0} onClick={() => moveInitiative(setDraft, keyResult.clientId, initiativeIndex, -1)} aria-label={t("Initiative 위로 이동")}><ArrowUp size={12} /></button><button type="button" disabled={initiativeIndex === keyResult.initiatives.length - 1} onClick={() => moveInitiative(setDraft, keyResult.clientId, initiativeIndex, 1)} aria-label={t("Initiative 아래로 이동")}><ArrowDown size={12} /></button><button type="button" className="danger" onClick={() => removeInitiative(setDraft, initiative.clientId)} aria-label={t("Initiative 삭제")}><Trash2 size={12} /></button></div>
                 </div>)}
                 <button type="button" className="okr-file-add-row" onClick={() => addInitiative(setDraft, keyResult.clientId)}><Plus size={13} />{t("Initiative 추가")}</button>
@@ -479,17 +494,26 @@ export function OkrFileSurface({
             <button type="button" className="okr-file-add-kr" onClick={() => addKeyResult(setDraft)}><Plus size={14} />{t("Key Result 추가")}</button>
           </div>
         </section>
-        {impactedProjects.length > 0 && <section className="okr-project-resolutions">
-          <header><AlertTriangle size={16} /><div><b>{t("연결 Project 정리 필요")}</b><p>{t("삭제되는 Initiative 아래 Project는 다른 Initiative로 이동하거나 휴지통으로 보내야 합니다.")}</p></div></header>
-          {impactedProjects.map((project) => {
-            const value = resolutions[project.id]?.action === "trash" ? "trash" : resolutions[project.id]?.targetInitiativeRef ? `move:${resolutions[project.id].targetInitiativeRef}` : "";
-            return <label key={project.id}><span><Briefcase size={13} /><b>{project.title}</b><small>{t("{kind} · {count}", { kind: t("하위 Task"), count: project.taskCount })}</small></span><select value={value} onChange={(event) => {
+        {linkedProjects.length > 0 && <section className="okr-project-resolutions">
+          <header><Briefcase size={16} /><div><b>{impactedProjects.length ? t("연결 Project 정리 필요") : t("연결 Project")}</b><p>{t("Project만 정리하면 하위 Task는 자동으로 따라갑니다.")}</p></div></header>
+          {linkedProjects.map((project) => {
+            const resolution = resolutions[project.id];
+            const value = resolution?.action === "trash" || resolution?.action === "routine" ? resolution.action : resolution?.targetInitiativeRef ? `move:${resolution.targetInitiativeRef}` : "";
+            const requiresResolution = impactedProjects.some((entry) => entry.id === project.id);
+            return <label key={project.id}><span><Briefcase size={13} /><b>{project.title}</b><small>{project.initiativeTitle} · {t("{kind} · {count}", { kind: t("하위 Task"), count: project.taskCount })}</small></span><select aria-label={t("{title} Project 처리", { title: project.title })} value={value} onChange={(event) => {
               const next = event.target.value;
               setError("");
-              setResolutions((current) => ({ ...current, [project.id]: next === "trash" ? { action: "trash" } : next.startsWith("move:") ? { action: "move", targetInitiativeRef: next.slice(5) } : { action: "move" } }));
-            }}><option value="">{t("처리 방법 선택")}</option><optgroup label={t("다른 Initiative로 이동")}>{resolutionOptions.map((option) => <option value={`move:${option.ref}`} key={option.ref}>{option.label}</option>)}</optgroup>{project.canTrash && <option value="trash">{t("Project·Task를 휴지통으로 이동")}</option>}</select>{!project.canTrash && <small>{t("생성자 또는 책임자만 휴지통으로 이동할 수 있습니다.")}</small>}</label>;
+              setResolutions((current) => {
+                const updated = { ...current };
+                if (!next) delete updated[project.id];
+                else updated[project.id] = next === "trash" || next === "routine" ? { action: next } : { action: "move", targetInitiativeRef: next.slice(5) };
+                return updated;
+              });
+            }}><option value="">{requiresResolution ? t("처리 방법 선택") : t("현재 연결 유지")}</option><optgroup label={t("다른 Initiative로 이동")}>{resolutionOptions.map((option) => <option value={`move:${option.ref}`} key={option.ref}>{option.label}</option>)}</optgroup>{project.canTrash && <><option value="routine">{t("Routine으로 전환")}</option><option value="trash">{t("Project·Task를 휴지통으로 이동")}</option></>}</select>{requiresResolution && !resolution && <small>{t("상위 Initiative가 삭제됩니다. 처리 방법을 선택해 주세요.")}</small>}{!project.canTrash && <small>{t("생성자 또는 책임자만 휴지통으로 이동할 수 있습니다.")}</small>}</label>;
           })}
+          {changedProjects.some((project) => resolutions[project.id].action === "routine") && <p>{t("Routine 전환 시 Task와 문서를 옮기고, Project 원본은 휴지통에 보관합니다.")}</p>}
         </section>}
+        {conflict && <div className="okr-file-conflict" role="status"><p>{t("작성한 내용을 유지한 채 최신 저장본 위에 적용합니다.")}</p><button type="button" className="secondary" disabled={saving} onClick={() => void save()}>{t("내 변경사항으로 덮어쓰기")}</button></div>}
         {error && <p className="okr-file-editor-error" role="alert">{error}</p>}
       </div>
       <footer className="okr-file-editor-footer"><span>{dirty ? t("저장하지 않은 변경사항이 있습니다.") : t("변경사항 없음")}</span><div><button type="button" onClick={() => void cancelEdit()} disabled={saving}>{t("취소")}</button><button type="button" className="primary" onClick={() => void save()} disabled={saving || !dirty && !creating}><Check size={14} />{t("전체 저장")}</button></div></footer>
@@ -590,18 +614,18 @@ function OkrReadKeyResult({
                   {tasks.length ? <button type="button" className="okr-tree-row okr-tree-project-main" aria-expanded={projectExpanded} aria-controls={tasksId} onClick={() => onToggle(project.id)}>
                     <TreeChevron expanded={projectExpanded} />
                     <Briefcase className="okr-tree-kind-icon" size={15} />
-                    <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong></span>
+                    <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong>{executionOwner(project, "project_dri") && <span className="okr-tree-owner">{executionOwner(project, "project_dri")}</span>}</span>
                     <span className="okr-tree-count">{t("{kind} · {count}", { kind: t("Task"), count: tasks.length })}</span>
                   </button> : <div className="okr-tree-row okr-tree-project-main static">
                     <span className="okr-tree-chevron-placeholder" />
                     <Briefcase className="okr-tree-kind-icon" size={15} />
-                    <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong></span>
+                    <span className="okr-tree-copy"><small>{t("Project")}</small><strong className="project-item-title">{project.title}</strong>{executionOwner(project, "project_dri") && <span className="okr-tree-owner">{executionOwner(project, "project_dri")}</span>}</span>
                     <span className="okr-tree-count empty">{t("미완료 Task 없음")}</span>
                   </div>}
                   <button type="button" className="okr-tree-open-detail" aria-label={t("{value1} Project 상세 보기", { value1: messageValue(project.title) })} title={t("Project 상세 보기")} onClick={() => onOpenProject(project.id)}><ExternalLink size={13} /></button>
                 </div>
                 {tasks.length > 0 && projectExpanded && <div className="okr-tree-tasks" id={tasksId} role="group" aria-label={t("{value1}의 미완료 Task", { value1: messageValue(project.title) })}>
-                  {tasks.map((task) => <button type="button" className="okr-tree-task" key={task.id} onClick={() => onOpenTask(task.id)}><ListChecks size={14} /><span>{task.title}</span><ChevronRight size={13} /></button>)}
+                  {tasks.map((task) => <button type="button" className="okr-tree-task" key={task.id} onClick={() => onOpenTask(task.id)}><ListChecks size={14} /><span>{task.title}{executionOwner(task, "task_assignee") && <small className="okr-tree-owner">{executionOwner(task, "task_assignee")}</small>}</span><ChevronRight size={13} /></button>)}
                 </div>}
               </section>;
             })}
@@ -614,6 +638,11 @@ function OkrReadKeyResult({
 
 function TreeChevron({ expanded }: { expanded: boolean }) {
   return expanded ? <ChevronDown className="okr-tree-chevron" size={14} aria-hidden="true" /> : <ChevronRight className="okr-tree-chevron" size={14} aria-hidden="true" />;
+}
+
+function executionOwner(item: OkrExecutionItem, role: string) {
+  const names = item.assignments?.filter((assignment) => assignment.role === role).map((assignment) => assignment.displayName) ?? [];
+  return names.length ? names.join(", ") : item.creatorDisplayName ? t("{name} · 생성자", { name: item.creatorDisplayName }) : "";
 }
 
 function StatusSelect({ value, onChange }: { value: ItemStatus; onChange: (status: ItemStatus) => void }) {
@@ -636,6 +665,14 @@ function draftFromFile(file: OkrFile): Draft {
     metadata: { name: file.cycle.name, department: file.cycle.department, startDate: file.cycle.startDate, endDate: file.cycle.endDate, status: file.cycle.status },
     objective: file.objective ? structuredClone(file.objective) : { id: null, clientId: makeClientId("objective"), title: "", status: "in_progress", keyResults: [{ id: null, clientId: makeClientId("kr"), title: "", status: "todo", progress: 0, initiatives: [] }] },
   };
+}
+
+function preserveDraftAfterConflict(draft: Draft, latest: OkrFile): Draft {
+  const ids = new Set([latest.objective?.id, ...latest.objective?.keyResults.flatMap((kr) => [kr.id, ...kr.initiatives.map((initiative) => initiative.id)]) ?? []]);
+  const keepId = (id: string | null) => id && ids.has(id) ? id : null;
+  return { ...draft, objective: { ...draft.objective, id: keepId(draft.objective.id),
+    keyResults: draft.objective.keyResults.map((kr) => ({ ...kr, id: keepId(kr.id),
+      initiatives: kr.initiatives.map((initiative) => ({ ...initiative, id: keepId(initiative.id) })) })) } };
 }
 
 function makeClientId(kind: string) { return `draft-${kind}-${crypto.randomUUID()}`; }

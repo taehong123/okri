@@ -211,3 +211,23 @@ not evidence that a web feature magically exists in React Native.
   repeat the request.
 - This is Slack agent orchestration only. `/api/mobile/v1` fixtures, semantics,
   and native screens remain unchanged; no native release is required.
+
+## 2026-10-16 · Objective editing and Project organization
+
+- Web: Objective editing can move any linked Project, send it with its Tasks to
+  Trash, or convert it to a Routine. Tasks follow automatically; conversion keeps
+  Task IDs/assignments and copies the document while retaining the original
+  Project in Trash. Concurrent edits keep the draft and offer an explicit
+  overwrite against the latest revision. Editor fields share aligned controls.
+- Web Project/Task links from OKR open beside the retained OKR canvas on wide
+  screens. Project, Task and Routine property edits use explicit Save changes;
+  Routine edit/delete actions are visible on each custom Routine. Unassigned
+  Projects/Tasks display their recorded creator without assigning them work.
+- Shared permissions: active workspace Owners/Admins may delete any workspace
+  Project/Task/Ticket; ordinary members keep creator/accountable permissions.
+  Existing workspace-wide completion remains available to administrators. Viewer
+  and cross-workspace boundaries, and personal Daily ownership, are unchanged.
+- Shared data: the existing Project/Task/Routine relationships and frozen native
+  v1 payloads remain compatible. Native reads see the resulting organization.
+- Native editor parity is deferred to the next native UI release; no binary or
+  OTA update is claimed by this web editor change.

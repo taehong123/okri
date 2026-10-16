@@ -86,7 +86,7 @@ import {
   reserveEditorSeat,
   reserveProjectCreation,
 } from "@/lib/billing";
-import { normalizeTeamRole, TEAM_ROLES, type TeamRole } from "@/lib/team-role";
+import { normalizeTeamRole, type TeamRole } from "@/lib/team-role";
 
 export { normalizeTeamRole, TEAM_ROLES, type TeamRole } from "@/lib/team-role";
 
@@ -4503,6 +4503,11 @@ export async function updateItem(
   if (patch.status === "archived") throw new Error("Use the recoverable trash action instead");
 
   const normalizedPatch = { ...patch };
+  if (current.kind === "project" && normalizedPatch.parentId) {
+    const target = await getItem(ownerId, normalizedPatch.parentId);
+    if (!target || target.kind !== "initiative" || target.archivedAt) throw new Error("The target Initiative is not available");
+    normalizedPatch.cycleId = target.cycleId;
+  }
   if (current.kind === "ticket" && normalizedPatch.status !== undefined && !TICKET_STATUSES.includes(normalizedPatch.status as (typeof TICKET_STATUSES)[number])) {
     throw new Error("Ticket status must be backlog, policy_discussion, in_progress, or done");
   }
@@ -4545,11 +4550,24 @@ export async function updateItem(
     updatedAt: new Date().toISOString(),
   };
 
-  const [updated] = await getDb()
+  const updateQuery = getDb()
     .update(items)
     .set(values)
     .where(and(eq(items.ownerId, ownerId), eq(items.id, id)))
     .returning();
+  let updated: PaceItem;
+  if (current.kind === "project" && values.cycleId !== undefined && values.cycleId !== current.cycleId) {
+    const statement = updateQuery.toSQL();
+    const d1 = (env as RuntimeEnv).DB;
+    await d1.batch([
+      d1.prepare(statement.sql).bind(...statement.params),
+      d1.prepare("UPDATE items SET cycle_id = ?, updated_at = ? WHERE owner_id = ? AND parent_id = ? AND kind = 'task'")
+        .bind(values.cycleId, values.updatedAt, ownerId, id),
+    ]);
+    updated = (await getItem(ownerId, id))!;
+  } else {
+    [updated] = await updateQuery;
+  }
 
   await logActivity(ownerId, id, "updated", normalizedPatch.source ?? "web", normalizedPatch);
   if (current.status !== updated.status) {
@@ -4578,7 +4596,13 @@ export class ItemDeletePermissionError extends Error {
 }
 
 export async function getItemDeletePermissionMap(ownerId: string, userId: string, itemRows: PaceItem[]) {
-  const result: Record<string, boolean> = Object.fromEntries(itemRows.map((item) => [item.id, item.createdByUserId === userId]));
+  const [actor] = await getDb().select({ id: workspaceMembers.id, role: workspaceMembers.role }).from(workspaceMembers).where(and(
+    eq(workspaceMembers.workspaceId, ownerId), eq(workspaceMembers.userId, userId), eq(workspaceMembers.status, "active"),
+  )).limit(1);
+  const actorRole = normalizeTeamRole(actor?.role);
+  if (!actor || actorRole === "viewer") return Object.fromEntries(itemRows.map((item) => [item.id, false]));
+  if (actorRole === "owner" || actorRole === "admin") return Object.fromEntries(itemRows.map((item) => [item.id, item.ownerId === ownerId]));
+  const result: Record<string, boolean> = Object.fromEntries(itemRows.map((item) => [item.id, item.ownerId === ownerId && item.createdByUserId === userId]));
   const unresolved = itemRows.filter((item) => !result[item.id] && (item.kind === "project" || item.kind === "task"));
   if (!unresolved.length) return result;
 
@@ -4604,6 +4628,19 @@ export async function getItemDeletePermissionMap(ownerId: string, userId: string
     if (item?.kind === "task" && assignment.role === "task_assignee") result[item.id] = true;
   }
   return result;
+}
+
+export async function getItemCreatorMap(ownerId: string, itemRows: PaceItem[]) {
+  const scopedItems = itemRows.filter((item) => item.ownerId === ownerId);
+  const creatorIds = [...new Set(scopedItems.map((item) => item.createdByUserId).filter((id): id is string => Boolean(id)))];
+  if (!creatorIds.length) return {} as Record<string, string>;
+  const rows = await (env as RuntimeEnv).DB.prepare(`SELECT u.id, COALESCE(NULLIF(m.display_name, ''), NULLIF(u.display_name, '')) AS name
+    FROM users u LEFT JOIN workspace_members m ON m.user_id = u.id AND m.workspace_id = ?
+    WHERE u.id IN (SELECT value FROM json_each(?))
+      AND EXISTS (SELECT 1 FROM items i WHERE i.owner_id = ? AND i.created_by_user_id = u.id)`)
+    .bind(ownerId, JSON.stringify(creatorIds), ownerId).all<{ id: string; name: string | null }>();
+  const names = new Map(rows.results.map((row) => [row.id, row.name ?? ""]));
+  return Object.fromEntries(scopedItems.map((item) => [item.id, names.get(item.createdByUserId ?? "") ?? ""]));
 }
 
 async function assertItemDeletePermission(ownerId: string, userId: string, itemRows: PaceItem[]) {
@@ -6712,6 +6749,7 @@ export function serializeItem(
   item: PaceItem,
   properties: Record<string, PropertyValue> = {},
   assignments: ItemAssignmentSummary[] = [],
+  creatorDisplayName = "",
 ) {
   const status = item.kind === "task" && item.status !== "archived"
     ? normalizeTaskStatus(item.status as ItemStatus)
@@ -6731,6 +6769,7 @@ export function serializeItem(
     dueDate: item.dueDate,
     source: item.source,
     createdByUserId: item.createdByUserId,
+    creatorDisplayName,
     archivedAt: item.archivedAt,
     archivedFromStatus: item.archivedFromStatus,
     archiveRootId: item.archiveRootId,

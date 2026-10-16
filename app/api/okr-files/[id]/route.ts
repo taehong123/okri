@@ -56,8 +56,8 @@ export async function PUT(request: Request, context: { params: Promise<{ id: str
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
-  if (error instanceof OkrFileConflictError) return Response.json({ error: message }, { status: 409 });
-  if (error instanceof ItemDeletePermissionError || /cannot move .* to trash/i.test(message)) return Response.json({ error: message }, { status: 403 });
+  if (error instanceof OkrFileConflictError) return Response.json({ error: message, file: error.file }, { status: 409 });
+  if (error instanceof ItemDeletePermissionError || /cannot (move .* to trash|convert .* to a Routine)/i.test(message)) return Response.json({ error: message }, { status: 403 });
   const status = /required|invalid|unsupported|at most|before|belong|available|not found|split|resolution|target/i.test(message) ? 400 : 500;
   return Response.json({ error: message }, { status });
 }

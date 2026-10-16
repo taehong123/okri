@@ -15,7 +15,7 @@ import {
 import { t } from "@/lib/client-language";
 
 export type OverlayCloseReason = "backdrop" | "escape" | "close-button" | "history";
-export type OverlayVariant = "modal" | "drawer" | "sheet";
+export type OverlayVariant = "modal" | "drawer" | "sheet" | "docked";
 export type OverlayDismissPolicy = "normal" | "critical";
 
 type OverlayDialogProps = {
@@ -72,6 +72,14 @@ export function OverlayDialog({
   const discardFocusRef = useRef<HTMLButtonElement>(null);
   const requestCloseRef = useRef<(reason?: OverlayCloseReason) => void>(() => undefined);
   const [confirmingDiscard, setConfirmingDiscard] = useState(false);
+  const [wide, setWide] = useState(() => typeof window !== "undefined" && window.matchMedia("(min-width: 72rem)").matches);
+  const modeless = variant === "docked" && wide;
+  useEffect(() => {
+    const media = window.matchMedia("(min-width: 72rem)");
+    const update = () => setWide(media.matches);
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   const finishClose = useCallback((reason: OverlayCloseReason) => {
     onRequestClose(reason);
@@ -111,12 +119,12 @@ export function OverlayDialog({
     if (!dialog) return;
     returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     overlayStack.push(overlayId);
-    if (bodyOverlayCount === 0) {
+    if (!modeless && bodyOverlayCount === 0) {
       previousBodyOverflow = document.body.style.overflow;
       document.body.style.overflow = "hidden";
     }
-    bodyOverlayCount += 1;
-    if (!dialog.open) dialog.showModal();
+    if (!modeless) bodyOverlayCount += 1;
+    if (!dialog.open) { if (modeless) dialog.show(); else dialog.showModal(); }
     const focusTarget = initialFocus ? dialog.querySelector<HTMLElement>(initialFocus) : null;
     window.requestAnimationFrame(() => (focusTarget ?? dialog.querySelector<HTMLElement>("button, input, select, textarea, [tabindex]:not([tabindex='-1'])"))?.focus());
 
@@ -131,13 +139,23 @@ export function OverlayDialog({
       requestCloseRef.current("history");
     };
     window.addEventListener("popstate", handlePopState);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (modeless && event.key === "Escape" && !event.defaultPrevented && isTopOverlay(overlayId)) {
+        event.preventDefault();
+        requestCloseRef.current("escape");
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
 
     return () => {
       window.removeEventListener("popstate", handlePopState);
+      document.removeEventListener("keydown", handleKeyDown);
       const index = overlayStack.lastIndexOf(overlayId);
       if (index >= 0) overlayStack.splice(index, 1);
-      bodyOverlayCount = Math.max(0, bodyOverlayCount - 1);
-      if (bodyOverlayCount === 0) document.body.style.overflow = previousBodyOverflow;
+      if (!modeless) {
+        bodyOverlayCount = Math.max(0, bodyOverlayCount - 1);
+        if (bodyOverlayCount === 0) document.body.style.overflow = previousBodyOverflow;
+      }
       if (dialog.open) dialog.close();
       if (window.history.state?.__okriOverlay === overlayId) {
         const nextState = { ...window.history.state };
@@ -146,7 +164,7 @@ export function OverlayDialog({
       }
       returnFocusRef.current?.focus({ preventScroll: true });
     };
-  }, [initialFocus, overlayId, useHistory]);
+  }, [initialFocus, overlayId, useHistory, modeless]);
 
   useEffect(() => {
     if (confirmingDiscard) discardFocusRef.current?.focus();
@@ -160,7 +178,7 @@ export function OverlayDialog({
   return (
     <dialog
       ref={dialogRef}
-      className={`modal-backdrop overlay-dialog overlay-${variant} ${variant === "drawer" ? "align-right" : ""} ${className}`.trim()}
+      className={`modal-backdrop overlay-dialog overlay-${variant} ${variant === "drawer" || variant === "docked" ? "align-right" : ""} ${className}`.trim()}
       aria-labelledby={`${overlayId}-title`}
       onClick={handleBackdropClick}
       onCancel={(event) => {

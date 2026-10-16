@@ -59,7 +59,7 @@
 .task-detail-panel .task-completion-toggle { margin: var(--space-3) var(--editor-inset); width: fit-content; font-size: var(--type-label); font-weight: 500; border-color: var(--border-default); }
 .document-properties-toggle:focus-visible, .document-related > summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; border-radius: var(--radius-control); }
 .app-shell .routine-card { padding: var(--space-4) 0; border-width: 0 0 1px; border-radius: 0; background: transparent; }
-.app-shell .routine-card > header { grid-template-columns: var(--control-height) minmax(0, 1fr); }
+.app-shell .routine-card > header { grid-template-columns: var(--control-height) minmax(0, 1fr) auto; }
 .routine-card .document-properties { padding-inline: 0; }
 .routine-document-body { display: grid; gap: var(--space-6); padding: var(--space-4) 0 var(--space-6); }
 .routine-document-body h3 { margin: 0 0 var(--space-2); font-size: var(--type-section); font-weight: 600; line-height: 1.4; }

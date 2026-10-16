@@ -10,6 +10,7 @@ import {
   type ItemStatus,
   type OkrCycleStatus,
 } from "@/lib/pace-data";
+import { prepareRoutineProperties } from "@/lib/routine-properties";
 
 type RuntimeEnv = typeof env & { DB: D1Database };
 
@@ -47,7 +48,7 @@ export type OkrFileObjectiveInput = {
 
 export type OkrProjectResolutionInput = {
   projectId: string;
-  action: "move" | "trash";
+  action: "move" | "trash" | "routine";
   targetInitiativeRef?: string | null;
 };
 
@@ -138,7 +139,7 @@ type NormalizedNode = {
 };
 
 export class OkrFileConflictError extends Error {
-  constructor() {
+  constructor(public file?: OkrFileResponse) {
     super("OKR file changed while you were editing it");
     this.name = "OkrFileConflictError";
   }
@@ -200,7 +201,7 @@ export async function prepareOkrFileCreation(ownerId: string, userId: string, in
 export async function updateOkrFile(ownerId: string, userId: string, cycleId: string, input: OkrFileSaveInput): Promise<OkrFileResponse> {
   const context = await loadOkrFileContext(ownerId, userId, cycleId);
   if (context.okrItems.filter((item) => item.kind === "objective").length > 1) throw new Error("Split this OKR file before editing it");
-  if (!input.expectedRevision || input.expectedRevision !== context.revision) throw new OkrFileConflictError();
+  if (!input.expectedRevision || input.expectedRevision !== context.revision) throw new OkrFileConflictError(serializeOkrFile(context));
 
   const normalized = normalizeSaveInput(input, context);
   const currentById = new Map(context.okrItems.map((item) => [item.id, item]));
@@ -210,6 +211,15 @@ export async function updateOkrFile(ownerId: string, userId: string, cycleId: st
   const removedInitiativeIds = new Set(removedRows.filter((item) => item.kind === "initiative").map((item) => item.id));
   const impactedProjects = context.projects.filter((project) => project.parentId && removedInitiativeIds.has(project.parentId));
   const resolutionByProject = new Map((input.projectResolutions ?? []).map((resolution) => [resolution.projectId, resolution]));
+  if (resolutionByProject.size !== (input.projectResolutions ?? []).length) throw new Error("Duplicate Project resolution is invalid");
+  for (const resolution of resolutionByProject.values()) {
+    if (!context.projects.some((project) => project.id === resolution.projectId)) throw new Error("Project resolution does not belong to this file");
+    if (!["move", "trash", "routine"].includes(resolution.action)) throw new Error("Unsupported Project resolution");
+  }
+  for (const project of impactedProjects) {
+    if (!resolutionByProject.has(project.id)) throw new Error(`Project resolution is required for ${project.title}`);
+  }
+  const resolvedProjects = context.projects.filter((project) => resolutionByProject.has(project.id));
   const normalizedByRef = new Map<string, NormalizedNode>();
   for (const node of normalized.nodes.filter((entry) => entry.kind === "initiative")) {
     normalizedByRef.set(node.clientId, node);
@@ -218,7 +228,7 @@ export async function updateOkrFile(ownerId: string, userId: string, cycleId: st
   const activeInitiatives = new Map(context.allInitiatives.filter((item) => !removedIds.has(item.id)).map((item) => [item.id, item]));
   const d1 = (env as RuntimeEnv).DB;
   const now = new Date().toISOString();
-  const statements: D1PreparedStatement[] = [];
+  const statements: D1PreparedStatement[] = [fileRevisionGuard(d1, ownerId, context)];
   const rules = await getWorkspaceRules(ownerId);
 
   if (normalized.metadata.status === "active") {
@@ -242,12 +252,41 @@ export async function updateOkrFile(ownerId: string, userId: string, cycleId: st
     }
   }
 
-  for (const project of impactedProjects) {
-    const resolution = resolutionByProject.get(project.id);
-    if (!resolution) throw new Error(`Project resolution is required for ${project.title}`);
+  for (const project of resolvedProjects) {
+    const resolution = resolutionByProject.get(project.id)!;
     if (resolution.action === "trash") {
       if (!context.permissions[project.id]) throw new Error(`You cannot move ${project.title} to trash`);
       statements.push(...trashProjectStatements(d1, ownerId, project.id, now));
+      continue;
+    }
+    if (resolution.action === "routine") {
+      if (!context.permissions[project.id]) throw new Error(`You cannot convert ${project.title} to a Routine`);
+      const properties = await prepareRoutineProperties(d1, ownerId, {}, true);
+      // Keep the Project ID as the Routine ID so copied document image links can
+      // resolve their original objects. The original Project remains recoverable.
+      statements.push(
+        d1.prepare(`INSERT INTO routines
+          (id, owner_id, title, description, cadence, assignee_member_id, sort_order,
+           document_content, document_plain_text, document_version, document_updated_at,
+           properties_json, created_at, updated_at)
+          SELECT p.id, p.owner_id, p.title, p.description, p.cadence,
+            (SELECT a.member_id FROM item_assignments a JOIN workspace_members m ON m.id = a.member_id
+              WHERE a.owner_id = p.owner_id AND a.item_id = p.id AND a.role = 'project_dri'
+                AND m.workspace_id = p.owner_id AND m.status = 'active' LIMIT 1),
+            COALESCE((SELECT MAX(sort_order) FROM routines WHERE owner_id = p.owner_id), 0) + 10,
+            COALESCE(d.content, '[]'), COALESCE(d.plain_text, ''), COALESCE(d.version, 0),
+            d.updated_at, ?, ?, ?
+          FROM items p LEFT JOIN project_documents d ON d.owner_id = p.owner_id AND d.project_id = p.id
+          WHERE p.owner_id = ? AND p.id = ? AND p.kind = 'project' AND p.archived_at IS NULL`)
+          .bind(JSON.stringify(properties), now, now, ownerId, project.id),
+        d1.prepare(`UPDATE items SET parent_id = NULL, routine_id = ?, cycle_id = NULL,
+            archive_root_id = CASE WHEN archived_at IS NOT NULL AND archive_root_id = ? THEN id ELSE archive_root_id END,
+            updated_at = ?
+          WHERE owner_id = ? AND parent_id = ? AND kind = 'task'`)
+          .bind(project.id, project.id, now, ownerId, project.id),
+        ...trashProjectStatements(d1, ownerId, project.id, now),
+        activityStatement(d1, ownerId, project.id, "project_converted_to_routine", { routineId: project.id }, now),
+      );
       continue;
     }
     const targetRef = resolution.targetInitiativeRef?.trim();
@@ -281,10 +320,18 @@ export async function updateOkrFile(ownerId: string, userId: string, cycleId: st
     cycleId,
     removedKeyResultCount: removedRows.filter((item) => item.kind === "key_result").length,
     removedInitiativeCount: removedRows.filter((item) => item.kind === "initiative").length,
-    movedProjectCount: impactedProjects.filter((project) => resolutionByProject.get(project.id)?.action === "move").length,
-    trashedProjectCount: impactedProjects.filter((project) => resolutionByProject.get(project.id)?.action === "trash").length,
+    movedProjectCount: resolvedProjects.filter((project) => resolutionByProject.get(project.id)?.action === "move").length,
+    trashedProjectCount: resolvedProjects.filter((project) => resolutionByProject.get(project.id)?.action === "trash").length,
+    convertedRoutineCount: resolvedProjects.filter((project) => resolutionByProject.get(project.id)?.action === "routine").length,
   }, now));
-  await d1.batch(statements);
+  try {
+    await d1.batch(statements);
+  } catch (error) {
+    if (/malformed JSON/i.test(error instanceof Error ? error.message : String(error))) {
+      throw new OkrFileConflictError(await getOkrFile(ownerId, userId, cycleId));
+    }
+    throw error;
+  }
   return getOkrFile(ownerId, userId, cycleId);
 }
 
@@ -530,11 +577,39 @@ function activityStatement(d1: D1Database, ownerId: string, itemId: string, acti
 
 async function calculateRevision(cycle: OkrCycle, rows: PaceItem[]) {
   const source = JSON.stringify({
-    cycle: [cycle.id, cycle.name, cycle.department, cycle.startDate, cycle.endDate, cycle.status, cycle.updatedAt],
-    rows: rows.sort((left, right) => left.id.localeCompare(right.id)).map((item) => [item.id, item.kind, item.parentId, item.cycleId, item.status, item.updatedAt]),
+    cycle: cycleSnapshot(cycle),
+    rows: itemSnapshot(rows),
   });
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+function cycleSnapshot(cycle: OkrCycle) {
+  return [cycle.id, cycle.name, cycle.department, cycle.startDate, cycle.endDate, cycle.status, cycle.updatedAt];
+}
+
+function itemSnapshot(rows: PaceItem[]) {
+  return [...rows].sort((a, b) => a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
+    .map((item) => [item.id, item.kind, item.parentId, item.cycleId, item.title, item.status, item.progress, item.sortOrder, item.updatedAt]);
+}
+
+// A change after the initial read must abort the whole batch, including Project
+// moves/conversions. Retrying against the returned revision keeps the draft.
+function fileRevisionGuard(d1: D1Database, ownerId: string, context: OkrFileContext) {
+  return d1.prepare(`SELECT CASE WHEN
+    (SELECT json_array(id, name, department, start_date, end_date, status, updated_at)
+      FROM okr_cycles WHERE owner_id = ? AND id = ?) = ?
+    AND (SELECT json_group_array(json_array(id, kind, parent_id, cycle_id, title, status, progress, sort_order, updated_at))
+      FROM (SELECT * FROM items WHERE owner_id = ? AND archived_at IS NULL AND (
+        (cycle_id = ? AND kind IN ('objective', 'key_result', 'initiative'))
+        OR (kind = 'project' AND parent_id IN (SELECT id FROM items WHERE owner_id = ? AND cycle_id = ? AND kind = 'initiative' AND archived_at IS NULL))
+        OR (kind = 'task' AND parent_id IN (SELECT p.id FROM items p JOIN items i ON i.id = p.parent_id AND i.owner_id = p.owner_id
+          WHERE p.owner_id = ? AND p.kind = 'project' AND p.archived_at IS NULL AND i.cycle_id = ? AND i.kind = 'initiative' AND i.archived_at IS NULL))
+      ) ORDER BY id)) = ?
+    THEN 1 ELSE json('okr_file_revision_conflict') END`)
+    .bind(ownerId, context.cycle.id, JSON.stringify(cycleSnapshot(context.cycle)),
+      ownerId, context.cycle.id, ownerId, context.cycle.id, ownerId, context.cycle.id,
+      JSON.stringify(itemSnapshot([...context.okrItems, ...context.projects, ...context.projectTasks])));
 }
 
 function serializeCycle(cycle: OkrCycle) {

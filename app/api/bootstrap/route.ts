@@ -7,6 +7,7 @@ import {
   canManageTeam,
   ensureWorkspace,
   getItemAssignmentMap,
+  getItemCreatorMap,
   getProjectHiddenPropertyMap,
   getProjectPropertyUsageCounts,
   getProjectPropertyValueMap,
@@ -86,17 +87,18 @@ async function loadBootstrap(request: Request) {
         listArchivedProjects(authorization.ownerId),
         listRoutines(authorization.ownerId, date, true),
       ]);
-      const [itemAssignments, archiveAssignments] = await Promise.all([
+      const [itemAssignments, archiveAssignments, creators] = await Promise.all([
         getItemAssignmentMap(authorization.ownerId, itemRows.map((item) => item.id)),
         getItemAssignmentMap(authorization.ownerId, archivedRows.map((entry) => entry.project.id)),
+        getItemCreatorMap(authorization.ownerId, [...itemRows, ...archivedRows.map((entry) => entry.project)]),
       ]);
       return {
-        items: itemRows.map((item) => serializeItem(item, {}, itemAssignments[item.id] ?? [])),
+        items: itemRows.map((item) => serializeItem(item, {}, itemAssignments[item.id] ?? [], creators[item.id])),
         properties: propertyRows.map((property) => serializePropertyDefinition(property, propertyUsageCounts[property.id] ?? 0)),
         propertyValues,
         hiddenByProject,
         archivedProjects: archivedRows.map((entry) => ({
-          ...serializeItem(entry.project, {}, archiveAssignments[entry.project.id] ?? []),
+          ...serializeItem(entry.project, {}, archiveAssignments[entry.project.id] ?? [], creators[entry.project.id]),
           archivedTaskCount: entry.taskCount,
         })),
         routines,

@@ -50,8 +50,9 @@ test("Project reads as a document; only Change opens property controls", async (
   await expect(editor).toBeVisible();
   await expect(editor.getByLabel("Project 이름", { exact: true })).toBeFocused();
   await editor.getByLabel("기한", { exact: true }).fill("2026-10-01");
+  expect(writes).toEqual([]);
+  await editor.getByRole("button", { name: "변경사항 저장", exact: true }).click();
   await expect.poll(() => writes.some(write => write.data.dueDate === "2026-10-01")).toBe(true);
-  await page.keyboard.press("Escape");
   await expect(editor).toHaveCount(0);
   await expect(properties.getByRole("button", { name: "변경", exact: true })).toBeFocused();
   await expect(panel).toBeVisible();

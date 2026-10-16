@@ -134,7 +134,7 @@ function navigationFromLocation() {
   const requestedView = (rawView === "kr_data" ? "data" : rawView) as View | null;
   const projectId = params.get("project");
   return {
-    view: projectId ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : params.get("guide") === "1" ? "home" : "okr",
+    view: projectId && requestedView !== "okr" ? "work" : requestedView && urlViews.has(requestedView) ? requestedView : params.get("guide") === "1" ? "home" : "okr",
     projectId,
     ticketId: projectId ? null : params.get("ticket"),
     taskId: projectId ? null : params.get("task"),
@@ -192,6 +192,7 @@ type OkriItem = {
   dueDate: string | null;
   source: string;
   createdByUserId: string | null;
+  creatorDisplayName?: string;
   archivedAt: string | null;
   archivedFromStatus: ItemStatus | null;
   archiveRootId: string | null;
@@ -1997,8 +1998,9 @@ function WorkspaceApp() {
     setSelectedTaskId(null);
     setSelectedTicketId(null);
     setSelectedProjectId(id);
-    setActiveView("work");
-    writeNavigation("work", id, null);
+    const view = activeView === "okr" ? "okr" : "work";
+    setActiveView(view);
+    writeNavigation(view, id, null);
   }
 
   function addCreatedItem(created: OkriItem, initialValues: Record<string, PropertyValue> = {}, warning?: string) {
@@ -2488,7 +2490,7 @@ function WorkspaceApp() {
             onNotice={(message) => showNotice(message, "error")}
           />}
           {!setupOpen && authState.user?.onboarding && authState.user.onboarding.status !== "completed" && <button type="button" onClick={() => setSetupOpen(true)}>{t("처음 설정 이어하기")}<ChevronRight size={14} /></button>}
-          {activeView !== "home" && !selectedProject && <header className="page-header">
+          {activeView !== "home" && (!selectedProject || activeView === "okr") && <header className="page-header">
             <div><h1>{viewTitles[activeView]}</h1>{activeView === "billing" && <p>{currentWorkspace?.name} · {pageSubtitle(activeView)}</p>}</div>
             {activeView === "okr" ? (
               <button className="primary-action" onClick={() => setOkrListOpen(true)}><Archive size={14} />{t("목록보기")}</button>
@@ -2539,10 +2541,12 @@ function WorkspaceApp() {
             />
           </div>
 
-          {selectedProject ? (
+          {selectedProject && (
             <ProjectPageView
               key={selectedProject.id}
               project={selectedProject}
+              docked={activeView === "okr"}
+              onPropertiesSaved={() => { clearCachedBootstrap(); setWorkspaceDataAttempt((current) => current + 1); }}
               allItems={items}
               properties={properties}
               propertyValues={propertyValues}
@@ -2564,7 +2568,8 @@ function WorkspaceApp() {
               selectedItemIds={selectedDeleteItemIds}
               onToggleSelect={toggleDeleteSelection}
             />
-          ) : (
+          )}
+          {(!selectedProject || activeView === "okr") && (
             <>
           {activeView === "my_work" && <MyWorkView key={`${currentWorkspace?.id ?? ""}:${currentTeamMember?.id ?? ""}`} workspaceId={currentWorkspace?.id ?? ""} items={activeItems} routines={routines} currentMember={currentTeamMember ?? null} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} onRoutinesChange={setRoutines} onNotice={showNotice} />}
           {activeView === "inbox" && <TaskListView items={taskItems} allItems={items} routines={routines} onOpenTask={openTaskDetail} onPatch={patchItem} canDeleteItem={(item) => deletableItemIds.has(item.id)} selectedItemIds={selectedDeleteItemIds} onToggleSelect={toggleDeleteSelection} onSelectItems={addDeleteItems} onClearItems={removeDeleteItems} onTrashSelected={() => void moveSelectedItemsToTrash()} trashing={trashingItems} />}
@@ -2797,7 +2802,17 @@ function WorkspaceApp() {
       {cleanupOpen && <CleanupModal onClose={() => setCleanupOpen(false)} onCleaned={(cycle) => { setItems([]); setPropertyValues({}); setOkrCycles([cycle]); setVisibleOkrCycleIds([cycle.id]); setSelectedTaskId(null); navigateView("trash"); setCleanupOpen(false); showNotice(t("OKR 데이터를 휴지통에 보관하고 정리했습니다.")); }} onNotice={showNotice} />}
       {selectedTask && (
         <TaskDetailPanel
+          key={selectedTask.id}
           task={selectedTask}
+          docked={activeView === "okr"}
+          onArchive={async () => {
+            if (!await confirmAction({ title: t("휴지통으로 이동"), message: t("'{value1}' 항목을 삭제합니다.", { value1: messageValue(selectedTask.title) }), confirmLabel: t("휴지통으로 이동"), danger: true })) return;
+            const response = await fetch("/api/item-trash", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ itemIds: [selectedTask.id] }) });
+            if (!response.ok) { showNotice(t("변경사항을 저장하지 못했습니다.")); return; }
+            setItems((current) => current.filter((item) => item.id !== selectedTask.id));
+            closeDetail();
+            clearCachedBootstrap();
+          }}
           readOnly={!canWriteWorkspace}
           allItems={activeItems}
           routines={routines}
@@ -3299,8 +3314,48 @@ function documentPropertyValue(property: PropertyDefinition, value: PropertyValu
   return Array.isArray(value) ? value.join(", ") : String(value);
 }
 
-function ProjectPageView({ project, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onBackToList, onPatch, onPropertyChange, onPropertyVisibility, onAssignmentsChange, onTaskCreated, onItemsRefresh, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
+function useItemPropertyDraft(item: OkriItem, savePatch: (patch: Partial<OkriItem>) => Promise<unknown>, assignmentsChanged: (assignments: ItemAssignment[]) => void, refresh: () => void = () => {}) {
+  const [patch, setPatch] = useState<Partial<OkriItem>>({});
+  const [assignments, setAssignments] = useState<Partial<Record<ItemAssignmentRole, string[]>>>({});
+  const [values, setValues] = useState<Record<string, PropertyValue>>({});
+  const [visibility, setVisibility] = useState<Record<string, boolean>>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const dirty = Boolean(Object.keys(patch).length || Object.keys(assignments).length || Object.keys(values).length || Object.keys(visibility).length);
+  function reset() { setPatch({}); setAssignments({}); setValues({}); setVisibility({}); setError(""); }
+  async function write(path: string, body: Record<string, unknown>) {
+    const response = await fetch(path, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!response.ok) throw new Error(t("변경사항을 저장하지 못했습니다."));
+    return response.json();
+  }
+  async function save(close: () => void) {
+    if (busy || !dirty) return;
+    if (patch.title !== undefined && !patch.title.trim()) { setError(t("제목을 입력해 주세요.")); return; }
+    setBusy(true); setError("");
+    try {
+      if (Object.keys(patch).length && await savePatch(patch) === false) throw new Error(t("변경사항을 저장하지 못했습니다."));
+      for (const [role, memberIds] of Object.entries(assignments)) {
+        const data = await write("/api/item-assignments", { itemId: item.id, role, memberIds }) as { assignments: ItemAssignment[] };
+        assignmentsChanged(data.assignments);
+      }
+      for (const [propertyId, value] of Object.entries(values)) await write("/api/property-values", { itemId: item.id, propertyId, value });
+      for (const [propertyId, hidden] of Object.entries(visibility)) await write("/api/project-property-visibility", { projectId: item.id, propertyId, hidden });
+      reset(); refresh(); close();
+    } catch (failure) { refresh(); setError(failure instanceof Error ? failure.message : t("변경사항을 저장하지 못했습니다.")); }
+    finally { setBusy(false); }
+  }
+  return { item: { ...item, ...patch }, assignments, values, visibility, dirty, busy, error, reset, save,
+    patch: (next: Partial<OkriItem>) => setPatch((current) => ({ ...current, ...next })),
+    assign: (role: ItemAssignmentRole, ids: string[]) => setAssignments((current) => ({ ...current, [role]: ids })),
+    value: (id: string, value: PropertyValue) => setValues((current) => ({ ...current, [id]: value })),
+    hide: (id: string, hidden: boolean) => setVisibility((current) => ({ ...current, [id]: hidden })),
+  };
+}
+
+function ProjectPageView({ project, docked = false, onPropertiesSaved, allItems, properties, propertyValues, hiddenPropertyIds, teamMembers, onClose, onBackToList, onPatch, onAssignmentsChange, onTaskCreated, onItemsRefresh, onOpenTask, readOnly, onNotice, onArchive, canDeleteItem, selectedItemIds, onToggleSelect }: {
   project: OkriItem;
+  docked?: boolean;
+  onPropertiesSaved: () => void;
   onBackToList: () => void;
   allItems: OkriItem[];
   properties: PropertyDefinition[];
@@ -3323,6 +3378,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   onToggleSelect: (id: string) => void;
 }) {
   const confirmAction = useAppConfirm();
+  const propertyEditor = useItemPropertyDraft(project, (patch) => onPatch(project.id, patch), (assignments) => onAssignmentsChange(project.id, assignments), onPropertiesSaved);
   const [quickTaskTitle, setQuickTaskTitle] = useState("");
   const [creatingTask, setCreatingTask] = useState(false);
   const [addingTask, setAddingTask] = useState(false);
@@ -3339,12 +3395,9 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   const activeProperties = properties.filter((property) => property.active);
   const customProperties = activeProperties.filter((property) => !property.systemKey);
   const visibleProperties = customProperties.filter((property) => !hiddenPropertyIds.includes(property.id));
-  const hiddenPropertyDefinitions = activeProperties.filter((property) => hiddenPropertyIds.includes(property.id));
   const systemProperties = new Map(properties.filter((property) => property.systemKey).map((property) => [property.systemKey!, property]));
   const linkedTasks = allItems.filter((entry) => entry.kind === "task" && entry.parentId === project.id && !entry.archivedAt);
   const deletableLinkedTasks = linkedTasks.filter(canDeleteItem);
-  const driIds = project.assignments.filter((entry) => entry.role === "project_dri").map((entry) => entry.memberId);
-  const workerIds = project.assignments.filter((entry) => entry.role === "project_worker").map((entry) => entry.memberId);
 
   useEffect(() => { progressBotRefreshHandler.current = onItemsRefresh; }, [onItemsRefresh]);
   useEffect(() => { progressBotNoticeHandler.current = onNotice; }, [onNotice]);
@@ -3413,17 +3466,6 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
   ].filter(entry => systemPropertyVisible(entry.key));
   propertyEntries.push(...visibleProperties.map(property => ({ key: property.id, label: systemPropertyLabel(property, t), value: documentPropertyValue(property, propertyValues[project.id]?.[property.id] ?? null, teamMembers) })));
 
-  async function saveAssignments(role: "project_dri" | "project_worker", memberIds: string[]) {
-    const response = await fetch("/api/item-assignments", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId: project.id, role, memberIds }),
-    });
-    if (!response.ok) { onNotice(t("담당자를 저장하지 못했습니다.")); return; }
-    const data = await response.json() as { assignments: ItemAssignment[] };
-    onAssignmentsChange(project.id, data.assignments);
-  }
-
   async function saveTaskAssignee(task: OkriItem, memberId: string) {
     const response = await fetch("/api/item-assignments", {
       method: "PATCH",
@@ -3453,7 +3495,7 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
     onNotice(t("Project에 Task를 추가했습니다."));
   }
   return (
-    <OverlayDialog title={t("{value1} Project 상세", { value1: messageValue(project.title) })} variant="drawer" dirty={Boolean(quickTaskTitle.trim())} history={false} onRequestClose={() => onClose()}>
+    <OverlayDialog title={t("{value1} Project 상세", { value1: messageValue(project.title) })} variant={docked ? "docked" : "drawer"} dirty={Boolean(quickTaskTitle.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className={`property-panel project-detail-panel ${project.status === "archived" ? "archived" : ""}`}>
         <header className="project-page-head">
           <div>
@@ -3469,9 +3511,21 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
         <LocalAgentLauncher targetKind="project" targetId={project.id} targetTitle={project.title} readOnly={readOnly} onNotice={onNotice} />
         <div className="project-detail-content">
           <aside className="project-context-column" aria-label={t("Project 정보")}>
-        <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
+        <DocumentProperties entries={propertyEntries} readOnly={readOnly} autoSave={false} dirty={propertyEditor.dirty} onEditorOpen={propertyEditor.reset} onEditorClose={propertyEditor.reset}>{(close) => {
+          const project = propertyEditor.item;
+          const onPatch = async (_id: string, patch: Partial<OkriItem>) => propertyEditor.patch({ ...patch, ...(patch.parentId ? { cycleId: allItems.find((item) => item.id === patch.parentId)?.cycleId ?? null } : {}) });
+          const onPropertyVisibility = (id: string, hidden: boolean) => propertyEditor.hide(id, hidden);
+          const onPropertyChange = async (_itemId: string, id: string, value: PropertyValue) => propertyEditor.value(id, value);
+          const saveAssignments = (role: "project_dri" | "project_worker", ids: string[]) => propertyEditor.assign(role, ids);
+          const driIds = propertyEditor.assignments.project_dri ?? project.assignments.filter((entry) => entry.role === "project_dri").map((entry) => entry.memberId);
+          const workerIds = propertyEditor.assignments.project_worker ?? project.assignments.filter((entry) => entry.role === "project_worker").map((entry) => entry.memberId);
+          const hidden = (id: string) => propertyEditor.visibility[id] ?? hiddenPropertyIds.includes(id);
+          const visibleProperties = customProperties.filter((property) => !hidden(property.id));
+          const hiddenPropertyDefinitions = activeProperties.filter((property) => hidden(property.id));
+          const systemPropertyVisible = (key: string) => { const property = systemProperty(key); return property ? property.active && !hidden(property.id) : true; };
+          return <fieldset className="item-property-draft" disabled={propertyEditor.busy}>
         <form className="property-form project-detail-form" onSubmit={event => event.preventDefault()}>
-          <label><span>{t("Project 이름")}</span><textarea aria-label={t("Project 이름")} defaultValue={project.title} rows={2} onBlur={event => { const title = event.target.value.trim(); if (title && title !== project.title) void onPatch(project.id, { title }); }} /></label>
+          <label><span>{t("Project 이름")}</span><textarea aria-label={t("Project 이름")} value={project.title} rows={2} onChange={event => propertyEditor.patch({ title: event.target.value })} /></label>
           {systemPropertyVisible("parent_id") && <ProjectSystemPropertySlot property={systemProperty("parent_id")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("parent_id"), t, "상위 Initiative")}</span><select disabled={readOnly} value={project.parentId ?? ""} onChange={(event) => void onPatch(project.id, { parentId: event.target.value || null })}><option value="">{t("선택")}</option>{initiatives.map((entry) => <option value={entry.id} key={entry.id}>{entry.title}</option>)}</select></label></ProjectSystemPropertySlot>}
           <div className="project-field-grid">
             {systemPropertyVisible("priority") && <ProjectSystemPropertySlot property={systemProperty("priority")} readOnly={readOnly} onHide={onPropertyVisibility}><label><span>{systemPropertyLabel(systemProperty("priority"), t, "우선순위")}</span><select disabled={readOnly} className={`priority-${project.priority}`} value={project.priority} onChange={(event) => void onPatch(project.id, { priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label></ProjectSystemPropertySlot>}
@@ -3482,12 +3536,14 @@ function ProjectPageView({ project, allItems, properties, propertyValues, hidden
           {teamMembers.length > 0 && systemPropertyVisible("project_workers") && <ProjectSystemPropertySlot property={systemProperty("project_workers")} readOnly={readOnly} onHide={onPropertyVisibility}><MemberMentionPicker label={systemPropertyLabel(systemProperty("project_workers"), t, "하위 업무자")} members={teamMembers} selectedIds={workerIds} disabled={readOnly} onChange={(ids) => !readOnly && void saveAssignments("project_worker", ids)} placeholder={t("@실명으로 여러 명 태그")} /></ProjectSystemPropertySlot>}
         </form>
         <section className="project-custom-properties">
-          <header><b>{t("Project 속성")}</b><span>{readOnly ? t("읽기 전용") : t("변경 즉시 저장")}</span></header>
-          {visibleProperties.length ? <div className="project-field-grid">{visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />)}</div> : <EmptyState icon={Settings2} title={t("표시 중인 커스텀 속성이 없습니다")} />}
+          <header><b>{t("Project 속성")}</b></header>
+          {visibleProperties.length ? <div className="project-field-grid">{visibleProperties.map((property) => <ProjectPropertyField key={property.id} projectId={project.id} property={property} value={Object.hasOwn(propertyEditor.values, property.id) ? propertyEditor.values[property.id] : propertyValues[project.id]?.[property.id] ?? null} members={teamMembers} readOnly={readOnly} onChange={onPropertyChange} onHide={() => onPropertyVisibility(property.id, true)} />)}</div> : <EmptyState icon={Settings2} title={t("표시 중인 커스텀 속성이 없습니다")} />}
           {hiddenPropertyDefinitions.length > 0 && <div className="hidden-property-list"><span>{t("숨긴 속성")}{hiddenPropertyDefinitions.length}</span>{hiddenPropertyDefinitions.map((property) => <button type="button" disabled={readOnly} key={property.id} onClick={() => onPropertyVisibility(property.id, false)}><Eye size={13} />{systemPropertyLabel(property, t)}</button>)}</div>}
         </section>
         <div className="project-progress-bot-control"><span><Bot size={15} />{t("진행사항 봇")}</span><label className="project-bot-switch"><input type="checkbox" checked={progressBotEnabled} onChange={event => setProgressBot(event.target.checked)} aria-label={t("진행사항 봇 사용")} /><span aria-hidden="true" /></label></div>
-        </>}</DocumentProperties>
+        {propertyEditor.error && <p role="alert">{propertyEditor.error}</p>}
+        <footer><button type="button" className="secondary" onClick={close}>{t("취소")}</button><button type="button" className="primary-action" disabled={!propertyEditor.dirty || propertyEditor.busy} aria-busy={propertyEditor.busy} onClick={() => void propertyEditor.save(close)}>{propertyEditor.busy ? t("저장 중") : t("변경사항 저장")}</button></footer>
+        </fieldset>; }}</DocumentProperties>
         <details className="document-related"><summary>{t("상위 OKR")} · {t("연결 데이터")}</summary>
         <ProjectDataSection key={`data:${project.id}`} project={project} />
         <section className="task-lineage project-lineage-compact">
@@ -3871,8 +3927,10 @@ function ProjectPropertyField({ projectId, property, value, members, readOnly, o
   );
 }
 
-function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onClose, onOpenParent, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
+function TaskDetailPanel({ task, docked = false, onArchive, readOnly, allItems, routines, teamMembers, onClose, onOpenParent, onPatch, onAssignmentsChange, onNotice, canDelete, selected, onToggleSelect }: {
   task: OkriItem;
+  docked?: boolean;
+  onArchive: () => void;
   readOnly: boolean;
   onOpenParent: (kind: "project" | "ticket" | "routine", id: string) => void;
   allItems: OkriItem[];
@@ -3888,6 +3946,7 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
 }) {
   const confirmAction = useAppConfirm();
   const [rows, setRows] = useState<ChecklistItem[]>([]);
+  const propertyEditor = useItemPropertyDraft(task, onPatch, onAssignmentsChange);
   const [title, setTitle] = useState("");
   const [syncingCalendar, setSyncingCalendar] = useState(false);
   const [savingChecklist, setSavingChecklist] = useState(false);
@@ -3904,8 +3963,6 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
   const routineMatch = task.routineId ? routines.find((entry) => entry.id === task.routineId) : undefined;
   const routine = routineMatch?.active && routineMatch.systemKey !== "general" ? routineMatch : undefined;
   const projectDri = project ? assignmentLabel(project, "project_dri") : "미지정";
-  const assigneeIds = task.assignments.filter((entry) => entry.role === "task_assignee").map((entry) => entry.memberId);
-  const taskContainerValue = project ? `project:${project.id}` : ticket ? `ticket:${ticket.id}` : routine ? `routine:${routine.id}` : "";
   const lineageTitle = routine ? `Routine · ${routine.title}` : project ? `Project · ${project.title}` : ticket ? `Ticket · ${ticket.title}` : routineMatch?.systemKey === "general" ? "General 수집함" : "연결 끊김";
   const propertyEntries: DocumentProperty[] = [
     { key: "status", label: t("상태"), value: statusLabels[task.status], primary: true },
@@ -3921,33 +3978,19 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
       .catch(() => { setRows([]); setChecklistLoadError(true); onNotice(t("체크리스트를 불러오지 못했습니다.")); });
   }, [onNotice, task.id]);
 
-  async function saveAssignee(memberIds: string[]) {
-    const response = await fetch("/api/item-assignments", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ itemId: task.id, role: "task_assignee", memberIds }),
-    });
-    if (!response.ok) {
-      onNotice(t("담당자를 저장하지 못했습니다."));
-      return;
-    }
-    const data = await response.json() as { assignments: ItemAssignment[] };
-    onAssignmentsChange(data.assignments);
-  }
-
-  function saveContainer(value: string) {
+  function saveContainer(value: string, patch: (next: Partial<OkriItem>) => void = (next) => { void onPatch(next); }) {
     const [kind, id] = value.split(":", 2);
     if (!id) {
-      void onPatch({ parentId: null, routineId: null, cycleId: null });
+      patch({ parentId: null, routineId: null, cycleId: null });
       return;
     }
     if (kind === "project" || kind === "ticket") {
       const nextProject = projects.find((entry) => entry.id === id);
       const nextTicket = tickets.find((entry) => entry.id === id);
       const nextParent = kind === "project" ? nextProject : nextTicket;
-      if (nextParent) void onPatch({ parentId: nextParent.id, routineId: null, cycleId: nextParent.kind === "project" ? nextParent.cycleId : null });
+      if (nextParent) patch({ parentId: nextParent.id, routineId: null, cycleId: nextParent.kind === "project" ? nextParent.cycleId : null });
     } else if (kind === "routine" && routines.some((entry) => entry.id === id && entry.active && entry.systemKey !== "general")) {
-      void onPatch({ parentId: null, routineId: id, cycleId: null });
+      patch({ parentId: null, routineId: id, cycleId: null });
     }
   }
 
@@ -4013,21 +4056,29 @@ function TaskDetailPanel({ task, readOnly, allItems, routines, teamMembers, onCl
   }
 
   return (
-    <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant="drawer" dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
+    <OverlayDialog title={t("{value1} Task 상세", { value1: messageValue(task.title) })} variant={docked ? "docked" : "drawer"} dirty={Boolean(title.trim())} history={false} onRequestClose={() => onClose()}>
       {(requestClose) => <aside className="property-panel task-detail-panel">
         <header><div>{project || ticket || routine ? <button type="button" className="detail-parent-link" onClick={async () => { if (title.trim() && !await confirmAction({ title: t("변경사항을 버릴까요?"), message: t("저장하지 않은 변경사항이 있습니다. 닫으면 작성한 내용이 사라집니다."), confirmLabel: t("변경사항 버리기"), danger: true })) return; if (project) onOpenParent("project", project.id); else if (ticket) onOpenParent("ticket", ticket.id); else if (routine) onOpenParent("routine", routine.id); }}><ArrowLeft size={14} />{lineageTitle}</button> : <p>{lineageTitle}</p>}<h2 className="document-title">{task.title}</h2></div><div className="task-detail-actions">{canDelete && <DeleteSelectCheckbox item={task} selected={selected} onToggle={onToggleSelect} />}<button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("닫기")}><X size={17} /></button></div></header>
-        <DocumentProperties entries={propertyEntries} readOnly={readOnly}>{() => <>
-        <div className="property-form"><label><span>{t("Task 이름")}</span><textarea aria-label={t("Task 이름")} defaultValue={task.title} rows={2} onBlur={(event) => { const nextTitle = event.currentTarget.value.trim(); if (nextTitle && nextTitle !== task.title) void onPatch({ title: nextTitle }); }} /></label></div>
+        <DocumentProperties entries={propertyEntries} readOnly={readOnly} autoSave={false} dirty={propertyEditor.dirty} onEditorOpen={propertyEditor.reset} onEditorClose={propertyEditor.reset}>{(close) => {
+          const task = propertyEditor.item;
+          const onPatch = async (patch: Partial<OkriItem>) => propertyEditor.patch(patch);
+          const assigneeIds = propertyEditor.assignments.task_assignee ?? task.assignments.filter((entry) => entry.role === "task_assignee").map((entry) => entry.memberId);
+          const taskContainerValue = task.parentId ? `${allItems.find((item) => item.id === task.parentId)?.kind ?? "project"}:${task.parentId}` : task.routineId && routines.find((routine) => routine.id === task.routineId)?.systemKey !== "general" ? `routine:${task.routineId}` : "";
+          return <fieldset className="item-property-draft" disabled={propertyEditor.busy}>
+        <div className="property-form"><label><span>{t("Task 이름")}</span><textarea aria-label={t("Task 이름")} value={task.title} rows={2} onChange={(event) => propertyEditor.patch({ title: event.currentTarget.value })} /></label></div>
         <section className="task-detail-fields" aria-label={t("Task 정보")}>
           <label><span>{t("우선순위")}</span><select className={`priority-${task.priority}`} value={task.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
           <label><span>{t("기한")}</span><input type="date" value={task.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
-          <label className="task-container-field"><span>{t("연결 대상")}</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value)}><option value="">General</option><optgroup label={t("Project")}>{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Ticket")}>{tickets.map((entry) => <option value={`ticket:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Routine")}>{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
+          <label className="task-container-field"><span>{t("연결 대상")}</span><select value={taskContainerValue} onChange={(event) => saveContainer(event.target.value, propertyEditor.patch)}><option value="">General</option><optgroup label={t("Project")}>{projects.map((entry) => <option value={`project:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Ticket")}>{tickets.map((entry) => <option value={`ticket:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup><optgroup label={t("Routine")}>{routines.filter((entry) => entry.active && entry.systemKey !== "general").map((entry) => <option value={`routine:${entry.id}`} key={entry.id}>{entry.title}</option>)}</optgroup></select></label>
         </section>
-        {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label={t("담당자")} members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => void saveAssignee(ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></section>}
-        </>}</DocumentProperties>
+        {teamMembers.length > 0 && <section className="task-assignee-editor"><MemberMentionPicker label={t("담당자")} members={teamMembers} selectedIds={assigneeIds} onChange={(ids) => propertyEditor.assign("task_assignee", ids)} placeholder={t("@실명으로 찾기")} maxSelected={1} /></section>}
+        {propertyEditor.error && <p role="alert">{propertyEditor.error}</p>}
+        <footer><button type="button" className="secondary" onClick={close}>{t("취소")}</button><button type="button" className="primary-action" disabled={!propertyEditor.dirty || propertyEditor.busy} aria-busy={propertyEditor.busy} onClick={() => void propertyEditor.save(close)}>{propertyEditor.busy ? t("저장 중") : t("변경사항 저장")}</button></footer>
+        </fieldset>; }}</DocumentProperties>
         <div className="task-work-actions">
           <button type="button" disabled={readOnly} className={`task-completion-toggle ${isCompletedStatus(task.status) ? "completed" : ""}`} aria-pressed={isCompletedStatus(task.status)} onClick={() => void onPatch(taskCompletionPatch(task.status))}><span><Check size={14} /></span>{isCompletedStatus(task.status) ? t("완료 취소") : t("완료")}</button>
           <LocalAgentLauncher targetKind="task" targetId={task.id} targetTitle={task.title} readOnly={readOnly} onNotice={onNotice} />
+          {canDelete && <button type="button" className="secondary" onClick={onArchive}><Archive size={15} />{t("휴지통으로 이동")}</button>}
         </div>
         <details className="document-related"><summary>{t("상위 맵핑")} · Google Calendar</summary>
         <section className="task-lineage">
@@ -4097,11 +4148,12 @@ function pickMembers(members: TeamMember[], ids: string[]) {
 
 function assignmentLabel(item: OkriItem, role: ItemAssignmentRole) {
   const names = item.assignments.filter((entry) => entry.role === role).map((entry) => `@${entry.displayName}`);
-  return names.length ? names.join(", ") : "미지정";
+  return names.length ? names.join(", ") : item.creatorDisplayName && role !== "project_worker" ? t("{name} · 생성자", { name: item.creatorDisplayName }) : t("미지정");
 }
 
 function canUserDeleteItem(item: OkriItem, currentMember: TeamMember | undefined, userId: string | null) {
   if (currentMember?.role === "viewer") return false;
+  if (currentMember?.role === "owner" || currentMember?.role === "admin") return true;
   if (userId && item.createdByUserId === userId) return true;
   if (!currentMember) return false;
   const accountableRole: ItemAssignmentRole | null = item.kind === "project"
@@ -4385,6 +4437,8 @@ function CreatePropertyField({ property, value, members, onChange }: { property:
   return <label><span>{systemPropertyLabel(property, t)}</span><PropertyValueInput type={property.type} value={value} options={property.options} members={members} onChange={(next) => onChange(property, next)} /></label>;
 }
 
+type RoutineEditDraft = Pick<Routine, "title" | "cadence" | "active" | "assigneeMemberId" | "description" | "triggerPoint" | "actionPlace" | "actionSteps">;
+
 function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, teamMembers, onNotice, onRoutinesChange, createOpen, onCreateClose, onCreateWithChat, readOnly, canManageProperties }: { focusId?: string | null; onDirtyChange: (dirty: boolean) => void; readOnly: boolean; canManageProperties: boolean; workspaceId: string; initialRoutines: Routine[]; teamMembers: TeamMember[]; onNotice: (message: string) => void; onRoutinesChange: (routines: Routine[]) => void; createOpen: boolean; onCreateClose: () => void; onCreateWithChat: (initialMessage?: string) => void }) {
   const confirmAction = useAppConfirm();
   const initialDate = localDate();
@@ -4398,7 +4452,8 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
   const [actionSteps, setActionSteps] = useState("");
   const [cadence, setCadence] = useState<RoutineCadence>("daily");
   const [assigneeMemberId, setAssigneeMemberId] = useState("");
-  const [drafts, setDrafts] = useState<Record<string, Pick<Routine, "description" | "triggerPoint" | "actionPlace" | "actionSteps">>>({});
+  const [drafts, setDrafts] = useState<Record<string, RoutineEditDraft>>({});
+  const [editingRoutineId, setEditingRoutineId] = useState<string | null>(null);
   const [propertyDefinitions, setPropertyDefinitions] = useState<PropertyDefinition[]>([]);
   const [propertyDrafts, setPropertyDrafts] = useState<Record<string, Record<string, PropertyValue>>>({});
   const [createProperties, setCreateProperties] = useState<Record<string, PropertyValue>>({});
@@ -4514,32 +4569,12 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
     }
   }
 
-  async function toggleActive(routine: Routine) {
-    if (routine.systemKey === "general") return;
-    const active = !routine.active;
-    const previous = rows;
-    setRows((current) => current?.map((entry) => entry.id === routine.id ? { ...entry, active } : entry) ?? null);
-    try {
-      const response = await fetch("/api/routines", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: routine.id, active, date }),
-      });
-      if (!response.ok) throw new Error(t("Routine 활성 상태를 저장하지 못했습니다."));
-      const data = await response.json() as { routine: Routine };
-      setRows((current) => {
-        const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
-        onRoutinesChange(next);
-        return next;
-      });
-    } catch (toggleError) {
-      setRows(previous);
-      onNotice(toggleError instanceof Error ? toggleError.message : t("Routine 활성 상태를 저장하지 못했습니다."));
-    }
-  }
-
   function routineDraft(routine: Routine) {
     return drafts[routine.id] ?? {
+      title: routine.title,
+      cadence: routine.cadence,
+      active: routine.active,
+      assigneeMemberId: routine.assigneeMemberId,
       description: routine.description,
       triggerPoint: routine.triggerPoint,
       actionPlace: routine.actionPlace,
@@ -4547,13 +4582,14 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
     };
   }
 
-  function updateDraft(routine: Routine, field: "description" | "triggerPoint" | "actionPlace" | "actionSteps", value: string) {
+  function updateDraft<K extends keyof RoutineEditDraft>(routine: Routine, field: K, value: RoutineEditDraft[K]) {
     setDrafts((current) => ({ ...current, [routine.id]: { ...routineDraft(routine), [field]: value } }));
   }
 
   function hasDraftChange(routine: Routine) {
     const draft = drafts[routine.id];
     return Boolean(Object.keys(propertyDrafts[routine.id] ?? {}).length) || Boolean(draft) && (
+      draft.title !== routine.title || draft.cadence !== routine.cadence || draft.active !== routine.active || draft.assigneeMemberId !== routine.assigneeMemberId ||
       draft.description !== routine.description ||
       draft.triggerPoint !== routine.triggerPoint ||
       draft.actionPlace !== routine.actionPlace ||
@@ -4564,6 +4600,7 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
   async function saveRoutineGuide(routine: Routine) {
     if (routine.systemKey === "general" || readOnly || saving) return;
     const draft = routineDraft(routine);
+    if (!draft.title.trim()) { onNotice(t("제목을 입력해 주세요.")); return; }
     setSaving(true);
     try {
     const response = await fetch("/api/routines", {
@@ -4594,7 +4631,7 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
   async function remove(id: string) {
     const routine = rows?.find((entry) => entry.id === id);
     if (!routine || routine.systemKey === "general") return;
-    if (!await confirmAction({ title: t("Routine 삭제"), message: t("'{value1}' Routine을 삭제합니다.", { value1: messageValue(routine.title) }), confirmLabel: t("Routine 삭제"), danger: true })) return;
+    if (!await confirmAction({ title: t("Routine 삭제"), message: t("'{title}' Routine을 삭제합니다. 연결된 Task는 General로 이동하며 유지됩니다.", { title: routine.title }), confirmLabel: t("Routine 삭제"), danger: true })) return;
     const response = await fetch(`/api/routines?id=${encodeURIComponent(id)}`, { method: "DELETE" });
     if (response.ok) {
       setRows((current) => {
@@ -4604,25 +4641,6 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
       });
       onNotice(t("Routine을 삭제했습니다."));
     } else onNotice(t("Routine을 삭제하지 못했습니다."));
-  }
-
-  async function updateAssignee(routine: Routine, memberId: string) {
-    if (routine.systemKey === "general") return;
-    const response = await fetch("/api/routines", {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: routine.id, date, assigneeMemberId: memberId || null }),
-    });
-    if (!response.ok) {
-      onNotice(t("Routine 담당자를 저장하지 못했습니다."));
-      return;
-    }
-    const data = await response.json() as { routine: Routine };
-    setRows((current) => {
-      const next = current?.map((entry) => entry.id === routine.id ? data.routine : entry) ?? [];
-      onRoutinesChange(next);
-      return next;
-    });
   }
 
   const createDirty = Boolean(title.trim() || description.trim() || triggerPoint.trim() || actionPlace.trim() || actionSteps.trim() || cadence !== "daily" || assigneeMemberId || Object.keys(createProperties).length);
@@ -4647,9 +4665,11 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
               <header>
                 {routine.systemKey === "general" ? <span className="general-routine-icon"><Inbox size={13} /></span> : <button className={`task-check ${routine.completed ? "checked" : ""}`} disabled={readOnly || !routine.active} onClick={() => void toggleCompletion(routine)} aria-label={routine.completed ? t("완료 취소") : t("완료 처리")}><Check size={12} /></button>}
                 {routine.systemKey === "general" ? <div><b>{routine.title}<em className="system-badge">{t("기본")}</em></b><small>{t("Project·Ticket·Routine에 연결하지 않은 Task가 모이는 기본 목록")}</small></div> : <button type="button" className="routine-expand" aria-expanded={expanded} aria-controls={detailsId} onClick={() => setExpandedIds((current) => { const next = new Set(current); if (next.has(routine.id)) next.delete(routine.id); else next.add(routine.id); return next; })}><span><b>{routine.title}</b><small>{routineCadenceLabel(routine.cadence)} · {routine.completed ? t("오늘 완료") : t("오늘 미완료")} · {teamMembers.find((member) => member.id === routine.assigneeMemberId)?.displayName ?? t("담당자 없음")}{hasDraftChange(routine) ? t(" · 저장하지 않은 변경") : ""}</small></span><ChevronDown size={16} /></button>}
+                {routine.systemKey !== "general" && !readOnly && <div className="routine-row-actions"><button type="button" className="icon-button" aria-label={t("Routine 수정")} onClick={() => { setExpandedIds((current) => new Set([...current, routine.id])); setEditingRoutineId(routine.id); }}><Pencil size={16} /></button><button type="button" className="icon-button danger" aria-label={t("Routine 삭제")} onClick={() => void remove(routine.id)}><Trash2 size={16} /></button></div>}
               </header>
               {routine.systemKey !== "general" && <div className="routine-details" id={detailsId} hidden={!expanded}>
-              <DocumentProperties readOnly={readOnly} autoSave={false} dirty={hasDraftChange(routine)} onEditorClose={() => {
+              <DocumentProperties readOnly={readOnly} autoSave={false} editOpen={editingRoutineId === routine.id} onEditorOpen={() => setEditingRoutineId(routine.id)} dirty={hasDraftChange(routine)} onEditorClose={() => {
+                setEditingRoutineId(null);
                 setDrafts(current => { const next = { ...current }; delete next[routine.id]; return next; });
                 setPropertyDrafts(current => { const next = { ...current }; delete next[routine.id]; return next; });
               }} entries={[
@@ -4659,20 +4679,22 @@ function RoutineView({ workspaceId, focusId, onDirtyChange, initialRoutines, tea
                 { key: "trigger", label: t("트리거 포인트"), value: routine.triggerPoint || t("미지정") },
                 { key: "place", label: t("어디서"), value: routine.actionPlace || t("미지정") },
                 ...activeProperties.map(property => ({ key: property.id, label: systemPropertyLabel(property, t), value: documentPropertyValue(property, routine.properties?.[property.id] ?? null, teamMembers) })),
-              ]}>{close => <>
+              ]}>{close => <fieldset className="item-property-draft" disabled={saving}>
               <div className="property-form routine-guide-grid">
+                <label><span>{t("Routine 이름")}</span><input value={draft.title} onChange={(event) => updateDraft(routine, "title", event.target.value)} /></label>
+                <label><span>{t("반복 주기")}</span><select value={draft.cadence} onChange={(event) => updateDraft(routine, "cadence", event.target.value as RoutineCadence)}><option value="daily">{t("매일")}</option><option value="weekly">{t("매주")}</option><option value="monthly">{t("매월")}</option></select></label>
                 <label><span>{t("트리거 포인트")}</span><input value={draft.triggerPoint} onChange={(event) => updateDraft(routine, "triggerPoint", event.target.value)} placeholder={t("예: 오전 9시, Slack 알림 확인 후")} /></label>
                 <label><span>{t("어디서")}</span><input value={draft.actionPlace} onChange={(event) => updateDraft(routine, "actionPlace", event.target.value)} placeholder={t("예: OKRI 작업 탭, 캘린더, 책상")} /></label>
                 <label><span>{t("목적/메모")}</span><input value={draft.description} onChange={(event) => updateDraft(routine, "description", event.target.value)} placeholder={t("왜 반복하는지")} /></label>
                 <label className="routine-steps"><span>{t("무엇을 어떻게")}</span><textarea value={draft.actionSteps} onChange={(event) => updateDraft(routine, "actionSteps", event.target.value)} placeholder={t("1. 확인할 것\n2. 실행할 것\n3. 끝났다고 판단하는 기준")} rows={3} /></label>
               </div>
               <section className="routine-property-values property-form" aria-label={t("{value1} 속성 값", { value1: messageValue(routine.title) })}><h3>{t("속성 값")}</h3>{activeProperties.length ? propertyInputs({ ...routine.properties, ...propertyDrafts[routine.id] }, (id, value) => setPropertyDrafts((current) => ({ ...current, [routine.id]: { ...current[routine.id], [id]: value } }))) : <p>{propertiesReady ? t("아직 루틴 속성이 없습니다. 루틴 속성 관리에서 추가할 수 있습니다.") : t("루틴 속성을 불러오는 중입니다.")}</p>}</section>
-              <div className="property-form"><label className="document-checkbox"><input type="checkbox" checked={routine.active} onChange={() => void toggleActive(routine)} /><span>{t("Routine 활성 상태")}</span></label></div>
+              <div className="property-form"><label className="document-checkbox"><input type="checkbox" checked={draft.active} onChange={(event) => updateDraft(routine, "active", event.target.checked)} /><span>{t("Routine 활성 상태")}</span></label></div>
               <footer>
-                <label className="routine-assignee"><span>{t("담당자")}</span><select value={routine.assigneeMemberId ?? ""} onChange={(event) => void updateAssignee(routine, event.target.value)}><option value="">{t("담당자 없음")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
-                <button className="icon-button" disabled={saving} onClick={() => void remove(routine.id)} aria-label={t("Routine 삭제")} title={t("Routine 삭제")}><Trash2 size={13} /></button>
-                <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={async () => { if (await saveRoutineGuide(routine)) close(); }}><Check size={14} />{t("저장")}</button>
-              </footer></>}</DocumentProperties>
+                <label className="routine-assignee"><span>{t("담당자")}</span><select value={draft.assigneeMemberId ?? ""} onChange={(event) => updateDraft(routine, "assigneeMemberId", event.target.value || null)}><option value="">{t("담당자 없음")}</option>{teamMembers.filter((member) => member.status === "active").map((member) => <option value={member.id} key={member.id}>{member.displayName}</option>)}</select></label>
+                <button type="button" className="secondary" disabled={saving} onClick={close}>{t("취소")}</button>
+                <button className="primary-action" disabled={readOnly || !hasDraftChange(routine) || saving} aria-busy={saving} onClick={async () => { if (await saveRoutineGuide(routine)) close(); }}><Check size={14} />{t("변경사항 저장")}</button>
+              </footer></fieldset>}</DocumentProperties>
               {expanded && <WorkDocumentSection key={`routine-document:${routine.id}`} targetKind="routine" targetId={routine.id} readOnly={readOnly} onNotice={onNotice} />}
               </div>}
             </article>

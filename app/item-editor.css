@@ -228,7 +228,7 @@
   border-bottom: 1px solid var(--border-default);
   background: var(--bg-page);
 }
-.project-detail-panel .detail-parent-link {
+.property-panel .detail-parent-link {
   width: fit-content;
   min-height: var(--control-height);
   display: inline-flex;
@@ -242,7 +242,7 @@
   font-size: var(--type-label);
   cursor: pointer;
 }
-.project-detail-panel .detail-parent-link:hover { color: var(--text-primary); }
+.property-panel .detail-parent-link:hover { color: var(--text-primary); }
 .project-detail-panel .project-title-input {
   padding-inline: 0;
   border-color: transparent;
@@ -392,7 +392,8 @@
 .project-template-create { grid-template-columns: minmax(0, 1fr) var(--control-height) var(--control-height); gap: var(--space-2); }
 .project-template-meta { gap: var(--space-4); }
 
-.okr-file-metadata-editor { gap: var(--space-4); padding: var(--space-4); border: 0; border-bottom: 1px solid var(--border-default); border-radius: 0; background: transparent; }
+.okr-file-metadata-editor { grid-template-columns: repeat(auto-fit, minmax(min(100%, 14rem), 1fr)); gap: var(--space-4); padding: var(--space-4); border: 0; border-bottom: 1px solid var(--border-default); border-radius: 0; background: transparent; }
+.okr-file-metadata-editor .wide { grid-column: 1 / -1; }
 .okr-file-objective-editor, .okr-file-key-result-editor { border: 0; border-radius: 0; background: transparent; }
 .okr-file-key-result-editor { border-left: 2px solid var(--kr-rail); }
 .okr-file-editor :is(.okr-file-objective-editor > header, .okr-file-key-result-editor > header) { gap: var(--space-3); padding: var(--space-4); }
@@ -400,6 +401,96 @@
 .okr-file-initiatives { gap: var(--space-2); padding: var(--space-4); }
 .okr-file-initiative-editor { gap: var(--space-2); padding: var(--space-3); }
 .okr-file-editor textarea { font-weight: 500; }
+
+/* Title fields get their own line; related controls share a measured baseline. */
+.okr-file-editor { container-type: inline-size; }
+.okr-file-title-field, .okr-file-control { min-width: 0; display: grid; align-content: start; gap: var(--space-2); }
+.okr-file-editor :is(.okr-file-title-field, .okr-file-control) > small { margin: 0; font-size: var(--type-meta); font-weight: 500; line-height: 1.6; }
+.okr-file-editor :is(.okr-file-title-field, .okr-file-control) :is(textarea, select) { margin: 0; }
+.okr-file-editor .okr-file-title-field textarea { width: 100%; min-height: 5rem; resize: vertical; }
+.okr-file-editor .okr-file-row-tools { gap: var(--space-1); padding-top: calc(var(--type-meta) * 1.6 + var(--space-2)); }
+.okr-file-editor .okr-file-row-tools button { width: var(--field-height); height: var(--field-height); min-height: var(--field-height); padding: 0; flex: 0 0 auto; }
+.okr-file-initiative-editor {
+  grid-template-columns: 1.75rem minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  padding: var(--space-4) 0 var(--space-4) var(--space-3);
+  background: transparent;
+}
+.okr-file-initiative-editor > .type-icon { grid-column: 1; grid-row: 1; }
+.okr-file-initiative-editor > .okr-file-title-field { grid-column: 2 / -1; }
+.okr-file-initiative-editor > .okr-file-control { grid-row: 2; }
+.okr-file-initiative-editor > .okr-file-control:nth-of-type(2) { grid-column: 2; }
+.okr-file-initiative-editor > .okr-file-control:nth-of-type(3) { grid-column: 3; }
+.okr-file-initiative-editor > .okr-file-row-tools { grid-column: 4; grid-row: 2; }
+.okr-file-editor .okr-file-kr-metrics { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); align-items: center; gap: var(--space-4); padding: 0 var(--space-4) var(--space-4) calc(1.75rem + 2 * var(--space-4)); }
+.okr-file-kr-metrics > label { min-width: 0; grid-template-columns: auto minmax(0, 1fr) auto; }
+.okr-file-kr-metrics b { color: var(--progress-text); }
+.okr-project-resolutions { gap: var(--space-3); padding: var(--space-4) 0; border: 0; border-top: 1px solid var(--border-default); border-radius: 0; background: transparent; }
+.okr-project-resolutions > header { color: var(--text-primary); }
+.okr-project-resolutions p { font-size: var(--type-label); line-height: 1.6; }
+.okr-project-resolutions > label { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-3); padding-top: var(--space-3); }
+.okr-project-resolutions > label > span { grid-template-columns: 1rem minmax(0, 1fr); gap: var(--space-2); }
+.okr-project-resolutions > label b { white-space: normal; overflow-wrap: anywhere; font-weight: 400; }
+.okr-project-resolutions > label > span > small { grid-column: 2; white-space: normal; overflow-wrap: anywhere; }
+.okr-file-conflict { min-width: 0; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4) 0; border-top: 1px solid var(--border-default); }
+.okr-file-conflict p { flex: 1 1 14rem; margin: 0; color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
+.okr-file-conflict button { white-space: normal; }
+.okr-tree-copy .okr-tree-owner, .okr-tree-task .okr-tree-owner { display: block; margin: 0; color: var(--text-secondary); font-size: var(--type-label); font-weight: 400; line-height: 1.6; }
+.item-property-draft { min-width: 0; margin: 0; padding: 0; border: 0; }
+.item-property-draft > footer { position: sticky; bottom: 0; display: flex; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-3); padding: var(--space-4) var(--editor-inset); border-top: 1px solid var(--border-default); background: var(--bg-page); }
+.item-property-draft > [role="alert"] { padding-inline: var(--editor-inset); color: var(--danger-fg); }
+.item-property-draft > footer > button.secondary, .task-work-actions > button.secondary {
+  min-height: var(--control-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-control);
+  font: inherit;
+  font-size: var(--type-label);
+  cursor: pointer;
+}
+.routine-card > header { grid-template-columns: var(--control-height) minmax(0, 1fr) auto; }
+.routine-card > header > .routine-expand { grid-column: 2; }
+.routine-row-actions { grid-column: 3; display: flex; align-items: center; gap: var(--space-1); }
+
+@media (min-width: 72rem) {
+  .app-shell:has(.overlay-docked[open]) { --okr-dock-width: min(46vw, 52rem); }
+  .app-shell:has(.overlay-docked[open]) > .workspace { margin-right: var(--okr-dock-width); min-width: 0; }
+  .overlay-dialog.overlay-docked { grid-template-columns: minmax(0, 1fr); inset: 0 0 0 auto; width: var(--okr-dock-width); height: 100dvh; padding: 0; border-left: 1px solid var(--border-default); background: var(--bg-page); }
+  .overlay-docked > .property-panel { min-width: 0; width: 100%; max-width: 100%; height: 100dvh; box-sizing: border-box; }
+  .overlay-docked .project-detail-content { grid-template-columns: minmax(0, 1fr); }
+  .overlay-docked .project-context-column { border-left: 0; }
+}
+
+@media (max-width: 43.75rem) {
+  .okr-file-objective-editor > header, .okr-file-key-result-editor > header { grid-template-columns: 1.75rem minmax(0, 1fr); }
+  .okr-file-objective-editor > header > .okr-file-control { grid-column: 2; }
+  .okr-file-key-result-editor > header > .okr-file-row-tools { grid-column: 2; padding-top: 0; justify-content: flex-end; }
+  .okr-file-initiative-editor { grid-template-columns: 1.75rem minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
+  .okr-file-initiative-editor > .okr-file-title-field { grid-column: 2 / -1; }
+  .okr-file-initiative-editor > .okr-file-control > small { min-height: calc(var(--type-meta) * 1.6 * 2); }
+  .okr-file-initiative-editor > .okr-file-row-tools { grid-column: 2 / -1; grid-row: 3; padding-top: 0; justify-content: flex-end; }
+  .okr-file-editor .okr-file-kr-metrics { grid-template-columns: minmax(0, 1fr); padding-inline: var(--space-4); }
+  .okr-project-resolutions > label { grid-template-columns: minmax(0, 1fr); }
+  .okr-project-resolutions > label > small { grid-column: 1; }
+  .okr-file-initiatives { padding-inline: var(--space-2); }
+}
+
+@container (max-width: 36rem) {
+  .okr-file-objective-editor > header, .okr-file-key-result-editor > header { grid-template-columns: 1.75rem minmax(0, 1fr); }
+  .okr-file-objective-editor > header > .okr-file-control { grid-column: 2; }
+  .okr-file-key-result-editor > header > .okr-file-row-tools { grid-column: 2; padding-top: 0; justify-content: flex-end; }
+  .okr-file-initiative-editor { grid-template-columns: 1.75rem minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-2); }
+  .okr-file-initiative-editor > .okr-file-control > small { min-height: calc(var(--type-meta) * 1.6 * 2); }
+  .okr-file-initiative-editor > .okr-file-row-tools { grid-column: 2 / -1; grid-row: 3; padding-top: 0; justify-content: flex-end; }
+  .okr-file-editor .okr-file-kr-metrics { grid-template-columns: minmax(0, 1fr); padding-inline: var(--space-4); }
+  .okr-project-resolutions > label { grid-template-columns: minmax(0, 1fr); }
+  .okr-project-resolutions > label > small { grid-column: 1; }
+  .okr-file-initiatives { padding-inline: var(--space-2); }
+}
 
 @media (max-width: 700px) {
   :is(.property-panel, .okr-file-editor, .routine-card, .project-property-manager, .project-template-manager) { --editor-inset: var(--space-4); }

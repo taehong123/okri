@@ -712,7 +712,7 @@ test("Initiative 삭제 저장 전에 연결 Project 처리 결정을 요구한�
   await initiative.getByRole("button", { name: "Initiative 삭제" }).click();
   await expect(page.getByText("연결 Project 정리 필요")).toBeVisible();
   await page.getByRole("button", { name: "전체 저장" }).click();
-  await expect(page.getByRole("alert")).toContainText("이동 또는 휴지통 처리를 선택");
+  await expect(page.getByRole("alert")).toContainText("이동·Routine 전환·휴지통 처리를 선택");
   await page.locator(".okr-project-resolutions label").filter({ hasText: "모바일 사용성 개선" }).locator("select").selectOption("move:initiative-2");
   const saveRequest = page.waitForRequest((request) => new URL(request.url()).pathname === "/api/okr-files/cycle-1" && request.method() === "PUT");
   await page.getByRole("button", { name: "전체 저장" }).click();

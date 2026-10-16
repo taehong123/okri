@@ -9,6 +9,7 @@ import {
   createLinkedTasks,
   ensureWorkspace,
   getItemAssignmentMap,
+  getItemCreatorMap,
   getPeriodReview,
   listItems,
   replaceItemAssignmentRole,
@@ -50,8 +51,11 @@ export async function GET(request: Request) {
       query: url.searchParams.get("q") ?? undefined,
       includeArchived: url.searchParams.get("includeArchived") === "true",
     });
-    const assignments = await getItemAssignmentMap(authorization.ownerId, rows.map((item) => item.id));
-    return Response.json({ items: rows.map((item) => serializeItem(item, {}, assignments[item.id] ?? [])) });
+    const [assignments, creators] = await Promise.all([
+      getItemAssignmentMap(authorization.ownerId, rows.map((item) => item.id)),
+      getItemCreatorMap(authorization.ownerId, rows),
+    ]);
+    return Response.json({ items: rows.map((item) => serializeItem(item, {}, assignments[item.id] ?? [], creators[item.id])) });
   } catch (error) {
     return routeError(error);
   }
@@ -88,7 +92,7 @@ export async function POST(request: Request) {
         createdByUserId: authorization.userId,
       });
       const assignments = await getItemAssignmentMap(authorization.ownerId, created.map((item) => item.id));
-      return Response.json({ items: created.map((item) => serializeItem(item, {}, assignments[item.id] ?? [])) }, { status: 201 });
+      return Response.json({ items: created.map((item) => serializeItem(item, {}, assignments[item.id] ?? [], authorization.displayName ?? "")) }, { status: 201 });
     }
     const title = typeof payload.title === "string" ? payload.title.trim() : "";
     if (!title) return Response.json({ error: "title is required" }, { status: 400 });
@@ -140,7 +144,7 @@ export async function POST(request: Request) {
     });
     await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload, authorization.userId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
-    return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? []) }, { status: 201 });
+    return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? [], authorization.displayName ?? "") }, { status: 201 });
   } catch (error) {
     return routeError(error);
   }
@@ -174,7 +178,8 @@ export async function PATCH(request: Request) {
     });
     await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload, authorization.userId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
-    return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? []) });
+    const creators = await getItemCreatorMap(authorization.ownerId, [item]);
+    return Response.json({ item: serializeItem(item, {}, assignments[item.id] ?? [], creators[item.id]) });
   } catch (error) {
     return routeError(error);
   }

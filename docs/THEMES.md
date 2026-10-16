@@ -232,6 +232,18 @@ Project creation, Project detail, property definitions, templates, Task detail,
 Routine fields and the OKR editor use the same label, field and focus tokens.
 Do not add another page-specific input palette or density override.
 
+- Project, Task and Routine property changes stay in a draft until explicit
+  `변경사항 저장`. Errors retain typed values and closing a dirty editor offers
+  discard confirmation. Opening a document never writes properties.
+- OKR Project/Task links retain `view=okr`. At wide widths, a modeless right-hand
+  detail pane reserves layout space beside the OKR canvas; narrow layouts use
+  the existing accessible full-width drawer. Nested property dialogs stay modal.
+- Objective/KR/Initiative title fields share label spacing and control heights.
+  Container queries adapt to the actual editor width and larger user text.
+- Linked Projects can move, convert to Routine, or go to recoverable Trash from
+  Objective editing. Child Tasks follow automatically. Conflict recovery retains
+  the draft and offers an explicit overwrite against the newest saved revision.
+
 - Project create/edit custom values use `PropertyValueInput`; the caller retains
   responsibility for draft state, typed persistence and write permissions.
 - Hide controls occupy a separate column, never absolute positions over fields.

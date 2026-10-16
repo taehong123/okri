@@ -66,7 +66,7 @@ export async function GET(request: Request) {
     const target = readDocumentImageTarget(query);
     const imageId = query.get("imageId") ?? "";
     if (!target || !/^[a-f0-9-]{36}$/i.test(imageId)) return failure(404, "not_found");
-    if (!await canAccessTarget(authorization.ownerId, target)) return failure(404, "not_found");
+    if (!await canAccessTarget(authorization.ownerId, target, true)) return failure(404, "not_found");
     const bucket = (env as typeof env & { WORKSPACE_AVATARS?: R2Bucket }).WORKSPACE_AVATARS;
     if (!bucket) return failure(503, "storage_unavailable");
     const image = await bucket.get(objectKey(authorization.ownerId, target, imageId));
@@ -83,11 +83,19 @@ export async function GET(request: Request) {
   } catch { return failure(500, "image_unavailable"); }
 }
 
-async function canAccessTarget(ownerId: string, target: DocumentImageTarget) {
+async function canAccessTarget(ownerId: string, target: DocumentImageTarget, allowConvertedProject = false) {
   const statement = target.targetKind === "routine"
     ? env.DB.prepare("SELECT id FROM routines WHERE owner_id = ? AND id = ? AND system_key IS NULL").bind(ownerId, target.targetId)
     : env.DB.prepare("SELECT id FROM items WHERE owner_id = ? AND id = ? AND kind = ? AND archived_at IS NULL").bind(ownerId, target.targetId, target.targetKind);
-  return Boolean(await statement.first());
+  if (await statement.first()) return true;
+  // Converted Routine documents retain their workspace-scoped Project image
+  // URLs. Only reads may resolve this archived original; uploads stay blocked.
+  if (allowConvertedProject && target.targetKind === "project") {
+    return Boolean(await env.DB.prepare(`SELECT id FROM routines
+      WHERE owner_id = ? AND id = ? AND system_key IS NULL`)
+      .bind(ownerId, target.targetId).first());
+  }
+  return false;
 }
 
 function objectKey(ownerId: string, target: DocumentImageTarget, imageId: string) {

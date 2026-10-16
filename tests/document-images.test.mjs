@@ -23,7 +23,7 @@ const imageHelpers = await moduleAt("../lib/project-images.ts", {
 });
 const png = Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10]);
 
-async function fixture({ owner = "workspace", viewer = false, unauthorized = false, accessible = true, missingStorage = false, afterUpload = false, quotaExceeded = false } = {}) {
+async function fixture({ owner = "workspace", viewer = false, unauthorized = false, accessible = true, convertedProject = false, missingStorage = false, afterUpload = false, quotaExceeded = false } = {}) {
   const objects = new Map();
   const queries = [];
   const deleted = [];
@@ -34,6 +34,10 @@ async function fixture({ owner = "workspace", viewer = false, unauthorized = fal
   const runtime = {
     DB: { prepare: sql => ({ bind: (...values) => ({ first: async () => {
       queries.push({ sql, values });
+      if (convertedProject && sql.includes("FROM routines")) {
+        assert.match(sql, /owner_id = \? AND id = \? AND system_key IS NULL/);
+        return convertedProject && values[0] === "workspace" && values[1] === "project-1" ? { id: "project-1" } : null;
+      }
       assert.match(sql, /owner_id = \? AND id = \?/);
       if (!accessible || (uploaded && afterUpload) || values[0] !== "workspace") return null;
       if (sql.includes("routines")) { assert.match(sql, /system_key IS NULL/); return values[1] === "routine-1" ? { id: "routine-1" } : null; }
@@ -147,6 +151,16 @@ test("viewers may read an existing image but cannot upload one", async () => {
   for (const [key, value] of owner.objects) viewer.objects.set(key, value);
   assert.equal((await viewer.GET(new Request(`https://okri.test${url}`))).status, 200);
   assert.equal((await viewer.POST(upload())).status, 403);
+});
+test("converted Routine documents can read original Project images without reopening uploads or foreign access", async () => {
+  const original = await fixture();
+  const { url } = await (await original.POST(upload())).json();
+  const converted = await fixture({ accessible: false, convertedProject: true });
+  for (const [key, value] of original.objects) converted.objects.set(key, value);
+  assert.equal((await converted.GET(new Request(`https://okri.test${url}`))).status, 200);
+  assert.equal((await converted.POST(upload())).status, 404);
+  const foreign = await fixture({ owner: "other", accessible: false, convertedProject: true });
+  assert.equal((await foreign.GET(new Request(`https://okri.test${url}`))).status, 404);
 });
 test("storage failures are recoverable and filenames cannot inject headers", async () => {
   const f = await fixture({ missingStorage: true });
