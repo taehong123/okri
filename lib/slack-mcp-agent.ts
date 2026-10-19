@@ -251,7 +251,8 @@ async function runMcpAgent(input: {
       text: message.text,
     }));
     const creationIntent = !manualQuestion && !statusQuestion && !hasTaskRemovalIntent(input.query)
-      && (hasExplicitCreationIntent(input.query) || reviewNeedsRefresh || approvalRequested && workPlan.some((entry) => !entry.record));
+      && (hasExplicitCreationIntent(input.query) || reviewNeedsRefresh || approvalRequested
+        && (workPlan.some((entry) => !entry.record) || session?.turns.some((turn) => creationProgressTools.has(turn.name))));
     const requestedWorkKind = explicitCreationKind(input.query);
     const threadHasSourceContent = hasSlackCreationSource(conversation.map((message) => message.text), input.query, threadImages.length);
     const inlineHasSourceContent = hasInlineSlackCreationDetails(input.query);
@@ -406,7 +407,12 @@ async function runMcpAgent(input: {
         const args = applySlackCreationActorDefaults(call.name, rawArgs, input.memberId);
         let result: Record<string, unknown>;
         if (call.name === "plan_work") {
-          try { workPlan = reconcileWorkPlan(updateWorkPlan(workPlan, args.items), executed); result = { structuredContent: { workPlan } }; }
+          try {
+            const priorReceipts = (session?.turns ?? []).filter((turn) => creationProgressTools.has(turn.name)
+              && toolSucceeded(turn) && !(turn.name === "manage_project" && turn.arguments.action === "propose"));
+            workPlan = reconcileWorkPlan(updateWorkPlan(workPlan, args.items), [...priorReceipts, ...executed]);
+            result = { structuredContent: { workPlan } };
+          }
           catch (error) { result = toolError(error instanceof Error ? error.message : "Invalid work plan"); }
         } else if (call.name === "search_work") {
           try { result = { structuredContent: await searchSlackWork(env.DB, input.authorization.ownerId, {
@@ -416,7 +422,9 @@ async function runMcpAgent(input: {
           const confirmationId = stringValue(object(args.confirmation).review_id);
           const confirmationReceipt = executed.find((turn) => turn.name === "manage_project" && turn.arguments.action === "confirm"
             && stringValue(object(turn.arguments.confirmation).review_id) === confirmationId);
-          const blocked = call.name === "manage_project" && args.action === "confirm"
+          const blocked = call.name === "create_item" && args.kind === "project"
+            ? "Slack Project creation must use manage_project and its displayed review/approval workflow, never the legacy create_item confirmation path."
+            : call.name === "manage_project" && args.action === "confirm"
             && (!approvalRequested || !directApprovals.some((entry) => entry.reviewId === confirmationId))
             ? "This proposal is not approved in the current turn, or the user corrected it after presentation. Re-read the latest directions, search Initiative evidence and propose the corrected contents. Never confirm an old proposal or a new proposal from this same turn."
             : call.name === "manage_project" && args.action === "propose" && workPlan.some((item) => item.kind === "project" && item.record && workName(item.title) === workName(stringValue(args.title)))

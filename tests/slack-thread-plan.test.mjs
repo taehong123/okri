@@ -57,6 +57,7 @@ async function fixture(t) {
       register("prepare_work", { kind: z.string(), source_text: z.string(), include_members: z.boolean(), limit: z.number() }, async () => ({ structuredContent: { projects: [], initiatives: [] } }), true);
       register("list_items", { kind: z.string().optional(), query: z.string().optional() }, async () => ({ structuredContent: { items: [] } }), true);
       register("list_routines", {}, async () => ({ structuredContent: { routines: [] } }), true);
+      register("create_item", { kind: z.string(), title: z.string(), template_id: z.string().optional() }, async () => { throw new Error("Slack must never reach the legacy Project confirmation path"); });
       register("manage_project", { action: z.string(), title: z.string().optional(), dri_member_id: z.string().optional(),
         recommended_initiatives: z.array(z.object({ initiative_id: z.string(), reason: z.string() })).optional(), confirmation: z.record(z.string(), z.unknown()).optional() }, async (args) => {
         if (args.action === "propose") {
@@ -125,7 +126,9 @@ test("multi-project thread retains every request, refreshes corrections, confirm
   const f = await fixture(t);
   const answer = await f.run("세 프로젝트와 테스크를 각각 생성해줘. 그린서비스 유료전환과 렌즈 AX 그리고 샘플푸드 재무 자동화 프로젝트 아래 오늘 기한 업무도 각각 추가해줘", [
     (body) => { assert.equal(body.tool_choice.name, "plan_work"); return response(call("plan_work", { items: requested })); },
-    response(call("search_work", { query: "그린서비스", kind: "project" }), call("search_work", { query: "렌즈", kind: "project" }), call("search_work", { query: "샘플푸드", kind: "project" })),
+    response(call("create_item", { kind: "project", title: projects[0].title, template_id: "internal-legacy-confirmation" })),
+    (body) => { assert.match(body.input[0].output, /must use manage_project/);
+      return response(call("search_work", { query: "그린서비스", kind: "project" }), call("search_work", { query: "렌즈", kind: "project" }), call("search_work", { query: "샘플푸드", kind: "project" })); },
     proposeAll(), prose("아래 생성안을 승인해 주세요."),
   ]);
   assert.equal(f.writes.length, 0);
@@ -201,6 +204,28 @@ test("partial confirmation and subsequent AI/budget failure preserve actual rece
   assert.equal(f.session.workPlan.filter((item) => item.record).length, 2);
   assert.match(answer, /미처리/);
   assert.doesNotMatch(answer, /모두.*완료/);
+});
+
+test("legacy thread with only one created Project reconstructs the missing plan on a short continuation without duplicating that Project", async (t) => {
+  const f = await fixture(t);
+  const review = { ...proposal(projects[0].title, "legacy-created"), state: "created", projectId: `project-${projects[0].title}` };
+  f.session = { version: 1, turns: [{ name: "manage_project", arguments: { action: "confirm", confirmation: { review_id: review.id } },
+    result: { structuredContent: { review } }, at: new Date(Date.now() - 20_000).toISOString(), actorUserId: "user" }], answer: "프로젝트 하나 생성했습니다.", updatedAt: new Date().toISOString() };
+  f.messages.push({ user: "user", text: "세 프로젝트와 테스크를 각각 생성해줘. 그린서비스 유료전환, 렌즈 AX, 샘플푸드 재무 자동화 및 각 제안서 업무는 오늘 기한으로", ts: String(Date.now() / 1000 - 30) });
+  const answer = await f.run("진행해", [
+    (body) => { const input = JSON.parse(body.input[1].content[0].text); assert.equal(input.explicitCreationRequest, true);
+      assert.equal(body.tool_choice.name, "plan_work"); return response(call("plan_work", { items: requested })); },
+    (body) => { const updated = JSON.parse(body.input[0].output).structuredContent.workPlan;
+      assert.equal(updated[0].record.id, review.projectId);
+      return response(...projects.slice(1).map((item) => call("manage_project", { action: "propose", title: item.title })),
+        call("create_tasks", { titles: [tasks[0].title], parent_id: review.projectId, due_date: day })); },
+    prose("이미 생성된 프로젝트는 유지하고 나머지 생성안을 준비했습니다."),
+  ]);
+  assert.equal(f.writes.filter((row) => row.kind === "project").length, 0);
+  assert.equal(f.writes.filter((row) => row.kind === "task").length, 1);
+  assert.equal(f.session.workPlan.length, 6);
+  assert.equal(f.session.presentedReviewIds.length, 2);
+  assert.match(answer, /생성 승인 대기/);
 });
 
 test("plan guards reject cross-parent batches, missing dependencies, wrong deadlines, mismatched receipts and dependency cycles", () => {
