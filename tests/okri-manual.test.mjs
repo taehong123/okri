@@ -152,6 +152,8 @@ test("Slack manual questions read the manual without history/Canvas, writes or r
     "@/lib/slack-work-intake": { readSlackThread: noWorkspaceAccess },
     "@/lib/project-images": {},
     "@/lib/slack-mcp-continuity": compile(await read("lib/slack-mcp-continuity.ts")),
+    "@/lib/slack-mcp-plan": compile(await read("lib/slack-mcp-plan.ts")),
+    "@/lib/slack-mcp-search": {},
   });
   let round = 0;
   t.mock.method(globalThis, "fetch", async (_url, init) => {

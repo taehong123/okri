@@ -1,5 +1,14 @@
 # Native parity ledger
 
+## 2026-10-19 · Slack thread work planning and approval continuity
+
+- Slack AI keeps separate requested Projects/Tasks and dependencies across the
+  thread, searches scoped container/OKR evidence, invalidates stale proposals
+  after corrections, and continues requested child Tasks after approval.
+- Saved receipts and per-request pending status survive partial failures. This
+  is Slack-only orchestration; no native UI, auth, schema migration, mobile v1
+  payload, store binary or OTA change is included.
+
 ## 2026-10-16 · Multiline Slack creation commands
 
 - Slack creation forms recognize multiline commands, retain pasted details from

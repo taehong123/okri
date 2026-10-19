@@ -23,7 +23,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
   },
   {
     label: "말로 요청",
-    description: "맥락을 설명하면 OKRI가 내용을 정리해 생성 초안을 제안합니다.",
+    description: "같은 스레드의 여러 요청과 소속을 구분합니다. Project 생성안은 수정된 연결까지 확인 후 다음 답장에서 승인하며, 승인 후 하위 Task도 이어서 처리합니다.",
     entries: [
       { command: "@OKRI [요청]", label: "자연어 대화" },
       { command: "!업무생성 [내용]", label: "업무 생성" },

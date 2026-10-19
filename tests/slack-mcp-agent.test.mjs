@@ -101,13 +101,13 @@ test("Slack MCP agent reuses the authorized MCP server and publishes one updated
   assert.match(agent, /boundedCreationSource/);
   assert.match(agent, /source_text: sourceText/);
   assert.match(agent, /sourceMatched=true/);
-  assert.match(agent, /\["list_items", "capture_item", "create_item", "create_tasks"\]/);
+  assert.match(agent, /"manage_project", "prepare_work", "capture_item", "create_item", "create_tasks", "list_items"/);
   assert.match(agent, /"trash_task"/);
   assert.match(agent, /never claim that Task deletion is unavailable/);
-  assert.match(agent, /const creationIntent = !manualQuestion && !hasTaskRemovalIntent\(input\.query\) && hasExplicitCreationIntent/);
-  assert.match(agent, /tool_choice: mustProgressCreation \? "required" : "auto"/);
+  assert.match(agent, /const creationIntent = !manualQuestion && !statusQuestion && !hasTaskRemovalIntent/);
+  assert.match(agent, /mustProgressCreation \? "required" : "auto"/);
   assert.match(agent, /const maxToolCalls = 18/);
-  assert.match(agent, /call create_tasks once with the full title list/);
+  assert.match(agent, /call create_tasks once per parent group/);
   assert.match(agent, /Do not ask the user to split or repeat the request/);
   assert.doesNotMatch(agent, /한 번에 처리할 작업이 너무 많습니다/);
   assert.match(agent, /never ask the user to repeat a title or work description/);

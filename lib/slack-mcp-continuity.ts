@@ -4,6 +4,7 @@ export type SlackMcpStoredToolTurn = {
   result: unknown;
   at: string;
   actorUserId?: string;
+  planKey?: string;
 };
 
 export type PendingProjectApproval = {
@@ -22,6 +23,8 @@ export type PendingProjectApproval = {
   reviewUserId?: string;
   title: string;
   initiativePath: string[];
+  reviewId: string;
+  at: string;
 };
 
 const approvalPhrases = new Set([
@@ -40,7 +43,7 @@ const approvalPhrases = new Set([
 
 export function isExplicitProjectApproval(value: string) {
   const normalized = value.normalize("NFC")
-    .replace(/<@[A-Z0-9]+>/giu, "")
+    .replace(/<@[A-Z0-9]+(?:\|[^>]+)?>/giu, "")
     .toLocaleLowerCase()
     .replace(/[\s.!?~…。，、]+/gu, "")
     .trim();
@@ -79,6 +82,8 @@ export function pendingProjectApproval(turns: SlackMcpStoredToolTurn[]): Pending
     const cycleId = initiative && Object.hasOwn(initiative, "cycleId") ? initiative.cycleId : null;
     const path = Array.isArray(initiative?.path) ? initiative.path.filter((value): value is string => typeof value === "string") : [];
     return {
+      reviewId,
+      at: turn.at,
       arguments: {
         action: "confirm",
         confirmation: {
@@ -97,6 +102,41 @@ export function pendingProjectApproval(turns: SlackMcpStoredToolTurn[]): Pending
     };
   }
   return null;
+}
+
+export function pendingProjectApprovals(turns: SlackMcpStoredToolTurn[]) {
+  const pending = new Map<string, SlackMcpStoredToolTurn>();
+  for (const turn of turns) {
+    if (!["manage_project", "propose_project"].includes(turn.name) || record(turn.result)?.isError === true) continue;
+    const action = text(turn.arguments.action) || "propose";
+    const review = record(record(turn.result)?.structuredContent)?.review;
+    const reviewId = text(record(review)?.id) || text(record(turn.arguments.confirmation)?.review_id);
+    if (action !== "propose") {
+      if (reviewId) pending.delete(reviewId); else pending.clear();
+      continue;
+    }
+    if (!reviewId) continue;
+    const title = text(record(review)?.title);
+    for (const [id, prior] of pending) {
+      const priorData = record(record(prior.result)?.structuredContent);
+      const priorTitle = text(record(priorData?.review)?.title) || text(prior.arguments.title);
+      if ((turn.planKey && prior.planKey === turn.planKey) || priorTitle === title) pending.delete(id);
+    }
+    pending.set(reviewId, turn);
+  }
+  return [...pending.values()].flatMap((turn) => { const approval = pendingProjectApproval([turn]); return approval ? [approval] : []; });
+}
+
+export function isThreadStatusQuestion(value: string) {
+  return /(?:반영|완료|저장|처리|생성|진행)[\s\S]{0,30}(?:맞아|맞나|됐|되었|했어|했나|상태|어디까지|확인|않|안\s*된)|(?:어디까지|현황|상태).*(?:알려|확인|보여)/iu.test(value)
+    && !/(?:바꿔|바꾸|변경해|수정해|추가해|생성해|등록해|처리해|진행해|해\s*줘|만들어|넣어)/u.test(value);
+}
+
+export function hasProjectReviewCorrection(approval: PendingProjectApproval, messages: Array<{ user: string; text: string; ts?: string }>, eventTs: string, botUserId: string) {
+  const proposedAt = Date.parse(approval.at) / 1000;
+  return messages.some((message) => message.user !== botUserId && Number(message.ts) > proposedAt
+    && Number(message.ts) < Number(eventTs) && !isExplicitProjectApproval(message.text) && !isThreadStatusQuestion(message.text)
+    && !/^(?:<@[^>]+>\s*)?(?:고마워|감사합니다|고맙습니다|thanks)[.!\s]*$/iu.test(message.text.trim()));
 }
 
 function candidateById(candidates: Record<string, unknown> | null, initiativeId: string) {
