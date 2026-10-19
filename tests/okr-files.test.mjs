@@ -21,7 +21,7 @@ const source = await read("../lib/okr-files.ts");
 const paceSource = await read("../lib/pace-data.ts");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
 const permissionSource = paceAst.statements.filter((node) => ts.isFunctionDeclaration(node) && ["getItemDeletePermissionMap", "getItemCreatorMap"].includes(node.name?.text)).map((node) => node.getText(paceAst)).join("\n");
-const updateSource = paceAst.statements.filter((node) => ts.isFunctionDeclaration(node) && ["updateItem", "getItem", "validateParent", "normalizeTaskStatus", "clampProgress"].includes(node.name?.text)
+const updateSource = paceAst.statements.filter((node) => ts.isFunctionDeclaration(node) && ["createItem", "updateItem", "getItem", "validateParent", "normalizeTaskStatus", "clampProgress"].includes(node.name?.text)
   || ts.isVariableStatement(node) && node.declarationList.declarations.some(declaration => ["parentKind", "completedStatuses", "TICKET_STATUSES"].includes(declaration.name.getText(paceAst))))
   .map(node => node.getText(paceAst)).join("\n");
 
@@ -57,8 +57,10 @@ async function fixture(t) {
   const permissions = compile(`const { getDb, workspaceMembers, itemAssignments, env, and, eq, inArray, normalizeTeamRole } = require("deps");\n${permissionSource}`, {
     deps: { getDb: () => orm, env: { DB: db }, normalizeTeamRole: (role) => role?.trim().toLowerCase() ?? "viewer", ...schema, ...require("drizzle-orm") },
   });
-  const updates = compile(`const { getDb, items, env, and, eq, ensureWorkspace, logActivity, dispatchSlackAutomationEvent } = require("deps");\n${updateSource}`, {
-    deps: { getDb: () => orm, env: { DB: db }, ensureWorkspace: async () => {}, logActivity: async () => {}, dispatchSlackAutomationEvent: async () => {}, ...schema, ...require("drizzle-orm") },
+  const updates = compile(`const { getDb, items, env, and, eq, ensureWorkspace, logActivity, dispatchSlackAutomationEvent, parsePropertyValue, defaultCycleIdForKind, getWorkspaceRules, releaseProjectCreation } = require("deps");\n${updateSource}`, {
+    deps: { getDb: () => orm, env: { DB: db }, ensureWorkspace: async () => {}, logActivity: async () => {}, dispatchSlackAutomationEvent: async () => {},
+      parsePropertyValue: (value) => JSON.parse(value), defaultCycleIdForKind: async () => null,
+      getWorkspaceRules: async () => ({ defaultPriority: "medium", defaultCadence: "weekly" }), releaseProjectCreation: async () => {}, ...schema, ...require("drizzle-orm") },
   });
   const routineProperties = compile(await read("../lib/routine-properties.ts"), {});
   const api = compile(source, {
@@ -86,6 +88,24 @@ async function fixture(t) {
   }
   return { sql, db, api, permissions, updates, input, beforeBatch: (callback) => { beforeBatch = callback; } };
 }
+
+test("Tickets default to ready-to-process, preserve received records and accept only their five statuses", async (t) => {
+  const f = await fixture(t);
+  const ticket = await f.updates.createItem("w", { kind: "ticket", title: "処理待ち Ticket", createdByUserId: "u" });
+  assert.equal(ticket.status, "todo");
+  assert.equal(ticket.cycleId, null);
+  const received = await f.updates.createItem("w", { kind: "ticket", title: "Received request", status: "backlog", createdByUserId: "u" });
+  for (const status of ["policy_discussion", "todo", "in_progress", "done", "backlog"]) {
+    const updated = await f.updates.updateItem("w", ticket.id, { status });
+    assert.equal(updated.status, status);
+  }
+  assert.equal((await f.updates.updateItem("w", received.id, { description: "Keep its original status" })).status, "backlog");
+  for (const status of ["blocked", "developing", "development_done"]) {
+    await assert.rejects(f.updates.createItem("w", { kind: "ticket", title: "Invalid", status }), /Ticket status/);
+    await assert.rejects(f.updates.updateItem("w", received.id, { status }), /Ticket status/);
+  }
+  assert.deepEqual(f.sql.prepare("PRAGMA foreign_key_check").all(), []);
+});
 
 test("any linked Project can move across OKR files and all Tasks follow without losing work", async (t) => {
   const f = await fixture(t), input = await f.input();

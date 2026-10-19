@@ -681,7 +681,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
         routine_id: memberIdInput.optional().describe("Task-only alternative to parent_id for an independent Routine"),
         cycle_id: memberIdInput.optional().describe("Objective's selected OKR file; children inherit their parent's cycle when omitted"),
         description: z.string().optional(),
-        status: z.enum(ITEM_STATUSES).optional().describe("Workflow status for OKR items and Projects. Tasks are binary: completed statuses become done and every other status becomes todo."),
+        status: z.enum(ITEM_STATUSES).optional().describe("Workflow status for OKR items and Projects. Tickets: backlog=received, policy_discussion=reviewing, todo=ready to process (default), in_progress=processing, done=closed. Tasks are binary: completed statuses become done and every other status becomes todo."),
         priority: z.enum(ITEM_PRIORITIES).optional(),
         cadence: z.enum(ITEM_CADENCES).optional(),
         progress: z.number().min(0).max(100).optional().describe("Progress for Key Results and Projects. Task progress is derived from completion and is not edited directly."),
@@ -949,7 +949,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
     "update_item",
     {
       title: "Update an OKRI item",
-      description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tickets use backlog, policy_discussion, in_progress, or done. Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
+      description: "Change an existing item. Projects and OKR items can use workflow status and progress. Tickets use backlog (received), policy_discussion (reviewing), todo (ready to process), in_progress (processing), or done (closed). Tasks use only incomplete/complete; prefer set_task_completed for that change. Use list_items first when the ID is unknown.",
       inputSchema: {
         id: z.string(),
         title: z.string().trim().min(1).max(500).optional(),

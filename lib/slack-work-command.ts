@@ -352,7 +352,7 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
       title,
       description: textValue(state, "work_description"),
       kind: "ticket",
-      status: selectedValue(state, "work_status") as ItemStatus || "backlog",
+      status: selectedValue(state, "work_status") as ItemStatus || "todo",
       priority: selectedValue(state, "work_priority") as ItemPriority || "medium",
       dueDate: dateValue(state, "work_due") || null,
       source: "slack",
@@ -474,7 +474,7 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     blocks.push(context(t("실행 담당자는 Ticket 아래 Task에서 지정합니다.")));
     blocks.push(input("work_priority", t("우선순위"), staticSelect("work_priority", priorityOptions(t), "medium", t("선택")), false));
     blocks.push(input("work_due", t("기한"), datepicker("work_due", t("기한 선택")), true));
-    blocks.push(input("work_status", t("Ticket 상태"), staticSelect("work_status", ticketStatusOptions(t), "backlog", t("선택")), false));
+    blocks.push(input("work_status", t("Ticket 상태"), staticSelect("work_status", ticketStatusOptions(t), "todo", t("선택")), false));
     blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", description), multiline: true }, true));
   }
   if (metadata.command === "task_create") {
@@ -601,7 +601,10 @@ function targetAction(command: SlackWorkCommand) {
 function isWriteCommand(command: SlackWorkCommand) { return !["help", "my_work", "project_view", "task_view"].includes(command); }
 function priorityOptions(t: Translator) { return ITEM_PRIORITIES.map((value) => option(t(({ low: "낮음", medium: "보통", high: "높음", urgent: "긴급" } as Record<string, string>)[value]), value)); }
 function projectStatusOptions(t: Translator) { return ITEM_STATUSES.filter((value) => value !== "archived").map((value) => option(t(projectStatusLabel(value)), value)); }
-function ticketStatusOptions(t: Translator) { return ["backlog", "policy_discussion", "in_progress", "done"].map((value) => option(t(projectStatusLabel(value)), value)); }
+function ticketStatusOptions(t: Translator) {
+  const labels = { backlog: "접수", policy_discussion: "검토 중", todo: "처리 대기", in_progress: "처리 중", done: "종료" };
+  return Object.entries(labels).map(([value, label]) => option(t(label), value));
+}
 function routineCadenceOptions(t: Translator) { return ["daily", "weekly", "monthly"].map((value) => option(t(({ daily: "매일", weekly: "매주", monthly: "매월" } as Record<string, string>)[value]), value)); }
 function textValue(state: SlackState, id: string) { return state[id]?.[id]?.value ?? ""; }
 function dateValue(state: SlackState, id: string) { return state[id]?.[id]?.selected_date ?? ""; }

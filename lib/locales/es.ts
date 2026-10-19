@@ -1,5 +1,7 @@
 import type { Catalog } from "./en";
 const messages = {
+  "처리 대기": "Pendiente de tramitar",
+  "클라이언트 · 제품 · 상태(기본: 처리 대기) · 우선순위 · 기한": "Cliente · Productos · Estado (predeterminado: Pendiente de tramitar) · Prioridad · Fecha límite",
   "제목을 입력해 주세요.": "Introduce un título.",
   "{name} · 생성자": "{name} · creador",
   "'{title}' Routine을 삭제합니다. 연결된 Task는 General로 이동하며 유지됩니다.": "Se eliminará la Routine '{title}'. Las Tasks vinculadas se conservan y se mueven a General.",

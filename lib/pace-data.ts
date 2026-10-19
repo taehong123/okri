@@ -92,7 +92,7 @@ export { normalizeTeamRole, TEAM_ROLES, type TeamRole } from "@/lib/team-role";
 
 export const ITEM_KINDS = ["objective", "key_result", "initiative", "project", "ticket", "task"] as const;
 export const ITEM_STATUSES = ["backlog", "todo", "policy_discussion", "in_progress", "developing", "development_done", "done", "blocked", "archived"] as const;
-export const TICKET_STATUSES = ["backlog", "policy_discussion", "in_progress", "done"] as const;
+export const TICKET_STATUSES = ["backlog", "policy_discussion", "todo", "in_progress", "done"] as const;
 export const ITEM_PRIORITIES = ["low", "medium", "high", "urgent"] as const;
 export const ITEM_CADENCES = ["daily", "weekly", "monthly", "quarterly"] as const;
 export const OKR_CYCLE_STATUSES = ["planned", "active", "closed"] as const;
@@ -4409,12 +4409,12 @@ export async function createItem(
   }
   const defaultStatus = systemDefault("status");
   if (kind === "ticket" && input.status !== undefined && !TICKET_STATUSES.includes(input.status as (typeof TICKET_STATUSES)[number])) {
-    throw new Error("Ticket status must be backlog, policy_discussion, in_progress, or done");
+    throw new Error("Ticket status must be backlog, policy_discussion, todo, in_progress, or done");
   }
   const status = kind === "task"
     ? normalizeTaskStatus(input.status)
     : kind === "ticket"
-      ? input.status ?? "backlog"
+      ? input.status ?? "todo"
       : input.status ?? (typeof defaultStatus === "string" && ITEM_STATUSES.includes(defaultStatus as ItemStatus) ? defaultStatus as ItemStatus : "todo");
   const cycleId = input.cycleId === undefined ? await defaultCycleIdForKind(ownerId, kind) : input.cycleId;
   await validateParent(ownerId, kind, parentId, routineId, cycleId);
@@ -4509,7 +4509,7 @@ export async function updateItem(
     normalizedPatch.cycleId = target.cycleId;
   }
   if (current.kind === "ticket" && normalizedPatch.status !== undefined && !TICKET_STATUSES.includes(normalizedPatch.status as (typeof TICKET_STATUSES)[number])) {
-    throw new Error("Ticket status must be backlog, policy_discussion, in_progress, or done");
+    throw new Error("Ticket status must be backlog, policy_discussion, todo, in_progress, or done");
   }
   if (current.kind === "task") {
     if (normalizedPatch.status !== undefined) normalizedPatch.status = normalizeTaskStatus(normalizedPatch.status);

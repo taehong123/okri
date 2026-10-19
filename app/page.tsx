@@ -4351,7 +4351,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
           description: nextDescription,
           parentId: nextParentId,
           routineId,
-          status: kind === "task" ? "todo" : kind === "ticket" && status === "todo" ? "backlog" : status,
+          status: kind === "task" ? "todo" : status,
           priority,
           cadence: kind === "project" ? undefined : cadence,
           dueDate: dueDate || null,
@@ -4416,7 +4416,7 @@ function CreateItemPanel({ initialKind, cycleId, items, routines, properties, te
               <header><b>{t("Ticket 정보")}</b><span>{t("요청을 실행 Task로 나누기 전의 기준")}</span></header>
               <label><span>{t("설명")}</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} rows={5} placeholder={t("요청 배경, 기대 결과, 참고 내용을 적어 주세요.")} /></label>
               <div className="project-field-grid">
-                <label><span>{t("상태")}</span><select value={status === "todo" ? "backlog" : status} onChange={(event) => setStatus(event.target.value as ItemStatus)}><option value="backlog">{t("접수")}</option><option value="policy_discussion">{t("검토 중")}</option><option value="in_progress">{t("처리 중")}</option><option value="done">{t("종료")}</option></select></label>
+                <label><span>{t("상태")}</span><select value={status} onChange={(event) => setStatus(event.target.value as ItemStatus)}>{Object.entries(ticketStatusNames).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
                 <label><span>{t("우선순위")}</span><select className={`priority-${priority}`} value={priority} onChange={(event) => setPriority(event.target.value as Priority)}>{Object.entries(priorityLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
                 <label><span>{t("기한")}</span><input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></label>
               </div>
@@ -5943,7 +5943,7 @@ function TicketDetailPanel({ ticket, tasks, teamMembers, readOnly, canDelete, on
         <label><span>{t("Ticket 이름")}</span><textarea aria-label={t("Ticket 이름")} defaultValue={ticket.title} rows={2} disabled={readOnly} onBlur={(event) => { const title = event.currentTarget.value.trim(); if (title && title !== ticket.title) void onPatch({ title }); }} /></label>
         <label><span>{t("설명")}</span><textarea aria-label={t("Ticket 설명")} defaultValue={ticket.description} rows={5} disabled={readOnly} onBlur={(event) => { if (event.currentTarget.value !== ticket.description) void onPatch({ description: event.currentTarget.value }); }} /></label>
         <div className="project-field-grid">
-          <label><span>{t("상태")}</span><select disabled={readOnly} value={normalizeTicketStatus(ticket.status)} onChange={(event) => void onPatch({ status: event.target.value as ItemStatus })}><option value="backlog">{t("접수")}</option><option value="policy_discussion">{t("검토 중")}</option><option value="in_progress">{t("처리 중")}</option><option value="done">{t("종료")}</option></select></label>
+          <label><span>{t("상태")}</span><select disabled={readOnly} value={normalizeTicketStatus(ticket.status)} onChange={(event) => void onPatch({ status: event.target.value as ItemStatus })}>{Object.entries(ticketStatusNames).map(([value, label]) => <option key={value} value={value}>{t(label)}</option>)}</select></label>
           <label><span>{t("우선순위")}</span><select disabled={readOnly} className={`priority-${ticket.priority}`} value={ticket.priority} onChange={(event) => void onPatch({ priority: event.target.value as Priority })}>{Object.entries(priorityLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
           <label><span>{t("기한")}</span><input disabled={readOnly} type="date" value={ticket.dueDate ?? ""} onChange={(event) => void onPatch({ dueDate: event.target.value || null })} /></label>
         </div>
@@ -8118,15 +8118,16 @@ const groupColors: GroupColor[] = ["gray", "blue", "green", "yellow", "orange", 
 
 function kindLabel(kind: ItemKind) { return t({ objective: "Objective", key_result: "Key Result", initiative: "Initiative", project: "Project", ticket: "Ticket", task: "Task" }[kind]); }
 function statusLabel(status: ItemStatus) { return statusLabels[status]; }
-function normalizeTicketStatus(status: ItemStatus): "backlog" | "policy_discussion" | "in_progress" | "done" {
+const ticketStatusNames = { backlog: "접수", policy_discussion: "검토 중", todo: "처리 대기", in_progress: "처리 중", done: "종료" } as const;
+function normalizeTicketStatus(status: ItemStatus): keyof typeof ticketStatusNames {
   if (status === "done" || status === "development_done") return "done";
   if (status === "in_progress" || status === "developing") return "in_progress";
   if (status === "policy_discussion") return "policy_discussion";
+  if (status === "todo") return "todo";
   return "backlog";
 }
 function ticketStatusLabel(status: ItemStatus) {
-  const normalized = normalizeTicketStatus(status);
-  return normalized === "backlog" ? t("접수") : normalized === "policy_discussion" ? t("검토 중") : normalized === "in_progress" ? t("처리 중") : t("종료");
+  return t(ticketStatusNames[normalizeTicketStatus(status)]);
 }
 function isCompletedStatus(status: ItemStatus) { return status === "done" || status === "development_done"; }
 function taskCompletionPatch(status: ItemStatus): Partial<OkriItem> { return { status: isCompletedStatus(status) ? "todo" : "done" }; }

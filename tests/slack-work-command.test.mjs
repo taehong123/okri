@@ -214,6 +214,27 @@ test("legacy form buttons still acknowledge before exact-message history lookup"
   assert.ok(f.calls.find((call) => call.method === "views.update").payload.view.submit);
 });
 
+test("Ticket forms distinguish received/reviewing/ready/processing/closed and default to ready", async () => {
+  const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
+  for (const selected of [undefined, "backlog", "policy_discussion", "todo", "in_progress", "done"]) {
+    const f = commandFixture("!티켓생성 새로운 요청", { domainSource });
+    await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(f.event.text));
+    const raw = f.calls.find((call) => call.method === "chat.postMessage").payload.blocks[1].elements[0].value;
+    await f.command.openSlackWorkCommandModal("trigger", f.authorization, "member", raw, "T1", "U1");
+    const view = f.calls.find((call) => call.method === "views.open").payload.view;
+    const status = view.blocks.find((block) => block.block_id === "work_status").element;
+    assert.equal(status.initial_option.value, "todo");
+    assert.deepEqual(status.options.map((entry) => [entry.value, entry.text.text]), [
+      ["backlog", "접수"], ["policy_discussion", "검토 중"], ["todo", "처리 대기"], ["in_progress", "처리 중"], ["done", "종료"],
+    ]);
+    const state = { work_title: { work_title: { value: "새로운 요청" } },
+      ...(selected ? { work_status: { work_status: { selected_option: { value: selected } } } } : {}) };
+    await f.command.submitSlackWorkCommand(f.authorization, "member", view.private_metadata, state, "T1", "U1");
+    assert.equal(f.writes[0].status, selected ?? "todo");
+    f.sqlite.close();
+  }
+});
+
 test("production-shaped Ticket event reaches a durable button and source-filled modal with duplicate delivery suppressed", async () => {
   const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
   const f = commandFixture("!티켓생성\nCI 실행기 시작 지연 원인 확인\n저장소: https://github.com/example/service\n완료 기준: 필수 CI 성공", { domainSource, reply: true, historyDenied: true });

@@ -1,5 +1,15 @@
 # Native parity ledger
 
+## 2026-10-20 · Ticket ready-to-process status
+
+- Tickets add the existing `todo` value as “처리 대기” and use it for new-item
+  defaults across web, Slack forms and shared creation. Existing received/backlog,
+  review, processing and closed records are preserved without a migration.
+- Web list/create/detail and Slack forms use the same five Ticket state meanings.
+  MCP documents the new allowed Ticket state. Other item workflows are unchanged.
+- Native v1 intentionally excludes Tickets and their Tasks; its frozen enums,
+  payloads and behavior are unchanged. No native screen, store binary or OTA.
+
 ## 2026-10-20 · Reliable Slack Ticket command entry
 
 - Explicit creation commands post a durable, requester-bound form button in the

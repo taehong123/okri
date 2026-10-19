@@ -17,7 +17,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
     entries: [
       { command: "!프로젝트 [이름]", label: "Project", fields: "Initiative · DRI · 참여자 · 기한" },
       { command: "!루틴 [이름]", label: "Routine", fields: "주기 · 트리거 · 장소 · 실행 방법 · 담당자" },
-      { command: "!티켓 [이름]", label: "Ticket", fields: "클라이언트 · 제품 · 상태 · 우선순위 · 기한" },
+      { command: "!티켓 [이름]", label: "Ticket", fields: "클라이언트 · 제품 · 상태(기본: 처리 대기) · 우선순위 · 기한" },
       { command: "!테스크 [이름]", label: "Task", fields: "Project·Ticket·Routine · 담당자 · 기한" },
     ],
   },

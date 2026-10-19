@@ -1,5 +1,7 @@
 import type { Catalog } from "./en";
 const messages = {
+  "처리 대기": "待处理",
+  "클라이언트 · 제품 · 상태(기본: 처리 대기) · 우선순위 · 기한": "客户 · 产品 · 状态（默认：待处理）· 优先级 · 截止日期",
   "제목을 입력해 주세요.": "请输入标题。",
   "{name} · 생성자": "{name} · 创建者",
   "'{title}' Routine을 삭제합니다. 연결된 Task는 General로 이동하며 유지됩니다.": "删除 Routine「{title}」。关联 Task 会保留并移至 General。",

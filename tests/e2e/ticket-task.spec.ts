@@ -49,6 +49,82 @@ test.beforeEach(async ({ page }) => {
   await page.route(/\/api\/ticket-client-links(?:\?|$)/, (route) => json(route, { links: [clientLink] }));
 });
 
+for (const theme of ["white", "dark"]) {
+test(`Ticket 상태는 처리 대기로 생성하고 기존 접수와 구별해 수정한다 · ${theme}`, async ({ page }, info) => {
+  let created: Record<string, unknown> | null = null;
+  const patches: Array<Record<string, unknown>> = [];
+  let saved = { ...ticket, id: "ticket-ready", status: "todo" };
+  await page.route(/\/api\/items(?:\?|$)/, async (route) => {
+    if (route.request().method() === "PATCH") {
+      const patch = route.request().postDataJSON() as Record<string, unknown>;
+      patches.push(patch);
+      saved = { ...saved, ...patch };
+      return json(route, { item: saved });
+    }
+    if (route.request().method() !== "POST") return route.fallback();
+    created = route.request().postDataJSON();
+    saved = { ...saved, ...created };
+    return json(route, { item: saved }, 201);
+  });
+  await page.addInitScript((mode) => localStorage.setItem("okri.theme", mode), theme);
+  await page.goto("/?view=tickets");
+  await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+  await page.getByRole("button", { name: "Ticket 추가", exact: true }).click();
+  const form = page.getByRole("dialog", { name: "새 항목", exact: true });
+  const status = form.getByRole("combobox", { name: "상태", exact: true });
+  await expect(status).toHaveValue("todo");
+  await expect(status.locator("option")).toHaveText(["접수", "검토 중", "처리 대기", "처리 중", "종료"]);
+  expect(created).toBeNull();
+  await status.focus();
+  await status.press("Home");
+  await expect(status).toHaveValue("backlog");
+  await status.selectOption("todo");
+  const title = "처리하기로 결정했지만 아직 시작하지 않은 고객 요청 확인";
+  await form.getByRole("textbox", { name: "이름", exact: true }).fill(title);
+  await form.getByRole("button", { name: "만들기", exact: true }).click();
+  await expect.poll(() => created).toMatchObject({ kind: "ticket", status: "todo", title });
+  const row = page.getByRole("button", { name: new RegExp(title) });
+  await expect(row).toContainText("처리 대기");
+  await expect(page.getByRole("button", { name: /로그인 오류 문의/ })).toContainText("접수");
+  await row.click();
+  const detail = page.getByRole("dialog", { name: new RegExp(`${title} Ticket 상세`) });
+  await detail.getByRole("button", { name: "변경", exact: true }).click();
+  const editor = page.getByRole("dialog", { name: "속성 편집", exact: true });
+  const editStatus = editor.getByRole("combobox", { name: "상태", exact: true });
+  await expect(editStatus).toHaveValue("todo");
+  await editStatus.selectOption("backlog");
+  await expect.poll(() => patches.at(-1)).toMatchObject({ status: "backlog" });
+  await editStatus.selectOption("todo");
+  await expect.poll(() => patches.at(-1)).toMatchObject({ status: "todo" });
+  await expect(editStatus).toHaveValue("todo");
+  await page.evaluate(() => { document.documentElement.style.fontSize = "200%"; });
+  await editStatus.scrollIntoViewIfNeeded();
+  await expect(editStatus).toBeVisible();
+  await expect(editStatus).toBeInViewport();
+  // Verify the changed editor rather than the scrollable workspace behind it.
+  expect(await editor.evaluate((node) => node.scrollWidth <= node.clientWidth + 1)).toBe(true);
+  const bounds = await editStatus.boundingBox();
+  expect(bounds!.x).toBeGreaterThanOrEqual(0);
+  expect(bounds!.x + bounds!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+  await page.evaluate(() => document.fonts.ready);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("DOM.enable");
+  await cdp.send("CSS.enable");
+  const { root } = await cdp.send("DOM.getDocument");
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: ".document-properties-editor label > span" });
+  const rendered = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
+  expect(rendered.fonts.length).toBeGreaterThan(0);
+  for (const font of rendered.fonts) {
+    expect(font.isCustomFont).toBe(true);
+    expect(font.familyName).toContain("Pretendard");
+  }
+  await cdp.detach();
+  const contrast = await new AxeBuilder({ page: page as never }).include(".document-properties-editor").withRules(["color-contrast"]).analyze();
+  expect(contrast.violations).toEqual([]);
+  await page.screenshot({ path: info.outputPath("ticket-ready-status.png") });
+});
+}
+
 test("Ticket 목록과 상세는 연결 Task를 같은 흐름에서 관리한다", async ({ page }) => {
   let createdPayload: Record<string, unknown> | null = null;
   let clientLinkPayload: Record<string, unknown> | null = null;

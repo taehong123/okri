@@ -1,4 +1,6 @@
 const messages = {
+  "처리 대기": "Ready to process",
+  "클라이언트 · 제품 · 상태(기본: 처리 대기) · 우선순위 · 기한": "Client · Products · Status (default: Ready to process) · Priority · Due date",
   "제목을 입력해 주세요.": "Enter a title.",
   "{name} · 생성자": "{name} · creator",
   "'{title}' Routine을 삭제합니다. 연결된 Task는 General로 이동하며 유지됩니다.": "Delete Routine '{title}'. Linked Tasks are kept and moved to General.",
