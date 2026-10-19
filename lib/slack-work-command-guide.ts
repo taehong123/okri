@@ -13,7 +13,7 @@ export type SlackWorkGuideGroup = {
 export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
   {
     label: "양식으로 추가",
-    description: "명령을 입력한 사람에게 확인 양식이 열립니다.",
+    description: "같은 스레드에 남는 '양식 열기' 버튼을 누르면 명령을 입력한 사람에게 확인 양식이 열립니다. 제출 전에는 생성되지 않습니다.",
     entries: [
       { command: "!프로젝트 [이름]", label: "Project", fields: "Initiative · DRI · 참여자 · 기한" },
       { command: "!루틴 [이름]", label: "Routine", fields: "주기 · 트리거 · 장소 · 실행 방법 · 담당자" },
@@ -49,6 +49,7 @@ export function slackWorkGuideText(t: GuideTranslator) {
     `*${t("OKRI Slack 업무 매뉴얼")}*`,
     t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요."),
     t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다."),
+    t("!티켓생성도 지원합니다. 본문을 받을 때 양식 내용을 보관하므로 양식을 열 때 스레드를 다시 조회하지 않습니다."),
   ];
   for (const group of SLACK_WORK_GUIDE_GROUPS) {
     lines.push("", `*${t(group.label)}*`, t(group.description));
@@ -68,7 +69,7 @@ export function slackWorkGuideBlocks(t: GuideTranslator) {
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}` },
+      text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}\n${t("!티켓생성도 지원합니다. 본문을 받을 때 양식 내용을 보관하므로 양식을 열 때 스레드를 다시 조회하지 않습니다.")}` },
     },
     ...SLACK_WORK_GUIDE_GROUPS.map((group) => ({
       type: "section",

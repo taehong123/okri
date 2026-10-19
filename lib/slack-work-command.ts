@@ -61,6 +61,7 @@ type CommandMetadata = {
   draft?: SlackWorkDraft;
   sourceThread?: { channel: string; ts: string };
   sourceMessageTs?: string;
+  sourceSnapshot?: boolean;
 };
 
 type SlackState = Record<string, Record<string, {
@@ -152,9 +153,23 @@ export async function handleSlackWorkCommandEvent(
     ...(isCreateCommand(parsed.command) && event.ts && /[\r\n\u2028\u2029]|.{241}/u.test(event.text)
       ? { sourceMessageTs: event.ts } : {}),
   };
+  if (metadata.sourceMessageTs) {
+    // Capture the already-delivered command. Opening a form must not depend on
+    // another history API request, its availability or its rate limit.
+    const content = slackWorkCommandFormContent(event.text);
+    if (!content || content.command !== metadata.command) throw new Error("Slack command source changed");
+    const now = new Date().toISOString();
+    await env.DB.prepare(`INSERT INTO slack_work_command_operations
+      (request_id, owner_id, team_id, slack_user_id, command, status, result_json, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'command_source', 'succeeded', ?, ?, ?)`)
+      .bind(`command-source:${metadata.requestId}`, metadata.ownerId, metadata.teamId, metadata.slackUserId,
+        JSON.stringify({ command: metadata.command, ...boundedFormContent(metadata, content) }), now, now).run();
+    metadata.sourceSnapshot = true;
+  }
   const label = commandLabel(parsed.command, t);
-  await postPrivate(token, event, `${label}${parsed.query ? ` · ${parsed.query}` : ""}`, [
-    { type: "section", text: { type: "mrkdwn", text: `*${label}*${parsed.query ? `\n${escapeSlack(parsed.query)}` : ""}` } },
+  const postPrompt = isCreateCommand(parsed.command) ? postCommandPrompt : postPrivate;
+  await postPrompt(token, event, `${label}${parsed.query ? ` · ${parsed.query}` : ""}`, [
+    { type: "section", text: { type: "mrkdwn", text: `${isCreateCommand(parsed.command) ? `<@${event.user}> ` : ""}*${label}*${parsed.query ? `\n${escapeSlack(parsed.query)}` : ""}` } },
     { type: "actions", elements: [{ type: "button", action_id: "work_command_open", style: "primary", text: { type: "plain_text", text: t("양식 열기") }, value: JSON.stringify(metadata) }] },
   ]);
 }
@@ -176,20 +191,32 @@ export async function openSlackWorkCommandModal(triggerId: string, authorization
     // Acknowledge the button immediately; fetching the source must not expire its trigger.
     waitUntil((async () => {
       try {
-        const result = await slackApi<{ messages?: Array<{ ts?: string; user?: string; text?: string }> }>(token, "conversations.replies", {
-          channel: metadata.sourceThread!.channel, ts: metadata.sourceThread!.ts,
-          oldest: metadata.sourceMessageTs, latest: metadata.sourceMessageTs, inclusive: true, limit: 1,
-        });
-        const message = result.messages?.find((entry) => entry.ts === metadata.sourceMessageTs && entry.user === metadata.slackUserId);
-        if (!message?.text) throw new Error("Slack command source is unavailable");
-        const text = message.text.replace(/<@([A-Z0-9]+)(?:\|[^>]+)?>/giu,
-          (mention, id: string) => id === connection.botUserId ? " " : mention);
-        const content = slackWorkCommandFormContent(text);
-        if (!content || content.command !== metadata.command) throw new Error("Slack command source changed");
-        const link = `https://slack.com/archives/${metadata.sourceThread!.channel}/p${metadata.sourceMessageTs!.replace(".", "")}`;
-        const description = content.description.length <= 3_000 ? content.description
-          : `${content.description.slice(0, 3_000 - link.length - 2)}\n\n${link}`;
-        const view = await commandModal(metadata, authorization, t, { title: content.title, description });
+        let content: { title: string; description: string };
+        if (metadata.sourceSnapshot) {
+          const row = await env.DB.prepare(`SELECT result_json FROM slack_work_command_operations
+            WHERE request_id = ? AND owner_id = ? AND team_id = ? AND slack_user_id = ? AND command = 'command_source'`)
+            .bind(`command-source:${metadata.requestId}`, metadata.ownerId, metadata.teamId, metadata.slackUserId)
+            .first<{ result_json: string }>();
+          const saved = row ? JSON.parse(row.result_json) as Record<string, unknown> : null;
+          if (!saved || saved.command !== metadata.command || typeof saved.title !== "string" || typeof saved.description !== "string") {
+            throw new Error("Slack command snapshot is unavailable");
+          }
+          content = boundedFormContent(metadata, { title: saved.title, description: saved.description });
+        } else {
+          // Compatibility for buttons posted before command snapshots existed.
+          const result = await slackApi<{ messages?: Array<{ ts?: string; user?: string; text?: string }> }>(token, "conversations.replies", {
+            channel: metadata.sourceThread!.channel, ts: metadata.sourceThread!.ts,
+            oldest: metadata.sourceMessageTs, latest: metadata.sourceMessageTs, inclusive: true, limit: 1,
+          });
+          const message = result.messages?.find((entry) => entry.ts === metadata.sourceMessageTs && entry.user === metadata.slackUserId);
+          if (!message?.text) throw new Error("Slack command source is unavailable");
+          const text = message.text.replace(/<@([A-Z0-9]+)(?:\|[^>]+)?>/giu,
+            (mention, id: string) => id === connection.botUserId ? " " : mention);
+          const parsed = slackWorkCommandFormContent(text);
+          if (!parsed || parsed.command !== metadata.command) throw new Error("Slack command source changed");
+          content = boundedFormContent(metadata, parsed);
+        }
+        const view = await commandModal(metadata, authorization, t, content);
         await slackApi(token, "views.update", { view_id: viewId, ...(hash ? { hash } : {}), view });
       } catch (error) {
         console.error("Slack command source hydration failed", { name: error instanceof Error ? error.name : "unknown" });
@@ -201,6 +228,13 @@ export async function openSlackWorkCommandModal(triggerId: string, authorization
   }
   const view = await commandModal(metadata, authorization, t);
   await slackApi(token, "views.open", { trigger_id: triggerId, view });
+}
+
+function boundedFormContent(metadata: CommandMetadata, content: { title: string; description: string }) {
+  const link = metadata.sourceThread && metadata.sourceMessageTs
+    ? `https://slack.com/archives/${metadata.sourceThread.channel}/p${metadata.sourceMessageTs.replace(".", "")}` : "";
+  return { title: content.title.slice(0, 240), description: content.description.length <= 3_000 ? content.description
+    : `${content.description.slice(0, 3_000 - link.length - 2)}\n\n${link}` };
 }
 
 function commandLoadingView(metadata: CommandMetadata, t: Translator, text: string) {
@@ -626,7 +660,15 @@ async function memberTranslator(authorization: RequestAuthorization) {
   return serverTranslator(language);
 }
 async function postPrivate(token: string, event: WorkMessageEvent, text: string, blocks?: unknown[]) {
-  const method = event.channelType === "im" ? "chat.postMessage" : "chat.postEphemeral";
+  return postCommandResponse(token, event, text, blocks, false);
+}
+async function postCommandPrompt(token: string, event: WorkMessageEvent, text: string, blocks?: unknown[]) {
+  // Form entry points must survive reloads and desktop/mobile transitions.
+  // Identity remains enforced when opening and submitting the modal.
+  return postCommandResponse(token, event, text, blocks, true);
+}
+async function postCommandResponse(token: string, event: WorkMessageEvent, text: string, blocks: unknown[] | undefined, persistent: boolean) {
+  const method = persistent || event.channelType === "im" ? "chat.postMessage" : "chat.postEphemeral";
   try {
     await slackApi(token, method, {
       channel: event.channel, text, blocks,

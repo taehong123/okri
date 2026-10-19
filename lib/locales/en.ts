@@ -40,6 +40,8 @@ const messages = {
   "느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.": "Use an exclamation command to open a form, or mention @OKRI for a natural-language request.",
   "양식으로 추가": "Add with a form",
   "명령을 입력한 사람에게 확인 양식이 열립니다.": "A review form opens privately for the person who entered the command.",
+  "같은 스레드에 남는 '양식 열기' 버튼을 누르면 명령을 입력한 사람에게 확인 양식이 열립니다. 제출 전에는 생성되지 않습니다.": "Use the persistent Open form button in the same thread. Only the requester can open the review form; nothing is created until submission.",
+  "!티켓생성도 지원합니다. 본문을 받을 때 양식 내용을 보관하므로 양식을 열 때 스레드를 다시 조회하지 않습니다.": "!티켓생성 is also supported. Form contents are captured when the command arrives, without fetching the thread again when you open the form.",
   "Initiative · DRI · 참여자 · 기한": "Initiative · DRI · participants · due date",
   "주기 · 트리거 · 장소 · 실행 방법 · 담당자": "Cadence · trigger · place · steps · assignee",
   "클라이언트 · 제품 · 상태 · 우선순위 · 기한": "Client · product · status · priority · due date",

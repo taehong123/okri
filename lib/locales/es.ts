@@ -41,6 +41,8 @@ const messages = {
   "느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.": "Usa un comando con signo de exclamación para abrir un formulario y menciona a @OKRI para pedir algo en lenguaje natural.",
   "양식으로 추가": "Añadir con formulario",
   "명령을 입력한 사람에게 확인 양식이 열립니다.": "El formulario de revisión se abre en privado para quien escribió el comando.",
+  "같은 스레드에 남는 '양식 열기' 버튼을 누르면 명령을 입력한 사람에게 확인 양식이 열립니다. 제출 전에는 생성되지 않습니다.": "El botón Abrir formulario permanece en el mismo hilo. Solo quien escribió el comando puede abrirlo; no se crea nada hasta enviarlo.",
+  "!티켓생성도 지원합니다. 본문을 받을 때 양식 내용을 보관하므로 양식을 열 때 스레드를 다시 조회하지 않습니다.": "También se admite !티켓생성. El contenido se guarda al recibir el comando, sin volver a consultar el hilo al abrir el formulario.",
   "Initiative · DRI · 참여자 · 기한": "Initiative · DRI · participantes · fecha límite",
   "주기 · 트리거 · 장소 · 실행 방법 · 담당자": "Frecuencia · disparador · lugar · pasos · responsable",
   "클라이언트 · 제품 · 상태 · 우선순위 · 기한": "Cliente · producto · estado · prioridad · fecha límite",

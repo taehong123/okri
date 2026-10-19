@@ -1,5 +1,17 @@
 # Native parity ledger
 
+## 2026-10-20 · Reliable Slack Ticket command entry
+
+- Explicit creation commands post a durable, requester-bound form button in the
+  source thread. Multiline form contents are captured at event receipt and read
+  from a workspace/team/actor-scoped snapshot instead of another Slack history
+  request. Legacy buttons retain their exact-source compatibility path.
+- Added group-DM routing and consistent bot-mention normalization across duplicate
+  message/app-mention deliveries. Creating an item still requires modal submit;
+  permissions and request-id idempotency remain enforced.
+- Slack-only delivery change; no native UI, mobile v1 payload, authentication,
+  historical migration, store binary or OTA changes.
+
 ## 2026-10-19 · Slack thread work planning and approval continuity
 
 - Slack AI keeps separate requested Projects/Tasks and dependencies across the

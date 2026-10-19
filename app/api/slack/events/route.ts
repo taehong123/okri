@@ -90,9 +90,9 @@ export async function POST(request: Request) {
   const commandEvent = isSlackCommandEvent(event) && event.user !== connection.botUserId ? event : null;
   const canvasExcerpt = commandEvent?.subtype === "document_mention" ? slackBlockText(commandEvent.blocks) : "";
   const rawCommandText = commandEvent?.text || canvasExcerpt;
-  const commandText = commandEvent?.type === "app_mention"
-    ? withoutBotMention(rawCommandText ?? "", connection.botUserId)
-    : rawCommandText;
+  // message and app_mention can arrive in either order for the same message.
+  const commandText = commandEvent ? withoutBotMention(rawCommandText ?? "", connection.botUserId) : rawCommandText;
+  const commandChannelType = commandEvent?.channel_type ?? (commandEvent?.channel.startsWith("D") ? "im" : "channel");
   const parsedCommand = commandText ? parseSlackWorkCommand(commandText) : null;
   const mcpConversation = !parsedCommand && (commandEvent?.type === "app_mention"
     || (!parsedCommand && commandEvent?.channel_type === "im" && isOkriManualQuestion(commandText ?? "")));
@@ -137,12 +137,12 @@ export async function POST(request: Request) {
     const blockIds = (event.blocks ?? []).map(slackBlockId).filter(Boolean);
     waitUntil(handleDeliveredDailyReminder({ teamId, channelId: event.channel, botId: event.user, blockIds }).then(() => undefined));
   } else if (workCommand && commandEvent
-    && ["im", "channel", "group"].includes(commandEvent.channel_type ?? (commandEvent.type === "app_mention" ? "channel" : ""))) {
+    && ["im", "mpim", "channel", "group"].includes(commandChannelType)) {
     waitUntil(handleSlackWorkCommandEvent(request, connection, {
       channel: commandEvent.channel,
-      channelType: commandEvent.channel_type ?? (commandEvent.type === "app_mention" ? "channel" : ""),
+      channelType: commandChannelType,
       user: commandEvent.user,
-      text: commandEvent.text ?? "",
+      text: commandText ?? "",
       ts: commandEvent.ts,
       threadTs: commandEvent.thread_ts,
     }, workCommand).then(() => import("@/lib/slack-task-changes")).then(({ runDueTaskChanges }) => runDueTaskChanges(env.DB)).catch((error) => console.error("Slack work command failed", error)));
