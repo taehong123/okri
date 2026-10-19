@@ -1,33 +1,38 @@
 import { workName } from "./slack-mcp-plan";
 
-type SearchRow = { id: string; kind: string; title: string; description: string; cycleId: string | null; parentTitle: string | null; grandparentTitle: string | null; ancestorTitle: string | null };
+type SearchRow = { id: string; kind: string; title: string; description: string; cycleId: string | null; parentTitle: string | null; grandparentTitle: string | null; ancestorTitle: string | null; rootTitle: string | null };
 
 export async function searchSlackWork(db: D1Database, ownerId: string, input: { query: string; kind?: string; limit?: number }) {
   const query = input.query.normalize("NFC").trim().slice(0, 120);
   if (workName(query).length < 2) throw new Error("Use a short distinctive subject of at least two characters.");
   const [items, routines] = await db.batch([
     db.prepare(`SELECT i.id, i.kind, i.title, substr(i.description,1,600) AS description, i.cycle_id AS cycleId,
-      p.title AS parentTitle, g.title AS grandparentTitle, a.title AS ancestorTitle
+      i.parent_id AS parentId, i.routine_id AS routineId, i.due_date AS dueDate, i.status,
+      COALESCE(p.title,r.title) AS parentTitle, g.title AS grandparentTitle, a.title AS ancestorTitle,b.title AS rootTitle
       FROM items i LEFT JOIN items p ON p.id=i.parent_id AND p.owner_id=i.owner_id
       LEFT JOIN items g ON g.id=p.parent_id AND g.owner_id=i.owner_id
       LEFT JOIN items a ON a.id=g.parent_id AND a.owner_id=i.owner_id
+      LEFT JOIN items b ON b.id=a.parent_id AND b.owner_id=i.owner_id
+      LEFT JOIN routines r ON r.id=i.routine_id AND r.owner_id=i.owner_id
       LEFT JOIN okr_cycles c ON c.id=i.cycle_id AND c.owner_id=i.owner_id
-      WHERE i.owner_id=? AND i.kind IN ('project','initiative','ticket') AND i.archived_at IS NULL AND i.status!='archived'
+      WHERE i.owner_id=? AND i.kind IN ('task','project','initiative','ticket') AND i.archived_at IS NULL AND i.status!='archived'
         AND (c.status IS NULL OR c.status!='closed')
         AND (p.id IS NULL OR (p.archived_at IS NULL AND p.status!='archived'))
         AND (g.id IS NULL OR (g.archived_at IS NULL AND g.status!='archived'))
         AND (a.id IS NULL OR (a.archived_at IS NULL AND a.status!='archived'))
+        AND (b.id IS NULL OR (b.archived_at IS NULL AND b.status!='archived'))
+        AND (i.routine_id IS NULL OR r.active=1)
         AND (i.kind!='initiative' OR (p.kind='key_result' AND g.kind='objective'
           AND p.cycle_id IS i.cycle_id AND g.cycle_id IS i.cycle_id))
       ORDER BY i.id LIMIT 2001`).bind(ownerId),
     db.prepare(`SELECT id,'routine' AS kind,title,substr(description,1,600) AS description,NULL AS cycleId,
-      NULL AS parentTitle,NULL AS grandparentTitle,NULL AS ancestorTitle FROM routines
+      NULL AS parentTitle,NULL AS grandparentTitle,NULL AS ancestorTitle,NULL AS rootTitle FROM routines
       WHERE owner_id=? AND active=1 AND (system_key IS NULL OR system_key!='general') ORDER BY id LIMIT 2001`).bind(ownerId),
   ]);
   const rows = [...items.results.slice(0, 2000), ...routines.results.slice(0, 2000)] as SearchRow[];
   const terms = [...new Set([workName(query), ...query.split(/\s+/).map(workName).filter((term) => term.length >= 2)])];
   const ranked = rows.filter((row) => !input.kind || row.kind === input.kind).map((row) => {
-    const title = workName(row.title), context = workName([row.description, row.parentTitle, row.grandparentTitle, row.ancestorTitle].filter(Boolean).join(" "));
+    const title = workName(row.title), context = workName([row.description, row.parentTitle, row.grandparentTitle, row.ancestorTitle, row.rootTitle].filter(Boolean).join(" "));
     const exact = title === terms[0];
     let score = exact ? 1000 : title.includes(terms[0]) ? 700 : 0;
     for (const term of terms) {
@@ -40,7 +45,7 @@ export async function searchSlackWork(db: D1Database, ownerId: string, input: { 
         if (editDistanceAtMostOne(term, title)) score += 180;
       }
     }
-    return { ...row, path: [row.ancestorTitle, row.grandparentTitle, row.parentTitle, row.title].filter(Boolean),
+    return { ...row, path: [row.rootTitle, row.ancestorTitle, row.grandparentTitle, row.parentTitle, row.title].filter(Boolean),
       match: exact ? "exact" : "candidate", score };
   }).filter((row) => row.score > 0).sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
   return { query, items: ranked.slice(0, Math.max(1, Math.min(20, input.limit || 8))),

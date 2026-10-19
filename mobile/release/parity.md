@@ -8,6 +8,10 @@
 - Saved receipts and per-request pending status survive partial failures. This
   is Slack-only orchestration; no native UI, auth, schema migration, mobile v1
   payload, store binary or OTA change is included.
+- Follow-up execution requests also recover existing misplaced Tasks, search
+  their actual parent/deadline, and relink the same record after parent approval
+  rather than creating a duplicate. All orchestration remains inside Slack;
+  installed native clients and mobile v1 are unchanged.
 
 ## 2026-10-16 · Multiline Slack creation commands
 

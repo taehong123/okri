@@ -40,7 +40,7 @@ function proposal(title, id, initiativeId = "growth") {
 }
 
 async function fixture(t) {
-  const state = { session: null, messages: [], posted: [], writes: [], reviews: new Map(), failConfirm: new Set(), budgetError: false, steps: [] };
+  const state = { session: null, messages: [], posted: [], writes: [], readItems: [], initiatives: [], reviews: new Map(), failConfirm: new Set(), budgetError: false, steps: [] };
   const db = { prepare: (sql) => ({ bind: (...args) => ({
     all: async () => ({ results: [] }),
     first: async () => state.session ? { result_json: JSON.stringify(state.session), updated_at: new Date().toISOString() } : null,
@@ -52,10 +52,14 @@ async function fixture(t) {
     "@/app/mcp/route": { createOkriServer: async () => {
       const server = new McpServer({ name: "thread-plan-fixture", version: "1" });
       const register = (name, properties, handler, readOnlyHint = false) => server.registerTool(name, {
-        inputSchema: properties, annotations: { readOnlyHint },
+        description: `${name}: authorized fixture tool with the same work semantics as production.`, inputSchema: properties, annotations: { readOnlyHint },
       }, async (args) => ({ content: [{ type: "text", text: "fixture" }], ...await handler(args) }));
-      register("prepare_work", { kind: z.string(), source_text: z.string(), include_members: z.boolean(), limit: z.number() }, async () => ({ structuredContent: { projects: [], initiatives: [] } }), true);
-      register("list_items", { kind: z.string().optional(), query: z.string().optional() }, async () => ({ structuredContent: { items: [] } }), true);
+      register("prepare_work", { kind: z.string(), source_text: z.string(), include_members: z.boolean(), limit: z.number() }, async () => ({ structuredContent: { context: {
+        projects: state.readItems.filter((item) => item.kind === "project"), initiatives: state.initiatives, members: [{ id: "member", displayName: "요청자", role: "owner", status: "active" }],
+      } } }), true);
+      register("list_items", { kind: z.string().optional(), query: z.string().optional(), parent_id: z.string().optional(), limit: z.number().optional() }, async (args) => ({ structuredContent: {
+        items: state.readItems.filter((item) => (!args.kind || item.kind === args.kind) && (!args.query || plan.workName(item.title).includes(plan.workName(args.query))) && (!args.parent_id || item.parentId === args.parent_id)),
+      } }), true);
       register("list_routines", {}, async () => ({ structuredContent: { routines: [] } }), true);
       register("create_item", { kind: z.string(), title: z.string(), template_id: z.string().optional() }, async () => { throw new Error("Slack must never reach the legacy Project confirmation path"); });
       register("manage_project", { action: z.string(), title: z.string().optional(), dri_member_id: z.string().optional(),
@@ -70,12 +74,21 @@ async function fixture(t) {
         if (state.failConfirm.has(review.title)) throw new Error("fixture confirmation failure");
         assert.equal(review.state, "awaiting_user_confirmation");
         state.writes.push({ kind: "project", title: review.title });
+        state.readItems.push({ id: `project-${review.title}`, kind: "project", title: review.title });
         return { structuredContent: { review: { ...review, state: "created", projectId: `project-${review.title}` } } };
       });
       register("create_tasks", { titles: z.array(z.string()), parent_id: z.string().optional(), due_date: z.string().optional(), assignee_member_id: z.string().optional() }, async (args) => {
         const items = args.titles.map((title) => ({ id: `task-${state.writes.length}-${title}`, kind: "task", title, parentId: args.parent_id, dueDate: args.due_date }));
         state.writes.push(...items);
+        state.readItems.push(...items);
         return { structuredContent: { items, count: items.length } };
+      });
+      register("link_item", { id: z.string(), parent_id: z.string().optional(), routine_id: z.string().optional() }, async (args) => {
+        const item = state.readItems.find((item) => item.id === args.id);
+        assert.ok(item, "only an existing fixture Task may move");
+        Object.assign(item, { parentId: args.parent_id ?? null, routineId: args.routine_id ?? null });
+        state.writes.push({ operation: "link", id: item.id, parentId: item.parentId });
+        return { structuredContent: { item } };
       });
       return server;
     } },
@@ -95,7 +108,8 @@ async function fixture(t) {
     "@/lib/project-images": {},
     "@/lib/slack-mcp-continuity": continuity,
     "@/lib/slack-mcp-plan": plan,
-    "@/lib/slack-mcp-search": { searchSlackWork: async (_db, owner, args) => { assert.equal(owner, "workspace"); return { query: args.query, items: [] }; } },
+    "@/lib/slack-mcp-search": { searchSlackWork: async (_db, owner, args) => { assert.equal(owner, "workspace"); return { query: args.query,
+      items: [...state.readItems, ...state.initiatives].filter((item) => (!args.kind || item.kind === args.kind) && plan.workName(item.title).includes(plan.workName(args.query))) }; } },
   });
   t.mock.method(globalThis, "fetch", async (_url, init) => {
     assert.ok(state.steps.length, "unexpected extra model request");
@@ -240,15 +254,71 @@ test("plan guards reject cross-parent batches, missing dependencies, wrong deadl
   items[0].record = { id: "green-project", title: projects[0].title };
   assert.match(plan.taskPlanGuard(items, "create_tasks", { titles: [tasks[0].title], due_date: day, parent_id: "other" }), /saved ID/);
   const taskReceipt = { name: "create_tasks", arguments: {}, result: { structuredContent: { items: [{ id: "wrong-task", kind: "task", title: tasks[0].title, parentId: "other" }] } } };
-  assert.equal(plan.reconcileWorkPlan(items, [taskReceipt])[1].record, undefined);
-  assert.throws(() => plan.updateWorkPlan([], [{ key: "a", title: "a", kind: "project", depends_on: "b" }, { key: "b", title: "b", kind: "project", depends_on: "a" }]), /cycle/);
+  const misplaced = plan.reconcileWorkPlan(items, [taskReceipt]);
+  assert.equal(misplaced[1].record.id, "wrong-task");
+  assert.equal(plan.workPlanStatus(misplaced[1], misplaced), "needs_placement");
+  assert.match(plan.taskPlanGuard(misplaced, "create_tasks", { titles: [tasks[0].title], due_date: day, parent_id: "green-project" }), /already has a successful/);
+  assert.throws(() => plan.updateWorkPlan([], [{ key: "a", title: "a", kind: "project", depends_on: "b" }, { key: "b", title: "b", kind: "project", depends_on: "a" }]), /Only a Task|cycle/);
+  assert.throws(() => plan.updateWorkPlan([], [{ key: "p", title: "제품", kind: "project" }, { key: "t", title: "구현", kind: "task", parent_title: "제품" }]), /must include depends_on/);
+  assert.throws(() => plan.updateWorkPlan([], [{ key: "i", title: "AX 세일즈", kind: "ticket" }, { key: "p", title: "AX", kind: "project", depends_on: "i" }]), /never a fabricated Ticket/);
   assert.equal(continuity.isThreadStatusQuestion("아직 생성 안된 업무 확인하고 생성해줘"), false);
+});
+
+test("다 반영하라고 is an execution continuation: reuse misplaced legacy Tasks and relink them after their separate Projects are approved", async (t) => {
+  const f = await fixture(t);
+  const parentId = `project-${projects[0].title}`;
+  const existingTasks = tasks.map((item, i) => ({ id: `existing-${i}`, kind: "task", title: item.title, parentId, dueDate: day, status: i === 1 ? "done" : "todo", assigneeMemberId: "member" }));
+  f.readItems.push({ id: parentId, kind: "project", title: projects[0].title }, ...structuredClone(existingTasks));
+  f.session = { version: 1, turns: [
+    { name: "manage_project", arguments: { action: "confirm" }, at: new Date(Date.now() - 20_000).toISOString(), result: { structuredContent: { review: { title: projects[0].title, state: "created", projectId: parentId } } } },
+    { name: "create_tasks", arguments: { titles: tasks.map((item) => item.title), parent_id: parentId }, at: new Date(Date.now() - 10_000).toISOString(), result: { structuredContent: { items: existingTasks } } },
+  ], updatedAt: new Date().toISOString(), answer: "세 업무를 같은 프로젝트 아래 만들었습니다." };
+  f.messages.push({ user: "user", text: "그린서비스 유료전환, 렌즈 AX, 샘플푸드 재무 자동화 프로젝트 각각 생성해주고 각자 업무를 넣어줘. 기존 도입 확장 관리 밑에는 넣지 말아줘.", ts: String(Date.now() / 1000 - 30) });
+  await f.run("왜 자꾸 처리를 안하고 보고만 하는거야. 다 반영하라고 뭐하는거야", [
+    (body) => { assert.equal(body.tool_choice.name, "plan_work"); return response(call("plan_work", { items: requested })); },
+    (body) => { const items = JSON.parse(body.input[0].output).structuredContent.workPlan;
+      assert.equal(items.filter((item) => item.kind === "task" && item.record).length, 3);
+      return response(...projects.slice(1).map((item) => call("manage_project", { action: "propose", title: item.title })),
+        call("create_tasks", { titles: [tasks[1].title], parent_id: parentId, due_date: day }),
+        call("link_item", { id: "existing-1", parent_id: parentId })); },
+    (body) => { assert.match(body.input[2].output, /already has a successful/); assert.match(body.input[3].output, /parent is not saved/); return prose("남은 두 프로젝트 생성안을 승인해 주세요. 기존 업무는 중복 생성하지 않고 옮깁니다."); },
+  ]);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.session.workPlan.filter((item) => plan.workPlanStatus(item, f.session.workPlan) === "needs_placement").length, 2);
+  await f.run("진행해", [
+    prose("프로젝트 두 개를 생성했습니다."),
+    (body) => { assert.equal(body.tool_choice, "required"); return response(...tasks.slice(1).map((item, i) => call("link_item", { id: `existing-${i + 1}`, parent_id: `project-${item.parent_title}` }))); },
+    prose("기존 업무 두 개를 각 프로젝트로 옮겼습니다."),
+  ]);
+  assert.equal(f.writes.filter((row) => row.kind === "task").length, 0);
+  assert.equal(f.writes.filter((row) => row.operation === "link").length, 2);
+  assert.ok(f.session.workPlan.every((item) => plan.workPlanStatus(item, f.session.workPlan) === "saved"));
+  assert.equal(f.readItems.find((item) => item.id === "existing-1").status, "done");
+  assert.equal(f.readItems.find((item) => item.id === "existing-1").assigneeMemberId, "member");
+});
+
+test("an explicit tool-backed existing_id can reuse a spelling variant, but an invented ID or ambiguous title never resolves a Task", () => {
+  const items = plan.updateWorkPlan([], [{ ...requested[0] }, { ...requested[1], title: "그린 서비스 시트 연동", existing_id: "known-task" }]);
+  const receipt = { name: "search_work", arguments: {}, result: { structuredContent: { items: [{ id: "known-task", kind: "task", title: "그린서비스 시트연동", parentId: "wrong" }] } } };
+  const resolved = plan.reconcileWorkPlan(items, [receipt]);
+  assert.equal(resolved[1].record.id, "known-task");
+  const changedReference = plan.updateWorkPlan(resolved, [{ ...requested[1], title: "그린 서비스 시트 연동", existing_id: "invented" }]);
+  assert.equal(changedReference[1].record, undefined, "changing a selected ID requires fresh read evidence");
+  const unknown = plan.updateWorkPlan([], [{ ...requested[0] }, { ...requested[1], existing_id: "invented" }]);
+  assert.equal(plan.reconcileWorkPlan(unknown, [receipt])[1].record, undefined);
+  assert.match(plan.taskPlanGuard(unknown, "create_tasks", { titles: [tasks[0].title], due_date: day }), /verify/);
+  const ambiguous = { name: "list_items", arguments: {}, result: { structuredContent: { items: [
+    { id: "a", kind: "task", title: tasks[0].title, parentId: "one" }, { id: "b", kind: "task", title: tasks[0].title, parentId: "two" },
+  ] } } };
+  assert.equal(plan.reconcileWorkPlan(plan.updateWorkPlan([], requested), [ambiguous])[1].record, undefined);
+  const routineOnly = { name: "list_routines", arguments: {}, result: { structuredContent: { routines: [{ id: "routine", title: tasks[0].title }] } } };
+  assert.equal(plan.reconcileWorkPlan(plan.updateWorkPlan([], requested), [routineOnly])[1].record, undefined);
 });
 
 test("workspace search finds older, normalized, misspelled and contextual candidates without crossing owners or archived/closed OKRs", async () => {
   const sqlite = new DatabaseSync(":memory:");
   try {
-    sqlite.exec(`CREATE TABLE items(id TEXT PRIMARY KEY,owner_id TEXT,kind TEXT,title TEXT,description TEXT DEFAULT '',parent_id TEXT,cycle_id TEXT,archived_at TEXT,status TEXT DEFAULT 'todo');
+    sqlite.exec(`CREATE TABLE items(id TEXT PRIMARY KEY,owner_id TEXT,kind TEXT,title TEXT,description TEXT DEFAULT '',parent_id TEXT,routine_id TEXT,due_date TEXT,cycle_id TEXT,archived_at TEXT,status TEXT DEFAULT 'todo');
       CREATE TABLE okr_cycles(id TEXT,owner_id TEXT,status TEXT);
       CREATE TABLE routines(id TEXT,owner_id TEXT,title TEXT,description TEXT,active INTEGER,system_key TEXT);
       INSERT INTO okr_cycles VALUES('active','w','active'),('old','w','closed');`);
@@ -257,6 +327,7 @@ test("workspace search finds older, normalized, misspelled and contextual candid
     add.run("kr", "w", "key_result", "외부 AX 매출", "", "o", "active", null);
     add.run("i", "w", "initiative", "기존 고객사 AX 세일즈", "재무 자동화 제안", "kr", "active", null);
     add.run("p", "w", "project", "샘플 푸드 재무자동화", "고객 재무 보고서", "i", "active", null);
+    add.run("t", "w", "task", "샘플 푸드 제안서 보내기", "고객 재무 보고서", "p", "active", null);
     add.run("old", "w", "project", "샘플 푸드 종료", "", null, "old", null);
     add.run("archived", "w", "project", "샘플 푸드 삭제", "", null, null, "yesterday");
     add.run("foreign", "other", "project", "샘플 푸드 비밀", "", null, null, null);
@@ -271,6 +342,9 @@ test("workspace search finds older, normalized, misspelled and contextual candid
     assert.equal(typo.items[0].id, "p"); assert.equal(typo.items[0].match, "candidate");
     const initiative = await search.searchSlackWork(db, "w", { query: "재무 자동화", kind: "initiative" });
     assert.deepEqual(initiative.items.map((row) => row.id), ["i"]);
+    const task = await search.searchSlackWork(db, "w", { query: "샘플푸드제안서보내기", kind: "task" });
+    assert.equal(task.items[0].parentId, "p");
+    assert.deepEqual(task.items[0].path, ["목표", "외부 AX 매출", "기존 고객사 AX 세일즈", "샘플 푸드 재무자동화", "샘플 푸드 제안서 보내기"]);
     assert.equal(exact.truncated, false);
     assert.match(exact.instruction, /not automatic placement/);
   } finally { sqlite.close(); }

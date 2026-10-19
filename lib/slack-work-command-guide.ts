@@ -23,7 +23,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
   },
   {
     label: "말로 요청",
-    description: "같은 스레드의 여러 요청과 소속을 구분합니다. Project 생성안은 수정된 연결까지 확인 후 다음 답장에서 승인하며, 승인 후 하위 Task도 이어서 처리합니다.",
+    description: "같은 스레드에서 다 반영해·남은 것도 처리해로 실행을 이어갑니다. Project 생성안을 다음 답장에서 승인하면 하위 Task도 처리하고, 기존 Task의 잘못된 소속은 중복 생성 없이 수정합니다.",
     entries: [
       { command: "@OKRI [요청]", label: "자연어 대화" },
       { command: "!업무생성 [내용]", label: "업무 생성" },
