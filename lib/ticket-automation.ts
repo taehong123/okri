@@ -6,7 +6,7 @@ import { prepareSlackTicketForm } from "@/lib/slack-ticket-intake";
 import { readSlackThread } from "@/lib/slack-work-intake";
 import { assessTicketText, canAutoApproveTicket, escapeSlackText, redactTicketText, TICKET_PRIORITIES, ticketPriorityRank, type TicketPriority, type TicketRisk, type TicketState } from "@/lib/ticket-policy";
 
-export type TicketChannelRule = { id: string; name: string; enabled: boolean; autoApprove: "manual" | "low_risk"; memberId: string; portId: string; productId?:string; repositoryId?:string };
+export type TicketChannelRule = { id: string; name: string; enabled: boolean; autoApprove: "manual" | "low_risk"; memberId: string; portId: string; productId?:string; repositoryId?:string;relayUserIds?:string[];relayPrefix?:string;relayContentStart?:string;relayContentEnd?:string };
 export type TicketRepository={id:string;name:string;remote:string;installRoots?:string[]};
 export type TicketDevelopmentProduct={id:string;owner_id:string;name:string;specification:string;setup_instructions:string;repositories_json:string;revision:number;updated_at:string};
 export type TicketAutomationConfig = { destination: string; prefix: string; channels: TicketChannelRule[]; actorUserId: string; notificationsAuthorized: boolean; defaultModel?: string };
@@ -141,7 +141,10 @@ export async function saveTicketAutomation(a: RequestAuthorization, payload: Rec
     if(productId||repositoryId)await productContext(a.ownerId,productId,repositoryId);
     if (memberId && !await one("SELECT id FROM workspace_members WHERE id=? AND workspace_id=? AND status='active' AND user_id IS NOT NULL", memberId, a.ownerId)) fail("활성 담당자를 선택해 주세요.");
     if (portId && !await one("SELECT id FROM ticket_execution_ports WHERE id=? AND owner_id=? AND member_id=? AND enabled=1", portId, a.ownerId, memberId)) fail("담당자의 활성 포트를 선택해 주세요.");
-    channels.push({ id: channel.id, name: channel.name, enabled: input.enabled === true, autoApprove: input.autoApprove === "low_risk" ? "low_risk" : "manual", memberId, portId,productId,repositoryId });
+    const relayUserIds=Array.isArray(input.relayUserIds)?[...new Set(input.relayUserIds.map(v=>text(v,80)).filter(Boolean))]:[];
+    if(relayUserIds.length>10||relayUserIds.some(id=>!/^U[A-Z0-9]+$/.test(id)||id===connection.botUserId))fail("중계 앱의 Slack 사용자 ID를 확인해 주세요.");
+    for(const id of relayUserIds){const profile=await slackApi<{ok:boolean;user?:{is_bot?:boolean;deleted?:boolean}}>(await slackTokenForConnection(connection),'users.info',{user:id});if(!profile.user?.is_bot||profile.user.deleted)fail("활성 중계 봇만 허용할 수 있습니다.");}
+    channels.push({ id: channel.id, name: channel.name, enabled: input.enabled === true, autoApprove: input.autoApprove === "low_risk" ? "low_risk" : "manual", memberId, portId,productId,repositoryId,relayUserIds,relayPrefix:text(input.relayPrefix,100),relayContentStart:text(input.relayContentStart,100),relayContentEnd:text(input.relayContentEnd,100) });
   }
   const defaultModel = text(payload.defaultModel, 128);
   if (defaultModel && !(await rows<{ models_json: string }>("SELECT models_json FROM ticket_execution_ports WHERE owner_id=?", a.ownerId)).some(p => JSON.parse(p.models_json).includes(defaultModel))) fail("연결된 포트가 지원하는 모델을 선택해 주세요.");
@@ -218,16 +221,26 @@ async function readSource(owner: string, channel: string, ts: string, user: stri
   const token = await slackTokenForConnection(connection);
   const thread = await readSlackThread(token, { channel, channelType: "channel", user, text: "", ts, threadTs: ts }, undefined, { full: true, includeCanvas:false });
   if (thread.truncated) fail("전체 스레드를 읽지 못해 승인을 중지했습니다.");
+  const s=await settings(owner),rule=s?config(s).channels.find(c=>c.id===channel):undefined;
   const messages = thread.messages.filter(m => m.user !== connection.botUserId);
-  const raw = messages.map(m => m.text).join("\n\n---\n\n");
+  const evidence=messages.flatMap(m=>{
+    if(!m.botId)return [m.text];
+    if(!rule?.relayUserIds?.includes(m.user))return [];
+    let body=m.text;if(rule.relayPrefix&&!body.trim().replace(/^\*+/,'').startsWith(rule.relayPrefix))return [];
+    if(rule.relayContentStart){const start=body.indexOf(rule.relayContentStart);if(start<0)return [];body=body.slice(start+rule.relayContentStart.length).replace(/^[\s*_：:]+/u,'');}
+    if(rule.relayContentEnd){const end=body.indexOf(rule.relayContentEnd);if(end<0)return [];body=body.slice(0,end).trim();}
+    return body?[body]:[];
+  });
+  const raw = evidence.join("\n\n---\n\n"),safe=redactTicketText(raw).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]');
   const hasAttachments=Boolean(thread.attachmentsPresent||thread.imageFiles?.length||thread.canvasCandidateCount);
-  return { connection, token, raw, requester: messages[0]?.user || user, hasAttachments, hash: await digest(JSON.stringify({messages:messages.map(m => ({ user: m.user, ts: m.ts, text: m.text })),hasAttachments})) };
+  return { connection, token, raw,safe, requester: messages[0]?.user || user, hasAttachments, hash: await digest(JSON.stringify({messages:messages.map(m => ({ user: m.user, ts: m.ts, text: m.text })),hasAttachments,evidence})) };
 }
-export async function intakeTicketEvent(connection: { ownerId: string; teamId: string; botUserId: string }, event: { channel: string; ts: string; user: string; text: string; threadTs?: string; hasAttachments?: boolean }) {
+export async function intakeTicketEvent(connection: { ownerId: string; teamId: string; botUserId: string }, event: { channel: string; ts: string; user: string; text: string; threadTs?: string; hasAttachments?: boolean;isRelay?:boolean }) {
   const s = await settings(connection.ownerId);
   if (!s?.enabled || s.team_id !== connection.teamId) return false;
   const c = config(s);
   if(event.channel===c.destination){
+    if(event.isRelay)return false;
     const link=event.text.match(/https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([CG][A-Z0-9]+)\/p([0-9]{16,})/i);
     if(!link||!c.channels.some(r=>r.enabled&&r.id===link[1]))return false;
     const ts=`${link[2].slice(0,-6)}.${link[2].slice(-6)}`;
@@ -235,6 +248,7 @@ export async function intakeTicketEvent(connection: { ownerId: string; teamId: s
   }
   const rule = c.channels.find(r => r.id === event.channel && r.enabled);
   if (!rule) return false;
+  if(event.isRelay&&(!rule.relayUserIds?.includes(event.user)||(rule.relayPrefix&&!event.text.trim().replace(/^\*+/,'').startsWith(rule.relayPrefix))))return false;
   const rootTs = event.threadTs || event.ts;
   if (await one("SELECT id FROM ticket_automation_requests WHERE owner_id=? AND source_channel=? AND source_ts=?", s.owner_id, event.channel, rootTs)) return true;
   const source = await readSource(s.owner_id, event.channel, rootTs, event.user);
@@ -242,11 +256,11 @@ export async function intakeTicketEvent(connection: { ownerId: string; teamId: s
   if (!assessment.candidate) return true;
   const actor = await one<{ email: string; display_name: string; role: RequestAuthorization["role"] }>("SELECT email,display_name,role FROM workspace_members WHERE workspace_id=? AND user_id=? AND status='active' AND role IN ('owner','admin')", s.owner_id, c.actorUserId);
   if (!actor) return true;
-  let title = redactTicketText(source.raw.split("\n")[0]).slice(0, 240) || "고객 요청 검토";
-  let description = redactTicketText(source.raw).slice(0, 3000);
+  let title = source.safe.split("\n")[0].slice(0, 240) || "고객 요청 검토";
+  let description = source.safe.slice(0, 3000);
   if (assessment.risk !== "blocked") {
     const form = await prepareSlackTicketForm({ authorization: { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false }, token: source.token, botUserId: connection.botUserId,
-      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true });
+      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages:[{user:source.requester,text:source.safe}] });
     title = redactTicketText(form.title); description = redactTicketText(form.description);
   }
   const derived = assessTicketText(`${title}\n${description}`);
@@ -254,9 +268,10 @@ export async function intakeTicketEvent(connection: { ownerId: string; teamId: s
   const autoPort = rule.autoApprove === "low_risk" && risk === "low" ? await chooseTicketPort(s.owner_id, rule.memberId, rule.portId || null, event.channel,rule.productId||null,rule.repositoryId||'') : null;
   const selectedPortId = rule.portId || autoPort?.id || null;
   const id = crypto.randomUUID(), time = now();
-  const requester = await slackApi<{ ok:boolean; user?: { real_name?: string; profile?: { display_name?: string } } }>(source.token,"users.info",{user:source.requester}).catch(()=>null);
-  const requesterName = requester?.user?.profile?.display_name || requester?.user?.real_name || source.requester;
-  const result = await run(`INSERT OR IGNORE INTO ticket_automation_requests(id,owner_id,team_id,source_channel,source_ts,source_user,requester_slack_user,requester_name,source_digest,source_text,title,description,risk,reasons_json,state,member_id,port_id,created_at,updated_at,product_id,repository_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.owner_id, s.team_id, event.channel, rootTs, event.user, source.requester, requesterName, source.hash, redactTicketText(source.raw).slice(0, 24000), title, description, risk, JSON.stringify([...assessment.reasons, ...derived.reasons]), risk === "blocked" ? "blocked" : "recommended", rule.memberId || null, selectedPortId, time, time,rule.productId||null,rule.repositoryId||'');
+  const requester = await slackApi<{ ok:boolean; user?: {is_bot?:boolean;deleted?:boolean;real_name?: string; profile?: { display_name?: string } } }>(source.token,"users.info",{user:source.requester}).catch(()=>null);
+  const requesterId=requester?.user?.is_bot||requester?.user?.deleted?'':source.requester;
+  const requesterName = requesterId?(requester?.user?.profile?.display_name || requester?.user?.real_name || source.requester):'';
+  const result = await run(`INSERT OR IGNORE INTO ticket_automation_requests(id,owner_id,team_id,source_channel,source_ts,source_user,requester_slack_user,requester_name,source_digest,source_text,title,description,risk,reasons_json,state,member_id,port_id,created_at,updated_at,product_id,repository_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, s.owner_id, s.team_id, event.channel, rootTs, event.user, requesterId, requesterName, source.hash, source.safe.slice(0, 24000), title, description, risk, JSON.stringify([...assessment.reasons, ...derived.reasons]), risk === "blocked" ? "blocked" : "recommended", rule.memberId || null, selectedPortId, time, time,rule.productId||null,rule.repositoryId||'');
   if (!result.meta.changes) return true;
   await audit(s.owner_id,id,"slack","intake_validated",1,{risk,sourceDigest:source.hash});
   await queueTicketMessage(s.owner_id, id, "recommendation", c.destination, null, `고객 요청 ${risk === "blocked" ? "보안 차단" : "티켓 추천"}\n${escapeSlackText(title)}\n${sourceLink({ source_channel: event.channel, source_ts: rootTs })}`);
@@ -325,12 +340,12 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
   } else if(action === "refresh_source") {
     if(!["recommended","created","security_review","blocked","failed"].includes(r.state)||await one("SELECT id FROM local_agent_jobs WHERE id=? AND status IN ('queued','running')",r.job_id))fail("실행 중인 요청은 원문을 다시 분석할 수 없습니다.",409);
     const source=await readSource(r.owner_id,r.source_channel,r.source_ts,r.source_user),assessment=assessTicketText(source.raw);
-    let title=redactTicketText(source.raw.split('\n')[0]).slice(0,240)||r.title,description=redactTicketText(source.raw).slice(0,4000);
-    if(assessment.risk!=='blocked') {const form=await prepareSlackTicketForm({authorization:a,token:source.token,botUserId:source.connection.botUserId,event:{channel:r.source_channel,ts:r.source_ts,threadTs:r.source_ts,user:r.source_user,text:'',channelType:'channel'},query:'',textOnly:true});title=redactTicketText(form.title);description=redactTicketText(form.description);}
+    let title=source.safe.split('\n')[0].slice(0,240)||r.title,description=source.safe.slice(0,4000);
+    if(assessment.risk!=='blocked') {const form=await prepareSlackTicketForm({authorization:a,token:source.token,botUserId:source.connection.botUserId,event:{channel:r.source_channel,ts:r.source_ts,threadTs:r.source_ts,user:r.source_user,text:'',channelType:'channel'},query:'',textOnly:true,evidenceMessages:[{user:source.requester,text:source.safe}]});title=redactTicketText(form.title);description=redactTicketText(form.description);}
     const derived=assessTicketText(`${title}\n${description}`),risk=assessment.risk==='blocked'||derived.risk==='blocked'?'blocked':assessment.risk;
     const results=await env.DB.batch([
       env.DB.prepare("UPDATE items SET title=?,description=?,status='todo',updated_at=? WHERE owner_id=? AND id IN (?,?) AND source='slack_ticket' AND source_ref=? AND EXISTS(SELECT 1 FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=?)").bind(title,description,time,a.ownerId,r.ticket_id,r.task_id,r.id,r.id,a.ownerId,r.revision),
-      env.DB.prepare("UPDATE ticket_automation_requests SET source_digest=?,source_text=?,title=?,description=?,risk=?,reasons_json=?,state=?,job_id=NULL,answer='',question='',security_json='{}',approved_at=NULL,approved_by=NULL,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?").bind(source.hash,redactTicketText(source.raw).slice(0,24000),title,description,risk,JSON.stringify([...assessment.reasons,...derived.reasons]),risk==='blocked'?'blocked':r.ticket_id?'created':'recommended',time,r.id,a.ownerId,r.revision),
+      env.DB.prepare("UPDATE ticket_automation_requests SET source_digest=?,source_text=?,title=?,description=?,risk=?,reasons_json=?,state=?,job_id=NULL,answer='',question='',security_json='{}',approved_at=NULL,approved_by=NULL,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?").bind(source.hash,source.safe.slice(0,24000),title,description,risk,JSON.stringify([...assessment.reasons,...derived.reasons]),risk==='blocked'?'blocked':r.ticket_id?'created':'recommended',time,r.id,a.ownerId,r.revision),
     ]);if(!results[1].meta.changes)fail("동시에 변경되었습니다.",409);
   } else if (action === "requester") {
     if(!["recommended","created","review"].includes(r.state))fail("개발 전 또는 완료 안내 검토 중에 요청자를 변경해 주세요.");

@@ -35,9 +35,9 @@ function fixture(t, options={}) {
   const service=compile(source,{"cloudflare:workers":{env:{DB:d1,OKRI_PUBLIC_URL:"https://okri.example.test"}},"@/lib/pace-data":{canManageTeam:v=>["owner","admin"].includes(v.role),getSlackConnection:async owner=>owner==="w1"?connection:null},"@/lib/slack-daily":{
     dailyMemberBySlack:async(team,user)=>team==="T1"&&user==="U1"?{authorization:a,memberId:"m1"}:null,
     listSlackChannels:async()=>[{id:"C1",name:"customer-one",isMember:true},{id:"CMGMT",name:"tickets",isMember:true}],slackTokenForConnection:async()=>"mock",
-    slackApi:async(_token,method,body)=>{if(method==="users.info")return{ok:true,user:{real_name:"Customer",profile:{display_name:"Customer"}}};if(method==="conversations.members")return{ok:true,members:["UCUSTOMER","U1"]};if(method==="users.list")return{ok:true,members:[{id:"UCUSTOMER",real_name:"Customer"},{id:"U1",real_name:"Operator"},{id:"UOUTSIDE",real_name:"Other"}]};writes.push({method,body});if(options.ambiguous)throw new Error("timeout");return{ok:true,ts:`${writes.length}.000`};}},
+    slackApi:async(_token,method,body)=>{if(method==="users.info")return{ok:true,user:{is_bot:body.user==='URELAY',real_name:"Customer",profile:{display_name:"Customer"}}};if(method==="conversations.members")return{ok:true,members:["UCUSTOMER","U1"]};if(method==="users.list")return{ok:true,members:[{id:"UCUSTOMER",real_name:"Customer"},{id:"U1",real_name:"Operator"},{id:"UOUTSIDE",real_name:"Other"}]};writes.push({method,body});if(options.ambiguous)throw new Error("timeout");return{ok:true,ts:`${writes.length}.000`};}},
     "@/lib/local-agent":{createLocalAgentPairing:async()=>{const id=crypto.randomUUID();db.prepare("INSERT INTO local_agent_pairings VALUES(?,?,?,?,?)").run(id,"w1","u1",null,null);return{id,code:"ABCD-EFGH",expiresAt:"later"}}},
-    "@/lib/slack-ticket-intake":{prepareSlackTicketForm:async()=>({title:messages[0].text,description:messages.map(m=>m.text).join("\n")})},
+    "@/lib/slack-ticket-intake":{prepareSlackTicketForm:async input=>({title:(input.evidenceMessages||messages)[0].text.split('\n')[0],description:(input.evidenceMessages||messages).map(m=>m.text).join("\n")})},
     "@/lib/slack-work-intake":{readSlackThread:async()=>({messages,truncated:false})},"@/lib/ticket-policy":policy});
   const intake=(ts='123.000')=>service.intakeTicketEvent(connection,{channel:"C1",ts,user:"UCUSTOMER",text:messages[0].text});
   const current=()=>db.prepare("SELECT * FROM ticket_automation_requests").get();
@@ -191,4 +191,14 @@ test('operator stop revokes queued work and cannot become a completion notice',a
   const f=fixture(t);await f.intake();await f.change('create');await f.change('approve');const job=f.current().job_id;
   await f.change('stop');assert.equal(f.current().state,'failed');assert.equal(f.db.prepare('SELECT status FROM local_agent_jobs WHERE id=?').get(job).status,'cancelled');assert.equal(await f.service.validateTicketJobPickup(job,true),false);
   await f.service.syncTicketJobs();assert.equal(f.current().state,'failed');assert.equal(f.current().notice,'');await assert.rejects(f.change('publish'));await assert.rejects(f.change('stop'));
+});
+
+test('trusted relay intake strips its envelope, hides contact details and never tags a bot as requester',async t=>{
+  const f=fixture(t),rule=f.config.channels[0];Object.assign(rule,{relayUserIds:['URELAY'],relayPrefix:'Incoming request',relayContentStart:'Content:',relayContentEnd:'Event footer'});f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  const text='Incoming request\nPhone: 01012345678\nContent:\n버튼 문구 오타 수정해 주세요. 01087654321\nEvent footer id=fixture';
+  f.setMessages([{ts:'123.000',user:'URELAY',botId:'B1',text}]);const connection={ownerId:'w1',teamId:'T1',botUserId:'UBOT'};
+  assert.equal(await f.service.intakeTicketEvent(connection,{channel:'C1',ts:'123.000',user:'UUNKNOWN',text,isRelay:true}),false);
+  assert.equal(await f.service.intakeTicketEvent(connection,{channel:'C1',ts:'123.000',user:'URELAY',text:'Delivery succeeded',isRelay:true}),false);
+  await f.service.intakeTicketEvent(connection,{channel:'C1',ts:'123.000',user:'URELAY',text,isRelay:true});const r=f.current();assert.equal(r.requester_slack_user,'');assert.equal(r.risk,'low');assert.doesNotMatch(r.source_text+r.description,/01012345678|01087654321|Phone:|Event footer/);
+  await f.change('refresh_source');assert.doesNotMatch(f.current().source_text+f.current().description,/01087654321/);
 });
