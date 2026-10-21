@@ -41,6 +41,12 @@ Customer thread → recommendation → edited and assigned Ticket + child Task �
 development approval → execution slot → development → completion review →
 exact-text sharing approval → customer-thread notice and completion reaction.
 
+The existing metered summarization call also distinguishes concrete work from
+acknowledgements and delivery/status receipts. Non-work produces no recommendation.
+When classification is unavailable, plausible requests remain for manual review;
+automatic approval requires a positive classification as well as the policy gates.
+Explicit manual Ticket forms retain their original behavior.
+
 The queue exposes unassigned, approval pending, answer pending, completion sharing
 pending, blocked and failed work. Each request displays its assigned slot.
 Automatic assignment uses online slots belonging to the assignee, configured

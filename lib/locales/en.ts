@@ -2836,6 +2836,7 @@ const messages = {
   "허용한 봇의 수신 본문만 분석합니다. 발송 결과는 제외하고 완료 공유 전 실제 Slack 요청자를 지정하세요.": "Analyze incoming content only from allowed bots. Exclude delivery reports and select a real Slack requester before sharing completion.",
   "요청자 지정 필요": "Select a requester",
   "제품 명세·Git 저장소·PC 준비 지침과 기본 모델을 설정하고, PC별 포트 개수를 정해 본인의 Codex에 연결합니다. 선행 작업 반영 후 긴급·높음·보통·낮음 순으로 검토합니다. 중계 앱은 허용한 봇의 수신 본문만 분석하며, 완료 공유 전 실제 Slack 요청자를 지정합니다. 포트는 검토용 패치를 준비하고 실제 병합·배포는 별도 승인합니다.": "Configure product specifications, Git repositories, PC setup and the default model, then connect personal Codex slots by PC. Review eligible work after prerequisites in urgent, high, medium, low order. Relay intake uses incoming content from allowed bots; select a human Slack requester before completion sharing. Slots prepare review patches; merge and deployment require separate approval.",
+  "감사·확인 대화와 단순 발송 결과는 추천에서 제외합니다. AI 요청 판별이 불가하면 자동 승인 없이 수동 검토로 남깁니다.": "Acknowledgements and delivery receipts are excluded from recommendations. If AI request classification is unavailable, requests remain for manual review without automatic approval.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

@@ -257,10 +257,12 @@ export async function intakeTicketEvent(connection: { ownerId: string; teamId: s
   const actor = await one<{ email: string; display_name: string; role: RequestAuthorization["role"] }>("SELECT email,display_name,role FROM workspace_members WHERE workspace_id=? AND user_id=? AND status='active' AND role IN ('owner','admin')", s.owner_id, c.actorUserId);
   if (!actor) return true;
   let title = source.safe.split("\n")[0].slice(0, 240) || "고객 요청 검토";
-  let description = source.safe.slice(0, 3000);
+  let description = source.safe.slice(0, 3000),classified=false;
   if (assessment.risk !== "blocked") {
     const form = await prepareSlackTicketForm({ authorization: { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false }, token: source.token, botUserId: connection.botUserId,
-      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages:[{user:source.requester,text:source.safe}] });
+      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages:[{user:source.requester,text:source.safe}],classifyRequest:true });
+    if(form.actionable===false)return true;
+    classified=form.actionable===true;
     title = redactTicketText(form.title); description = redactTicketText(form.description);
   }
   const derived = assessTicketText(`${title}\n${description}`);
@@ -275,7 +277,7 @@ export async function intakeTicketEvent(connection: { ownerId: string; teamId: s
   if (!result.meta.changes) return true;
   await audit(s.owner_id,id,"slack","intake_validated",1,{risk,sourceDigest:source.hash});
   await queueTicketMessage(s.owner_id, id, "recommendation", c.destination, null, `고객 요청 ${risk === "blocked" ? "보안 차단" : "티켓 추천"}\n${escapeSlackText(title)}\n${sourceLink({ source_channel: event.channel, source_ts: rootTs })}`);
-  if (canAutoApproveTicket({ mode: rule.autoApprove, risk, memberId: rule.memberId, portId: selectedPortId, hasAttachments: event.hasAttachments||source.hasAttachments })) {
+  if (classified&&canAutoApproveTicket({ mode: rule.autoApprove, risk, memberId: rule.memberId, portId: selectedPortId, hasAttachments: event.hasAttachments||source.hasAttachments })) {
     const a: RequestAuthorization = { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false };
     try { await changeTicketRequest(a, { id, action: "create", revision: 1 }); await changeTicketRequest(a, { id, action: "approve", revision: 2, automatic: true }); }
     catch { /* Visible created/recommended state stays in the review queue. */ }
