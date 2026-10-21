@@ -69,6 +69,12 @@ test('automation can summarize already-validated evidence without fetching the r
   assert.equal(f.requests.filter(r=>r.method==='conversations.replies').length,0);const payload=f.requests.find(r=>r.method==='model').body;assert.deepEqual(JSON.parse(payload.input[1].content).messages,[{user:'U1',text:'Reviewed request with metadata removed.'}]);
 });
 
+test('optional automation classification distinguishes acknowledgement from work without changing manual forms',async t=>{
+  const f=fixture(t,{modelOutput:JSON.stringify({title:'',description:'',actionable:false})});
+  const result=await f.prepareSlackTicketForm({...f.input,classifyRequest:true,evidenceMessages:[{user:'U1',text:'수고해 주세요. 감사합니다.'}]});assert.equal(result.actionable,false);assert.equal(result.title,'');
+  const payload=f.requests.find(r=>r.method==='model').body;assert.ok(payload.text.format.schema.required.includes('actionable'));assert.equal(f.metering.filter(r=>r.type==='finalize').length,1);
+});
+
 test("real Slack wire contract sends read arguments in GET queries and keeps writes as JSON without retries", async (t) => {
   const f = fixture(t);
   await slackApi("mock-token", "conversations.info", { channel: "C1", include_locale: false, cursor: undefined });

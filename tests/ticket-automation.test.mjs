@@ -37,7 +37,7 @@ function fixture(t, options={}) {
     listSlackChannels:async()=>[{id:"C1",name:"customer-one",isMember:true},{id:"CMGMT",name:"tickets",isMember:true}],slackTokenForConnection:async()=>"mock",
     slackApi:async(_token,method,body)=>{if(method==="users.info")return{ok:true,user:{is_bot:body.user==='URELAY',real_name:"Customer",profile:{display_name:"Customer"}}};if(method==="conversations.members")return{ok:true,members:["UCUSTOMER","U1"]};if(method==="users.list")return{ok:true,members:[{id:"UCUSTOMER",real_name:"Customer"},{id:"U1",real_name:"Operator"},{id:"UOUTSIDE",real_name:"Other"}]};writes.push({method,body});if(options.ambiguous)throw new Error("timeout");return{ok:true,ts:`${writes.length}.000`};}},
     "@/lib/local-agent":{createLocalAgentPairing:async()=>{const id=crypto.randomUUID();db.prepare("INSERT INTO local_agent_pairings VALUES(?,?,?,?,?)").run(id,"w1","u1",null,null);return{id,code:"ABCD-EFGH",expiresAt:"later"}}},
-    "@/lib/slack-ticket-intake":{prepareSlackTicketForm:async input=>({title:(input.evidenceMessages||messages)[0].text.split('\n')[0],description:(input.evidenceMessages||messages).map(m=>m.text).join("\n")})},
+    "@/lib/slack-ticket-intake":{prepareSlackTicketForm:async input=>({actionable:options.classificationMissing?undefined:options.actionable!==false,title:(input.evidenceMessages||messages)[0].text.split('\n')[0],description:(input.evidenceMessages||messages).map(m=>m.text).join("\n")})},
     "@/lib/slack-work-intake":{readSlackThread:async()=>({messages,truncated:false})},"@/lib/ticket-policy":policy});
   const intake=(ts='123.000')=>service.intakeTicketEvent(connection,{channel:"C1",ts,user:"UCUSTOMER",text:messages[0].text});
   const current=()=>db.prepare("SELECT * FROM ticket_automation_requests").get();
@@ -201,4 +201,9 @@ test('trusted relay intake strips its envelope, hides contact details and never 
   assert.equal(await f.service.intakeTicketEvent(connection,{channel:'C1',ts:'123.000',user:'URELAY',text:'Delivery succeeded',isRelay:true}),false);
   await f.service.intakeTicketEvent(connection,{channel:'C1',ts:'123.000',user:'URELAY',text,isRelay:true});const r=f.current();assert.equal(r.requester_slack_user,'');assert.equal(r.risk,'low');assert.doesNotMatch(r.source_text+r.description,/01012345678|01087654321|Phone:|Event footer/);
   await f.change('refresh_source');assert.doesNotMatch(f.current().source_text+f.current().description,/01087654321/);
+});
+
+test('semantic intake skips non-work acknowledgements and missing classification never auto-approves',async t=>{
+  const ignored=fixture(t,{actionable:false});await ignored.intake();assert.equal(ignored.current(),undefined);assert.equal(ignored.db.prepare('SELECT COUNT(*) n FROM ticket_automation_outbox').get().n,0);
+  const unavailable=fixture(t,{classificationMissing:true,auto:true});await unavailable.intake();assert.equal(unavailable.current().state,'recommended');assert.equal(unavailable.db.prepare('SELECT COUNT(*) n FROM local_agent_jobs').get().n,0);
 });
