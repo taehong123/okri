@@ -105,6 +105,7 @@ import { LocalAgentLauncher } from "./local-agent-launcher";
 import { GuideDraft } from "./guide-draft";
 import WorkspaceSearch, { type SearchDestination } from "./workspace-search";
 import type { SearchResult } from "@/lib/workspace-search";
+import TicketAutomation from "./ticket-automation";
 import { ClientManagementView, TicketClientEditor, TicketClientSummary, useTicketClients, type TicketClientLink } from "./ticket-clients";
 import { normalizeTeamRole } from "@/lib/team-role";
 import { SLACK_WORK_GUIDE_GROUPS } from "@/lib/slack-work-command-guide";
@@ -932,7 +933,7 @@ function WorkspaceApp() {
   const [searchNavigationId, setSearchNavigationId] = useState(0);
   const [, setVisibleOkrCycleIds] = useState<string[]>([]);
   const [activeView, setActiveView] = useState<View>(() => navigationFromLocation().view);
-  const [ticketAreaTab, setTicketAreaTab] = useState<"tickets" | "clients">("tickets");
+  const [ticketAreaTab, setTicketAreaTab] = useState<"tickets" | "clients" | "automation">(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).has("ticketAutomation") ? "automation" : "tickets");
   const [cadence, setCadence] = useState<Cadence>("weekly");
   const [taskDisplay, setTaskDisplay] = useState<"cards" | "table" | "board">("table");
   const [notice, setNotice] = useState<AppNotice | null>(null);
@@ -2577,8 +2578,9 @@ function WorkspaceApp() {
             <div className="view-tabs ticket-area-tabs" role="tablist" aria-label={t("Ticket 화면")}>
               <button type="button" role="tab" aria-selected={ticketAreaTab === "tickets"} className={ticketAreaTab === "tickets" ? "active" : ""} onClick={() => setTicketAreaTab("tickets")}><TicketIcon size={14} />{t("Ticket")}</button>
               <button type="button" role="tab" aria-selected={ticketAreaTab === "clients"} className={ticketAreaTab === "clients" ? "active" : ""} onClick={() => setTicketAreaTab("clients")}><Users size={14} />{t("클라이언트 관리")}</button>
+              <button type="button" role="tab" aria-selected={ticketAreaTab === "automation"} className={ticketAreaTab === "automation" ? "active" : ""} onClick={() => setTicketAreaTab("automation")}><Bot size={14} />{t("티켓 자동화")}</button>
             </div>
-            {ticketAreaTab === "tickets" ? <TicketListView tickets={ticketItems} tasks={taskItems} links={ticketClientData.links} onOpenTicket={openTicketDetail} onNotice={showNotice} /> : <ClientManagementView clients={ticketClientData.clients} loading={ticketClientData.loading} error={ticketClientData.error} readOnly={!canWriteWorkspace} workspaceName={currentWorkspace?.name ?? ""} canManageClientKeys={canDeleteRecords} canCreateMcpWriteKey={canWriteWorkspace} onRefresh={ticketClientData.refresh} onNotice={showNotice} />}
+            {ticketAreaTab === "automation" ? <TicketAutomation key={currentWorkspace?.id} workspaceId={currentWorkspace?.id ?? ""} /> : ticketAreaTab === "tickets" ? <TicketListView tickets={ticketItems} tasks={taskItems} links={ticketClientData.links} onOpenTicket={openTicketDetail} onNotice={showNotice} /> : <ClientManagementView clients={ticketClientData.clients} loading={ticketClientData.loading} error={ticketClientData.error} readOnly={!canWriteWorkspace} workspaceName={currentWorkspace?.name ?? ""} canManageClientKeys={canDeleteRecords} canCreateMcpWriteKey={canWriteWorkspace} onRefresh={ticketClientData.refresh} onNotice={showNotice} />}
           </section>}
           {activeView === "work" && (
             <section className="project-workspace">

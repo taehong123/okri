@@ -9,6 +9,10 @@ export async function POST(request: Request) {
   if (device instanceof Response) return device;
   try {
     const payload = await request.json() as Record<string, unknown>;
+    if(payload.status==="completed"&&typeof payload.id==="string"){
+      const {requireTicketPreflightForCompletion}=await import("@/lib/ticket-automation");
+      try{await requireTicketPreflightForCompletion(payload.id,device);}catch{return Response.json({error:"Ticket port final validation is required.",code:"ticket_security_required"},{status:409,headers:{"Cache-Control":"no-store"}});}
+    }
     const job = await reportLocalAgentJob(device, {
       id: payload.id,
       leaseId: payload.leaseId,

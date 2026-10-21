@@ -8,6 +8,8 @@ export async function POST(request: Request) {
       name: payload.name,
       platform: payload.platform,
     });
+    const { finishTicketPortPairing } = await import("@/lib/ticket-automation");
+    await finishTicketPortPairing(result.device.id);
     return Response.json(result, { status: 201, headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return localAgentErrorResponse(error);

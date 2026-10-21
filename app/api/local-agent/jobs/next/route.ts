@@ -8,7 +8,8 @@ export async function POST(request: Request) {
   const device = await authorizeLocalAgentDevice(request);
   if (device instanceof Response) return device;
   try {
-    return Response.json({ job: await claimNextLocalAgentJob(device) }, { headers: { "Cache-Control": "no-store" } });
+    const isolatedTicketSupport = request.headers.get("X-OKRI-Ticket-Sandbox") === "v1";
+    return Response.json({ job: await claimNextLocalAgentJob(device, isolatedTicketSupport) }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return localAgentErrorResponse(error);
   }

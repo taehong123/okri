@@ -10,6 +10,8 @@ import { runDueSlackDailyReminders } from "@/lib/slack-daily";
 import { runAndroidTestDailyReport } from "@/lib/android-test-feedback";
 import { runNotificationJobs } from "@/lib/notifications";
 
+import { runTicketAutomation } from "@/lib/ticket-automation";
+
 export type ScheduledRuntime = {
   DB: D1Database;
   WORKSPACE_AVATARS: R2Bucket;
@@ -38,6 +40,7 @@ export type ScheduledJobResult = {
  */
 export async function runScheduledJobs(runtime: ScheduledRuntime, scheduledAt = new Date()): Promise<ScheduledJobResult[]> {
   const jobs: Array<[string, Promise<unknown>]> = [
+    ["ticket_automation", runTicketAutomation()],
     ["slack_bot_deliveries", runDueSlackBotDeliveries(runtime.DB, scheduledAt)],
     ["slack_task_changes", runDueTaskChanges(runtime.DB)],
     ["daily_manual_runs", runDueDailyManualRuns(runtime.DB)],

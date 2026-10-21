@@ -9,6 +9,7 @@ import { serverTranslator, type Translator } from "@/lib/server-language";
 import { openSlackWorkCommandModal, slackWorkCommandOptions, submitSlackWorkCommand } from "@/lib/slack-work-command";
 import { finishManagementSubmission, managementEditorOptions, managementEditorSource, managementStatusView, openManagementEditor } from "@/lib/slack-management-actions";
 
+
 type SlackInteraction = {
   type?: string;
   trigger_id?: string;
@@ -41,6 +42,12 @@ export async function POST(request: Request) {
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return new Response("invalid payload", { status: 400 });
   if (payload?.type === "block_actions" && payload.actions?.length === 1
     && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open", "daily_calendar_connect"].includes(payload.actions[0].action_id ?? "")) {
+    return new Response(null, { status: 200 });
+  }
+  const ticketAction = payload.actions?.find(action => action.action_id?.startsWith("ticket_auto_"));
+  if (payload.type === "block_actions" && ticketAction?.value && payload.team?.id && payload.user?.id) {
+    waitUntil(import("@/lib/ticket-automation").then(({ ticketSlackAction }) => ticketSlackAction(payload.team!.id!, payload.user!.id!, ticketAction.action_id!.slice(12), ticketAction.value!))
+      .catch(error => console.error("Ticket action rejected", { name: error instanceof Error ? error.name : "unknown" })));
     return new Response(null, { status: 200 });
   }
   const checklistButton = payload.type === "block_actions" && payload.view?.callback_id === "daily_checklist_submit"

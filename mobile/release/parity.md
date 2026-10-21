@@ -277,3 +277,7 @@ not evidence that a web feature magically exists in React Native.
   v1 payloads remain compatible. Native reads see the resulting organization.
 - Native editor parity is deferred to the next native UI release; no binary or
   OTA update is claimed by this web editor change.
+
+## 2026-10-22 Slack ticket automation
+
+Web-only: workspace-scoped customer intake, product specifications and multiple repositories, PC-grouped personal execution ports, priority/prerequisite coordination, isolated local development and completion-message approval. Priority is mirrored to existing Ticket/Task fields. Deployment confirmation records an operator-verified Git commit; no automatic deployment is claimed. Mobile v1 endpoints, fixtures and native business semantics are unchanged. Native UI parity is deferred; installed clients retain their existing Ticket and Task views. The additive 0073 tables remain on code rollback. No store release or physical-device validation is claimed.

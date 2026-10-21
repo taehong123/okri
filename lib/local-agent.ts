@@ -1,5 +1,5 @@
 import { env } from "cloudflare:workers";
-import { and, asc, desc, eq, isNull } from "drizzle-orm";
+import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "@/db";
 import {
   activityLog,
@@ -71,18 +71,22 @@ function cleanLabel(value: unknown, fallback: string, maxLength: number) {
 
 export function redactLocalAgentSecrets(value: string) {
   return value
+    .replace(/-----BEGIN [^-\r\n]{0,60}PRIVATE KEY-----[\s\S]*?(?:-----END [^-\r\n]{0,60}PRIVATE KEY-----|$)/g,"[REDACTED_PRIVATE_KEY]")
+    .replace(/\bxox[baprs]-[A-Za-z0-9-]+|\bgh[pousr]_[A-Za-z0-9_]+|\bAKIA[A-Z0-9]{16}|\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,"[REDACTED_TOKEN]")
     .replace(/\b(?:sk|rk|pk)-(?:proj-)?[A-Za-z0-9_-]{16,}\b/g, "[REDACTED_KEY]")
     .replace(/\bBearer\s+[A-Za-z0-9._~+/-]{16,}/gi, "Bearer [REDACTED]")
-    .replace(/\b(API[_-]?KEY|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|SECRET|PASSWORD)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]");
+    .replace(/\b(API[_-]?KEY|ACCESS[_-]?TOKEN|AUTH[_-]?TOKEN|SECRET|PASSWORD)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]")
+    .replace(/((?:비밀\s*번호|비밀\s*키|인증\s*(?:토큰|코드))\s*[:：=]\s*)[^\s,;<>]+/gi,"$1[REDACTED]")
+    .replace(/(https?:\/\/[^\s<>]*[?&](?:token|key|secret|password|code|signature|access_token)=)[^&\s<>]+/gi,"$1[REDACTED]");
 }
 
-export async function createLocalAgentPairing(authorization: RequestAuthorization) {
+export async function createLocalAgentPairing(authorization: RequestAuthorization, { preserveExisting = false } = {}) {
   const now = new Date();
   const expiresAt = new Date(now.getTime() + PAIRING_TTL_MS).toISOString();
   const code = randomPairingCode();
   const id = crypto.randomUUID();
   const db = getDb();
-  await db.delete(localAgentPairings).where(and(
+  if(!preserveExisting)await db.delete(localAgentPairings).where(and(
     eq(localAgentPairings.workspaceId, authorization.ownerId),
     eq(localAgentPairings.userId, authorization.userId),
     isNull(localAgentPairings.claimedAt),
@@ -339,30 +343,34 @@ User request:
 ${job.instruction}`;
 }
 
-export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization) {
+export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization, isolatedTicketSupport = false) {
   const now = new Date();
   const nowIso = now.toISOString();
   await env.DB.prepare(`UPDATE local_agent_jobs SET status = 'queued', lease_id = NULL, lease_expires_at = NULL,
     progress_text = 'Previous runner lease expired; retrying.', updated_at = ?
     WHERE device_id = ? AND workspace_id = ? AND user_id = ? AND status = 'running' AND lease_expires_at < ?`)
     .bind(nowIso, device.id, device.workspaceId, device.userId, nowIso).run();
+  if(await env.DB.prepare("SELECT id FROM local_agent_jobs WHERE device_id=? AND workspace_id=? AND user_id=? AND status='running' AND lease_expires_at>? LIMIT 1").bind(device.id,device.workspaceId,device.userId,nowIso).first())return null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const [job] = await getDb().select().from(localAgentJobs).where(and(
+  const candidates = await getDb().select().from(localAgentJobs).where(and(
       eq(localAgentJobs.deviceId, device.id),
       eq(localAgentJobs.workspaceId, device.workspaceId),
       eq(localAgentJobs.userId, device.userId),
       eq(localAgentJobs.status, "queued"),
-    )).orderBy(asc(localAgentJobs.createdAt)).limit(1);
-    if (!job) return null;
+    )).orderBy(sql`COALESCE((SELECT CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END FROM ticket_automation_requests WHERE job_id=${localAgentJobs.id}),2)`,asc(localAgentJobs.createdAt)).limit(100);
+  for (const job of candidates) {
+    const { validateTicketJobPickup,ticketRuntimeContext } = await import("@/lib/ticket-automation");
+    if (!await validateTicketJobPickup(job.id, isolatedTicketSupport)) continue;
+    const context={...JSON.parse(job.contextJson||'{}'),...(await ticketRuntimeContext(job.id)||{})};
+    job.contextJson=JSON.stringify(context);
     const leaseId = crypto.randomUUID();
     const leaseExpiresAt = new Date(now.getTime() + JOB_LEASE_MS).toISOString();
     const result = await env.DB.prepare(`UPDATE local_agent_jobs SET status = 'running', lease_id = ?,
-      lease_expires_at = ?, started_at = COALESCE(started_at, ?), progress_text = 'Starting local Codex', updated_at = ?
-      WHERE id = ? AND device_id = ? AND status = 'queued'`)
-      .bind(leaseId, leaseExpiresAt, nowIso, nowIso, job.id, device.id).run();
+      lease_expires_at = ?, started_at = COALESCE(started_at, ?), progress_text = 'Starting local Codex', updated_at = ?,context_json=?
+      WHERE id = ? AND device_id = ? AND status = 'queued' AND NOT EXISTS(SELECT 1 FROM local_agent_jobs active WHERE active.device_id=? AND active.workspace_id=? AND active.user_id=? AND active.status='running' AND active.lease_expires_at>?)`)
+      .bind(leaseId, leaseExpiresAt, nowIso, nowIso, job.contextJson,job.id, device.id,device.id,device.workspaceId,device.userId,nowIso).run();
     if ((result.meta.changes ?? 0) === 1) {
-      return { ...serializeJob({ ...job, status: "running", leaseId, leaseExpiresAt, startedAt: job.startedAt ?? nowIso, updatedAt: nowIso }), leaseId, prompt: buildLocalAgentPrompt(job) };
+        return { ...serializeJob({ ...job, status: "running", leaseId, leaseExpiresAt, startedAt: job.startedAt ?? nowIso, updatedAt: nowIso }), leaseId, executionPolicy:context.executionPolicy,basisDigest:context.basisDigest,model:context.model??null,repository:context.repository,dependencies:context.dependencies,priority:context.priority,prompt:buildLocalAgentPrompt(job) };
     }
   }
   return null;

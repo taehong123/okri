@@ -66,6 +66,7 @@ export const slackScopes = [
 ];
 
 export const slackCanvasUserScopes = ["files:read", "canvases:read"];
+export const slackTicketScopes = ["reactions:write"];
 
 export function slackConfigured(runtime: SlackRuntimeEnv) {
   return Boolean(runtime.SLACK_CLIENT_ID && runtime.SLACK_CLIENT_SECRET && runtime.SLACK_SIGNING_SECRET && runtime.SLACK_TOKEN_ENCRYPTION_KEY);
@@ -101,7 +102,7 @@ export function slackEventsUrl(request: Request) {
 export function slackAuthorizationUrl(runtime: SlackRuntimeEnv, request: Request, state: string) {
   const url = new URL("https://slack.com/oauth/v2/authorize");
   url.searchParams.set("client_id", requireSlackValue(runtime.SLACK_CLIENT_ID, "SLACK_CLIENT_ID"));
-  url.searchParams.set("scope", slackScopes.join(","));
+  url.searchParams.set("scope", [...slackScopes,...(new URL(request.url).searchParams.get('ticket')==='1'?slackTicketScopes:[])].join(","));
   url.searchParams.set("user_scope", slackCanvasUserScopes.join(","));
   url.searchParams.set("redirect_uri", slackRedirectUri(runtime, request));
   url.searchParams.set("state", state);
