@@ -179,8 +179,8 @@ export class CodexAppServer {
     const command = this.docker ? "docker" : windows ? process.env.ComSpec || "C:\\Windows\\System32\\cmd.exe" : "codex";
     const authPath = join(process.env.CODEX_HOME || join(homedir(),".codex"),"auth.json");
     if(this.docker && this.auth)await access(authPath);
-    const profiles = ['-c','default_permissions="okri_ticket_review"','-c','permissions.okri_ticket.filesystem={":minimal"="read",":workspace_roots"={"."="write"}}','-c','permissions.okri_ticket.network.enabled=false','-c','permissions.okri_ticket_review.filesystem={":minimal"="read",":workspace_roots"={"."="read"}}','-c','permissions.okri_ticket_review.network.enabled=false',...['apps','plugins','remote_plugin','browser_use','browser_use_external','browser_use_full_cdp_access','browser_annotation_api','in_app_browser','code_mode','enable_mcp_apps'].flatMap(feature=>['-c',`features.${feature}=false`])];
-    const args = this.docker ? ["run","--rm","--name",this.containerName,"-i","--init","--cap-drop","ALL","--security-opt","no-new-privileges","--security-opt",`seccomp=${fileURLToPath(new URL('./ticket-seccomp.json',import.meta.url))}`,"--pids-limit","256","--memory","4g","--cpus","2",
+    const profiles = ['-c','default_permissions="okri_ticket_review"','-c',`permissions.okri_ticket.filesystem={":minimal"="read",${JSON.stringify(this.executionCwd)}="write"}`,'-c','permissions.okri_ticket.network.enabled=false','-c',`permissions.okri_ticket_review.filesystem={":minimal"="read",${JSON.stringify(this.executionCwd)}="read"}`,'-c','permissions.okri_ticket_review.network.enabled=false',...['apps','plugins','remote_plugin','browser_use','browser_use_external','browser_use_full_cdp_access','browser_annotation_api','in_app_browser','code_mode','enable_mcp_apps'].flatMap(feature=>['-c',`features.${feature}=false`])];
+    const args = this.docker ? ["run","--rm","--name",this.containerName,"-i","--init","--cap-drop","ALL","--security-opt","no-new-privileges","--security-opt",`seccomp=${fileURLToPath(new URL('./ticket-seccomp.json',import.meta.url))}`,"--pids-limit","256","--memory","4g","--cpus","2","--env","GOFLAGS=-mod=readonly -buildvcs=false -p=2",
       "--mount",`type=bind,source=${this.cwd},target=/workspace`,"--tmpfs","/home/node/.codex:rw,nosuid,nodev,uid=1000,gid=1000,mode=700",
       ...(this.auth?["--mount",`type=bind,source=${authPath},target=/home/node/.codex/auth.json,readonly`]:[]),
       ...this.dependencyMounts.filter(m=>/^okri-ticket-cache-[a-f0-9]{24}$/.test(m.volume)&&!/[,:\p{Cc}]/u.test(m.path)&&(m.path==='.okri-go/pkg/mod'||(ticketSnapshotPathAllowed(m.path.replace(/(?:^|\/)node_modules$/,'cache'))&&m.path.split('/').at(-1)==='node_modules'))).flatMap(m=>['--mount',`type=volume,source=${m.volume},target=/workspace/${m.path},volume-subpath=${m.path},readonly`]),TICKET_IMAGE,...profiles] : windows
@@ -276,7 +276,7 @@ export class CodexAppServer {
         approvalPolicy: "never",
         permissions: profile,
         config: {
-          [`permissions.${profile}.filesystem`]: { ":minimal": "read", ":workspace_roots": { ".": review ? "read" : "write" } },
+          [`permissions.${profile}.filesystem`]: { ":minimal": "read", [this.executionCwd]:review ? "read" : "write" },
           [`permissions.${profile}.network.enabled`]: false,
           ...(review ? { model_reasoning_effort: "low" } : {}),
         },
