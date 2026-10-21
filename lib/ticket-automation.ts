@@ -410,6 +410,9 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     const s = await settings(a.ownerId); if (!s?.enabled || !config(s).notificationsAuthorized) fail("Slack 발신 설정과 문안 승인을 먼저 확인해 주세요.");
     if(s.team_id!==r.team_id||!config(s).channels.some(c=>c.id===r.source_channel&&c.enabled)||(await getSlackConnection(a.ownerId))?.teamId!==r.team_id)fail("원문 Slack 워크스페이스와 고객 채널 연결을 확인해 주세요.");
     if (!/^[UW][A-Z0-9]+$/.test(r.requester_slack_user)) fail("완료 안내를 받을 Slack 요청자를 먼저 지정해 주세요.");
+    const connection=await getSlackConnection(a.ownerId),token=await slackTokenForConnection(connection!);
+    const recipient=await slackApi<{ok:boolean;user?:{is_bot?:boolean;deleted?:boolean}}>(token,'users.info',{user:r.requester_slack_user});
+    if(!recipient.user||recipient.user.is_bot||recipient.user.deleted||!(await requesterChannelMembers(token,r.source_channel)).has(r.requester_slack_user))fail("원문 채널의 활성 Slack 요청자를 다시 지정해 주세요.");
     const body=`<@${r.requester_slack_user}>\n${escapeSlackText(r.notice)}`,outboxId=`${r.id}:completion:${r.revision}`;
     const result=await env.DB.batch([
       env.DB.prepare("INSERT OR IGNORE INTO ticket_automation_outbox(id,owner_id,request_id,kind,channel_id,thread_ts,body_json,created_at,updated_at) SELECT ?,owner_id,id,?,source_channel,source_ts,?,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state='review'").bind(outboxId,`completion:${r.revision}`,JSON.stringify({text:body,unfurl_links:false,unfurl_media:false}),time,time,r.id,a.ownerId,r.revision),

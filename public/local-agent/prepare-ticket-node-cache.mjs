@@ -6,13 +6,14 @@ import {tmpdir} from 'node:os';
 
 // Preparation has no Codex authentication, device token, host home or Docker socket.
 // Only sanitized source enters the installer. Project install scripts stay disabled.
-export async function prepareTicketNodeCache(root,{image,environment,snapshotFactory,repositoryRemote,installRoots=['.']}) {
-  const canonicalRoot=await realpath(root),hash=createHash('sha256').update(image).update(repositoryRemote),roots=[];
+export async function prepareTicketNodeCache(root,{image,environment,snapshotFactory,snapshotCleanup,repositoryRemote,installRoots=['.']}) {
+  const canonicalRoot=await realpath(root),hash=createHash('sha256').update('okri-dependencies-v2').update(image).update(repositoryRemote),roots=[];
   for(const directory of installRoots){
     if(!directory||(directory.startsWith('/')||directory.startsWith('\\')||/[:\p{Cc}]/u.test(directory))||directory.replaceAll('\\','/').split('/').some(p=>p==='..'||/^\.(?:git|env|ssh|codex|aws)$/.test(p)))throw new Error('Dependency installation paths must stay inside the selected repository.');
     const actual=await realpath(join(root,directory)).catch(()=>null);if(!actual)continue;const scope=relative(canonicalRoot,actual);if(scope.startsWith('..')||isAbsolute(scope))throw new Error('Dependency installation path leaves the selected repository.');
-    const lock=await readFile(join(actual,'package-lock.json')).catch(()=>null),manifest=await readFile(join(actual,'package.json')).catch(()=>null);if(!lock||!manifest)continue;
-    hash.update(directory).update(lock).update(manifest);roots.push(directory);
+    const lock=await readFile(join(actual,'package-lock.json')).catch(()=>null),manifest=await readFile(join(actual,'package.json')).catch(()=>null),go=await readFile(join(actual,'go.mod')).catch(()=>null),sum=await readFile(join(actual,'go.sum')).catch(()=>null);
+    if((!lock||!manifest)&&!go)continue;
+    hash.update(directory).update(lock||'').update(manifest||'').update(go||'').update(sum||'');roots.push({directory,node:Boolean(lock&&manifest),go:Boolean(go)});
   }
   if(!roots.length)return [];
   const key=hash.digest('hex');
@@ -40,20 +41,24 @@ export async function prepareTicketNodeCache(root,{image,environment,snapshotFac
   }
   if(!lock)throw new Error('Another port is still preparing this product.');
   const name=`okri-ticket-prepare-${randomUUID()}`;
+  let preparedSnapshot,cachedFailure=false;
   try{
     const ready=await docker([...options,'--network','none','--entrypoint','node',image,'-e',"process.stdout.write(require('fs').readFileSync('/workspace/.okri-cache-ready.json','utf8'))"],{allowFailure:true});
     if(ready.code===0){const parsed=JSON.parse(ready.output);if(parsed.key===key)return parsed.mounts.map(path=>({volume,path}));}
     let failure={};try{failure=JSON.parse(await readFile(failurePath,'utf8'));}catch{/* no recent failure */}
-    if(failure.time&&Date.now()-failure.time<60000)throw new Error(failure.message||'Product dependency preparation failed.');
-    const snapshot=await snapshotFactory(root);
-    const script=`import{cp,writeFile,readdir}from'node:fs/promises';import{spawn}from'node:child_process';import{join,relative}from'node:path';
+    if(failure.time&&Date.now()-failure.time<60000){cachedFailure=true;throw new Error(failure.message||'Product dependency preparation failed.');}
+    const snapshot=await snapshotFactory(root);preparedSnapshot=snapshot;
+    const script=`import{cp,writeFile,readdir,mkdir}from'node:fs/promises';import{spawn}from'node:child_process';import{join,relative}from'node:path';
       await cp('/source','/workspace',{recursive:true,force:true,filter:p=>!p.split('/').includes('.git')});
-      for(const directory of ${JSON.stringify(roots)})await new Promise((ok,no)=>{const p=spawn('npm',['ci','--ignore-scripts','--include=dev','--no-audit','--no-fund'],{cwd:join('/workspace',directory),stdio:'inherit',env:{...process.env,GIT_TERMINAL_PROMPT:'0',NPM_CONFIG_IGNORE_SCRIPTS:'true'}});p.once('error',no);p.once('exit',c=>c===0?ok():no(new Error('Dependency installation failed')))});
-      const mounts=[];async function scan(dir){for(const e of await readdir(dir,{withFileTypes:true})){if(e.name==='.git')continue;const path=join(dir,e.name);if(e.isDirectory()){if(e.name==='node_modules')mounts.push(relative('/workspace',path));else await scan(path)}}}await scan('/workspace');
+      const roots=${JSON.stringify(roots)};
+      async function run(command,args,directory){await new Promise((ok,no)=>{const p=spawn(command,args,{cwd:join('/workspace',directory),stdio:'inherit',env:{...process.env,GIT_TERMINAL_PROMPT:'0',NPM_CONFIG_IGNORE_SCRIPTS:'true',GOPROXY:'https://proxy.golang.org',GOSUMDB:'sum.golang.org',GOTOOLCHAIN:'local'}});p.once('error',no);p.once('exit',c=>c===0?ok():no(new Error('Dependency installation failed')))})}
+      for(const root of roots){if(root.node)await run('npm',['ci','--ignore-scripts','--include=dev','--no-audit','--no-fund'],root.directory);if(root.go)await run('go',['mod','download'],root.directory);}
+      const mounts=[];async function scan(dir){for(const e of await readdir(dir,{withFileTypes:true})){if(e.name==='.git'||e.name==='.okri-go')continue;const path=join(dir,e.name);if(e.isDirectory()){if(e.name==='node_modules')mounts.push(relative('/workspace',path));else await scan(path)}}}await scan('/workspace');
+      if(roots.some(r=>r.go)){await mkdir('/workspace/.okri-go/pkg/mod',{recursive:true});mounts.push('.okri-go/pkg/mod');}
       await writeFile('/workspace/.okri-cache-ready.json',JSON.stringify({key:${JSON.stringify(key)},mounts}));`;
     await docker([...options,'--name',name,'--mount',`type=bind,source=${snapshot},target=/source,readonly`,'-i','--entrypoint','node',image,'--input-type=module'],{input:script});
     const result=await docker([...options,'--network','none','--entrypoint','node',image,'-e',"process.stdout.write(require('fs').readFileSync('/workspace/.okri-cache-ready.json','utf8'))"]);
     await unlink(failurePath).catch(()=>undefined);return JSON.parse(result.output).mounts.map(path=>({volume,path}));
-  }catch(error){await writeFile(failurePath,JSON.stringify({time:Date.now(),message:error.message}));throw error;}
-  finally{await docker(['rm','-f',name],{allowFailure:true}).catch(()=>undefined);await lock.close();await unlink(lockPath).catch(()=>undefined);}
+  }catch(error){if(!cachedFailure)await writeFile(failurePath,JSON.stringify({time:Date.now(),message:error.message}));throw error;}
+  finally{await docker(['rm','-f',name],{allowFailure:true}).catch(()=>undefined);if(preparedSnapshot&&snapshotCleanup)await snapshotCleanup(preparedSnapshot).catch(()=>undefined);await lock.close();await unlink(lockPath).catch(()=>undefined);}
 }

@@ -2,15 +2,15 @@
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { access, lstat, mkdtemp, mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { access, lstat, mkdtemp, mkdir, readFile, realpath, writeFile, rm } from "node:fs/promises";
 import { createInterface } from "node:readline";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { homedir, tmpdir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import {prepareTicketNodeCache} from './prepare-ticket-node-cache.mjs';
 
-const VERSION = "0.3.0";
-const TICKET_IMAGE = "okri-ticket-codex:0.3.0";
+const VERSION = "0.4.0";
+const TICKET_IMAGE = "okri-ticket-codex:0.4.0";
 const POLL_INTERVAL_MS = 3_000;
 const REPORT_INTERVAL_MS = 30_000;
 
@@ -55,8 +55,8 @@ export function sanitizedCodexEnvironment(source = process.env) {
 
 export function ticketSnapshotPathAllowed(name) {
   const path = name.replaceAll("\\", "/");
-  return !path.split("/").some(part => /^(?:\.git|\.env(?:\..*)?|\.ssh|\.aws|\.azure|\.codex|\.npmrc|\.netrc|node_modules|dist|build|coverage|\.next|\.wrangler|\.okri-ticket-results)$/i.test(part))
-    && !/(?:^|\/)(?:credentials?|secrets?|service.account|id_rsa|id_ed25519)(?:[./_-]|$)|\.(?:pem|p8|p12|pfx|key|keystore|jks|sqlite|sqlite3|db|log|csv|xlsx|sql\.gz)$/i.test(path)
+  return !path.split("/").some(part => /^(?:\.git|\.env(?:\..*)?|\.ssh|\.aws|\.azure|\.codex|\.codex-remote-attachments|\.npmrc|\.netrc|node_modules|toolcache|\.cache|\.okri-go|outputs?|deliverables|exports?|backups?|dist|build|coverage|\.next|\.wrangler|\.okri-ticket-results)$/i.test(part))
+    && !/(?:^|\/)(?:credentials?|secrets?|service.account|id_rsa|id_ed25519)(?:[./_-]|$)|\.(?:pem|p8|p12|pfx|key|keystore|jks|sqlite|sqlite3|db|log|csv|xlsx|pdf|docx|pptx|parquet|exe|dll|so|dylib|jar|traineddata|zip|tar|gz|7z)$/i.test(path)
     && !path.startsWith("/") && !path.split("/").includes("..");
 }
 export function canonicalLocalRepository(value) {
@@ -76,8 +76,17 @@ async function git(cwd, args) {
     child.once("error", reject); child.once("exit", code => code === 0 && size <= 8_000_000 ? resolvePromise(Buffer.concat(chunks).toString("utf8")) : reject(new Error("Local snapshot Git operation failed.")));
   });
 }
+const ownedSnapshots=new Set();
+export async function cleanupTicketSnapshot(directory) {
+  if(!ownedSnapshots.has(directory))return;
+  const canonical=await realpath(directory),temporary=await realpath(tmpdir()),scope=relative(temporary,canonical);
+  if(isAbsolute(scope)||scope.startsWith('..')||!/^okri-ticket-[^/\\]+$/.test(scope))throw new Error('Unsafe snapshot cleanup path.');
+  await rm(canonical,{recursive:true,force:true,maxRetries:5,retryDelay:200});ownedSnapshots.delete(directory);
+}
 export async function createTicketSnapshot(sourceRoot) {
   const root = await realpath(sourceRoot), directory = await mkdtemp(join(tmpdir(), "okri-ticket-"));
+  ownedSnapshots.add(directory);
+  try{
   const names = (await git(root, ["ls-files", "--cached", "--others", "--exclude-standard", "-z"])).split("\0").filter(Boolean);
   let total = 0;
   for (const name of names) {
@@ -94,6 +103,7 @@ export async function createTicketSnapshot(sourceRoot) {
   await git(directory, ["init", "--quiet"]); await git(directory, ["add", "."]);
   await git(directory, ["-c", "user.name=OKRI Local", "-c", "user.email=local@invalid", "commit", "--allow-empty", "-qm", "Isolated ticket baseline"]);
   return directory;
+  }catch(error){await cleanupTicketSnapshot(directory).catch(()=>undefined);throw error;}
 }
 async function saveTicketPatch(sourceRoot, directory, jobId) {
   await git(directory, ["add", "-N", "."]);
@@ -173,7 +183,7 @@ export class CodexAppServer {
     const args = this.docker ? ["run","--rm","--name",this.containerName,"-i","--init","--cap-drop","ALL","--security-opt","no-new-privileges","--security-opt",`seccomp=${fileURLToPath(new URL('./ticket-seccomp.json',import.meta.url))}`,"--pids-limit","256","--memory","4g","--cpus","2",
       "--mount",`type=bind,source=${this.cwd},target=/workspace`,"--tmpfs","/home/node/.codex:rw,nosuid,nodev,uid=1000,gid=1000,mode=700",
       ...(this.auth?["--mount",`type=bind,source=${authPath},target=/home/node/.codex/auth.json,readonly`]:[]),
-      ...this.dependencyMounts.filter(m=>/^okri-ticket-cache-[a-f0-9]{24}$/.test(m.volume)&&!/[,:\p{Cc}]/u.test(m.path)&&ticketSnapshotPathAllowed(m.path.replace(/(?:^|\/)node_modules$/,'cache'))&&m.path.split('/').at(-1)==='node_modules').flatMap(m=>['--mount',`type=volume,source=${m.volume},target=/workspace/${m.path},volume-subpath=${m.path},readonly`]),TICKET_IMAGE,...profiles] : windows
+      ...this.dependencyMounts.filter(m=>/^okri-ticket-cache-[a-f0-9]{24}$/.test(m.volume)&&!/[,:\p{Cc}]/u.test(m.path)&&(m.path==='.okri-go/pkg/mod'||(ticketSnapshotPathAllowed(m.path.replace(/(?:^|\/)node_modules$/,'cache'))&&m.path.split('/').at(-1)==='node_modules'))).flatMap(m=>['--mount',`type=volume,source=${m.volume},target=/workspace/${m.path},volume-subpath=${m.path},readonly`]),TICKET_IMAGE,...profiles] : windows
       ? ["/d", "/s", "/c", 'codex.cmd app-server -c mcp_servers={} -c web_search="disabled"']
       : ["app-server", "-c", "mcp_servers={}", "-c", 'web_search="disabled"',...profiles];
     this.child = spawn(command, args, {
@@ -331,7 +341,7 @@ async function run() {
 
   let token = options.token;
   const transport = { docker:options.executor === "docker" || (options.executor === "auto" && process.platform === "win32") };
-  if(transport.docker)transport.dependencyMounts=await prepareTicketNodeCache(cwd,{image:TICKET_IMAGE,environment:sanitizedCodexEnvironment(),snapshotFactory:createTicketSnapshot,repositoryRemote,installRoots:options.installRoots.split(',').map(v=>v.trim())});
+  if(transport.docker)transport.dependencyMounts=await prepareTicketNodeCache(cwd,{image:TICKET_IMAGE,environment:sanitizedCodexEnvironment(),snapshotFactory:createTicketSnapshot,snapshotCleanup:cleanupTicketSnapshot,repositoryRemote,installRoots:options.installRoots.split(',').map(v=>v.trim())});
   await assertTicketSandbox(transport);
   const codex = new CodexAppServer(cwd,transport);
   await codex.start();
@@ -415,6 +425,7 @@ async function run() {
       } finally {
         clearInterval(reportProgress);
         if (isolated) executionCodex.stop();
+        if (isolated&&executionDirectory!==cwd)await cleanupTicketSnapshot(executionDirectory).catch(()=>undefined);
       }
       if (options.once) break;
     } catch (error) {

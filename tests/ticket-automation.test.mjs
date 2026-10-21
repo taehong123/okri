@@ -52,7 +52,7 @@ test("normalization and policy block injected commands, credentials and private-
   assert.equal(policy.redactTicketText('안내문（최종）①'),'안내문（최종）①','safe approved wording must not be normalized');
   assert.equal(policy.assessTicketText("로그인 권한 수정해 주세요.").risk,"review");
   assert.equal(policy.canAutoApproveTicket({mode:"low_risk",risk:"low",memberId:"m",portId:"p",hasAttachments:true}),false);
-  for(const name of [".env","src/.env.production",".ssh/id_rsa","credentials.json","client.p8","node_modules/a.js","../outside","data.sqlite"])assert.equal(ticketSnapshotPathAllowed(name),false,name);
+  for(const name of [".env","src/.env.production",".ssh/id_rsa","credentials.json","client.p8","node_modules/a.js","../outside","data.sqlite","toolcache/gomod/pkg.go","outputs/customer-notes.md","deliverables/quote.pdf",".codex-remote-attachments/private.txt",".okri-go/pkg/mod/a.go"])assert.equal(ticketSnapshotPathAllowed(name),false,name);
   assert.equal(ticketSnapshotPathAllowed("src/component.tsx"),true);
 });
 test("intake, review, generation, approval, progress and final publication preserve separate approval boundaries",async t=>{
@@ -185,4 +185,10 @@ test('final publication freezes reviewed text and permits cancellation only befo
   await f.change('notice',{notice:'검토용 수정이 완료되었습니다. <!channel>'});await f.change('publish');assert.equal(f.current().state,'publishing');await assert.rejects(f.change('notice',{notice:'변경 문안'}));await assert.rejects(f.change('requester',{requesterSlackUser:'U1'}));
   await f.change('cancel_publish');assert.equal(f.current().state,'review');await f.change('publish');await f.service.deliverTicketOutbox();await f.service.deliverTicketOutbox();assert.equal(f.current().state,'published');
   const notices=f.writes.filter(v=>v.method==='chat.postMessage'&&v.body.channel==='C1');assert.equal(notices.length,1);assert.match(notices[0].body.text,/&lt;!channel&gt;/);assert.match(notices[0].body.text,/^<@UCUSTOMER>/);
+});
+
+test('operator stop revokes queued work and cannot become a completion notice',async t=>{
+  const f=fixture(t);await f.intake();await f.change('create');await f.change('approve');const job=f.current().job_id;
+  await f.change('stop');assert.equal(f.current().state,'failed');assert.equal(f.db.prepare('SELECT status FROM local_agent_jobs WHERE id=?').get(job).status,'cancelled');assert.equal(await f.service.validateTicketJobPickup(job,true),false);
+  await f.service.syncTicketJobs();assert.equal(f.current().state,'failed');assert.equal(f.current().notice,'');await assert.rejects(f.change('publish'));await assert.rejects(f.change('stop'));
 });

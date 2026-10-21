@@ -118,11 +118,14 @@ delivery. The operator may cancel only while the outbox is still pending.
 Stopping a job revokes its lease; the worker stops its container and saves a
 partial local review patch on its next progress check (normally within 30 seconds).
 
-Node dependencies are prepared once per product/repository, lockfile, installation
+Node and Go dependencies are prepared once per product/repository, lockfile, installation
 roots and executor image, behind a cross-process cache lock. The preparer receives
 only sanitized source and no authentication or device token, runs npm ci with
 installation scripts disabled, then mounts dependency directories read-only into
-development containers. Unsupported installation requirements are reported for
+development containers. The image includes Node and Go; configured paths detect
+package-lock.json or go.mod/go.sum. Go modules are downloaded without credentials
+and mounted read-only; development disables module downloads and uses a local
+temporary build cache. Unsupported installation requirements are reported for
 operator review. This allows ten slots to share dependencies without ten installs.
 
 Migration 0073 adds isolated tables only. Historical migrations and mobile v1
