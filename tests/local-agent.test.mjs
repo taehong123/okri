@@ -39,10 +39,15 @@ test("runner strips secret-looking environment variables before starting Codex",
 test("runner denies escalation and network access", async () => {
   const source = await read("../public/local-agent/okri-local-agent.mjs");
   assert.match(source, /approvalPolicy:\s*"never"/);
-  assert.match(source, /networkAccess:\s*false/);
+  assert.match(source, /permissions\.okri_ticket\.network\.enabled=false/);
+  assert.match(source, /permissions:\s*profile/);
+  assert.match(source, /":minimal":\s*"read"/);
   assert.match(source, /decision:\s*"decline"/);
   assert.match(source, /mcp_servers=\{\}/);
-  assert.doesNotMatch(source, /writeFile|appendFile|localStorage/);
+  assert.doesNotMatch(source, /appendFile|localStorage/);
+  assert.match(source, /saveTicketPatch/);
+  assert.match(source, /createTicketSnapshot/);
+  assert.match(source, /X-OKRI-Ticket-Sandbox/);
 });
 
 test("database stores hashes and excludes local paths, Codex credentials, and thread ids", async () => {

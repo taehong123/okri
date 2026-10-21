@@ -6,6 +6,7 @@ import { handleSlackWorkCommandEvent, parseSlackWorkCommand } from "@/lib/slack-
 import { handleSlackMcpConversation } from "@/lib/slack-mcp-agent";
 import { isOkriManualQuestion } from "@/lib/okri-manual";
 
+
 type SlackEventEnvelope = {
   type?: string;
   challenge?: string;
@@ -23,6 +24,8 @@ type SlackEventEnvelope = {
     thread_ts?: string;
     file_id?: string;
     blocks?: unknown[];
+    files?: unknown[];
+    attachments?: unknown[];
   };
 };
 
@@ -87,6 +90,14 @@ export async function POST(request: Request) {
   if (!eventId || !teamId) return new Response(null, { status: 200 });
   const connection = await getSlackConnectionByTeam(teamId);
   if (!connection) return new Response(null, { status: 200 });
+  if (event?.type === "message" && event.channel && event.ts && event.user && event.text && !event.bot_id && !event.subtype && event.user !== connection.botUserId && event.channel_type !== "im") {
+    // Durable request uniqueness handles message/app_mention duplicates. Ticket work is isolated from other bot commands.
+    waitUntil((async () => {
+      const { intakeTicketEvent, handleTicketThreadReply } = await import("@/lib/ticket-automation");
+      const message = { channel: event.channel!, ts: event.ts!, user: event.user!, text: event.text!, threadTs: event.thread_ts, hasAttachments:Boolean(event.files?.length||event.attachments?.length) };
+      if (!await handleTicketThreadReply(connection.teamId, message)) await intakeTicketEvent(connection, message);
+    })().catch(error => console.error("Ticket intake unavailable", { name: error instanceof Error ? error.name : "unknown" })));
+  }
   const commandEvent = isSlackCommandEvent(event) && event.user !== connection.botUserId ? event : null;
   const canvasExcerpt = commandEvent?.subtype === "document_mention" ? slackBlockText(commandEvent.blocks) : "";
   const rawCommandText = commandEvent?.text || canvasExcerpt;

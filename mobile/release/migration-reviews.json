@@ -54,5 +54,12 @@
     "rollbackPlan": "Leave the additive tables and indexes in place when rolling application code back. Older clients ignore them, and pending inbox rows remain available for a forward fix without rewriting migration history.",
     "dataPreservation": "Only new tables and indexes are created. ON DELETE clauses apply to notification records owned by an account or workspace and do not mutate existing users, workspaces, items, assignments, Daily records or native sessions during migration.",
     "reviewedBy": "Codex native compatibility and notification security review, 2026-10-08"
+  },
+  "drizzle/0073_ticket_automation.sql": {
+    "sha256": "42607319b77a0ebd07119c1644934837e7656edd76f86fba1eb79b7c6449a3db",
+    "v1Compatibility": "Adds isolated Slack ticket automation, personal execution slots and delivery audit tables. Existing mobile v1 fields, statuses, authentication and frozen fixtures are unchanged.",
+    "rollbackPlan": "Keep all additive tables and pending rows when rolling back application code. No historical migration is modified and no native support window is shortened.",
+    "dataPreservation": "Only new tables and indexes are created. Foreign-key deletion actions affect only newly owned automation records on ordinary workspace or item deletion; the migration itself mutates no customer data.",
+    "reviewedBy": "Codex source-bound installed-client and ticket-isolation review, 2026-10-22"
   }
 }

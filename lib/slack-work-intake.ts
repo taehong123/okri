@@ -383,12 +383,12 @@ async function waitForRetry(value: string | null) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function readSlackThread(token: string, event: SlackWorkIntakeEvent, canvasToken?: string | null, options: { full?: boolean } = {}) {
+export async function readSlackThread(token: string, event: SlackWorkIntakeEvent, canvasToken?: string | null, options: { full?: boolean; includeCanvas?: boolean } = {}) {
   const threadText = (value: string) => options.full ? value.replace(/\r\n?/g, "\n").trim() : cleanSlackText(value);
   const rootTs = event.threadTs || event.ts;
   if (!rootTs) {
-    return { messages: [{ user: event.user, text: cleanSlackText(event.text) }], truncated: false,
-      imageFiles: [] as SlackImageFile[], imagesTruncated: false, canvasCandidateCount: 0, canvasReadCount: 0 };
+    return { messages: [{ user: event.user, text: cleanSlackText(event.text), ts:event.ts }], truncated: false,
+      imageFiles: [] as SlackImageFile[], imagesTruncated: false, canvasCandidateCount: 0, canvasReadCount: 0, attachmentsPresent:false };
   }
   const collected: Array<{ user: string; text: string; botId?: string; ts?: string }> = [];
   const imageFiles: SlackImageFile[] = [];
@@ -404,6 +404,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   let cursor = "";
   let truncated = false;
   let imagesTruncated = false;
+  let attachmentsPresent = false;
   let pages = 0;
   const messageLimit = options.full ? 600 : maxThreadMessages;
   const charLimit = options.full ? 100_000 : maxThreadChars;
@@ -425,6 +426,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       break;
     }
     for (const message of result.messages ?? []) {
+      if (message.files?.length) attachmentsPresent = true;
       collectHuddleCanvasCandidates(message, huddleCanvasCandidates);
       for (const file of message.files ?? []) {
         if (!file.id || imageIds.has(file.id) || !String(file.mimetype ?? "").startsWith("image/")) continue;
@@ -465,6 +467,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       });
       const root = rootResult.messages?.find((message) => message.ts === event.threadTs) ?? rootResult.messages?.[0];
       if (root) {
+        if (root.files?.length) attachmentsPresent = true;
         collectHuddleCanvasCandidates(root, huddleCanvasCandidates);
         for (const file of root.files ?? []) {
           if (!file.id || imageIds.has(file.id) || !String(file.mimetype ?? "").startsWith("image/")) continue;
@@ -492,7 +495,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   }
   if (options.full && threadReadError) throw threadReadError;
   let canvasReadCount = 0;
-  if (huddleCanvasCandidates.size) {
+  if (huddleCanvasCandidates.size && options.includeCanvas !== false) {
     const canvasResults = await Promise.all([...huddleCanvasCandidates.values()].slice(0, maxHuddleCanvasCandidates)
       .map((candidate) => readSlackHuddleCanvasMessage(token, candidate, {
         canvasToken,
@@ -529,6 +532,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
     imagesTruncated,
     canvasCandidateCount: huddleCanvasCandidates.size,
     canvasReadCount,
+    attachmentsPresent,
   };
 }
 
