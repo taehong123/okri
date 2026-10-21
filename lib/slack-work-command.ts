@@ -37,6 +37,7 @@ import {
   type SlackWorkDraft,
 } from "@/lib/slack-work-intake";
 import { slackWorkGuideText } from "@/lib/slack-work-command-guide";
+import { prepareSlackTicketForm, type SlackTicketFormContent } from "@/lib/slack-ticket-intake";
 
 export { parseSlackWorkCommand } from "@/lib/slack-work-command-parser";
 
@@ -62,6 +63,8 @@ type CommandMetadata = {
   sourceThread?: { channel: string; ts: string };
   sourceMessageTs?: string;
   sourceSnapshot?: boolean;
+  ticketThread?: boolean;
+  sourceChannelType?: string;
 };
 
 type SlackState = Record<string, Record<string, {
@@ -150,10 +153,11 @@ export async function handleSlackWorkCommandEvent(
     memberId: linked.memberId,
     createdAt: Date.now(),
     ...(isCreateCommand(parsed.command) && sourceThread(event) ? { sourceThread: sourceThread(event)! } : {}),
-    ...(isCreateCommand(parsed.command) && event.ts && /[\r\n\u2028\u2029]|.{241}/u.test(event.text)
+    ...(isCreateCommand(parsed.command) && event.ts && (parsed.command === "ticket_create" || /[\r\n\u2028\u2029]|.{241}/u.test(event.text))
       ? { sourceMessageTs: event.ts } : {}),
+    ...(parsed.command === "ticket_create" ? { ticketThread: true, sourceChannelType: event.channelType } : {}),
   };
-  if (metadata.sourceMessageTs) {
+  if (metadata.sourceMessageTs && !metadata.ticketThread) {
     // Capture the already-delivered command. Opening a form must not depend on
     // another history API request, its availability or its rate limit.
     const content = slackWorkCommandFormContent(event.text);
@@ -176,6 +180,7 @@ export async function handleSlackWorkCommandEvent(
 
 export async function openSlackWorkCommandModal(triggerId: string, authorization: RequestAuthorization, memberId: string, rawMetadata: string, teamId: string, slackUserId: string) {
   const metadata = parseCommandMetadata(rawMetadata, authorization, memberId, teamId, slackUserId);
+  if (isWriteCommand(metadata.command) && authorization.role === "viewer") throw new Error("Viewer는 조회 명령만 사용할 수 있습니다.");
   const connection = await getSlackConnection(authorization.ownerId);
   if (!connection || connection.teamId !== metadata.teamId) throw new Error("Slack 연결이 변경되었습니다.");
   const token = await slackTokenForConnection(connection);
@@ -191,8 +196,11 @@ export async function openSlackWorkCommandModal(triggerId: string, authorization
     // Acknowledge the button immediately; fetching the source must not expire its trigger.
     waitUntil((async () => {
       try {
-        let content: { title: string; description: string };
-        if (metadata.sourceSnapshot) {
+        let content: { title: string; description: string; messageCount?: number; notice?: string };
+        if (metadata.ticketThread && metadata.command === "ticket_create") {
+          content = await ticketThreadContent(metadata, authorization, token, connection.botUserId,
+            await slackCanvasTokenForConnection(connection).catch(() => null));
+        } else if (metadata.sourceSnapshot) {
           const row = await env.DB.prepare(`SELECT result_json FROM slack_work_command_operations
             WHERE request_id = ? AND owner_id = ? AND team_id = ? AND slack_user_id = ? AND command = 'command_source'`)
             .bind(`command-source:${metadata.requestId}`, metadata.ownerId, metadata.teamId, metadata.slackUserId)
@@ -220,14 +228,56 @@ export async function openSlackWorkCommandModal(triggerId: string, authorization
         await slackApi(token, "views.update", { view_id: viewId, ...(hash ? { hash } : {}), view });
       } catch (error) {
         console.error("Slack command source hydration failed", { name: error instanceof Error ? error.name : "unknown" });
-        await slackApi(token, "views.update", { view_id: viewId, view: commandLoadingView(metadata, t,
-          t("Slack 원문을 불러오지 못했습니다. 창을 닫고 양식 열기를 다시 눌러 주세요.")) });
+        const message = error instanceof SlackWorkIntakeError ? t(error.message)
+          : metadata.ticketThread ? t("스레드 내용을 불러오지 못했습니다. 봇이 이 채널에 참여했는지 확인한 뒤 다시 열어 주세요.")
+            : t("Slack 원문을 불러오지 못했습니다. 창을 닫고 양식 열기를 다시 눌러 주세요.");
+        await slackApi(token, "views.update", { view_id: viewId, view: commandLoadingView(metadata, t, message) });
       }
     })());
     return;
   }
   const view = await commandModal(metadata, authorization, t);
   await slackApi(token, "views.open", { trigger_id: triggerId, view });
+}
+
+async function ticketThreadContent(metadata: CommandMetadata, authorization: RequestAuthorization, token: string, botUserId: string, canvasToken: string | null): Promise<SlackTicketFormContent> {
+  const id = `ticket-source:${metadata.requestId}`;
+  const now = new Date().toISOString();
+  const inserted = await env.DB.prepare(`INSERT OR IGNORE INTO slack_work_command_operations
+    (request_id, owner_id, team_id, slack_user_id, command, status, result_json, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 'ticket_source', 'processing', '{}', ?, ?)`)
+    .bind(id, metadata.ownerId, metadata.teamId, metadata.slackUserId, now, now).run();
+  if (!inserted.meta.changes) {
+    const row = await env.DB.prepare(`SELECT status, result_json, updated_at FROM slack_work_command_operations
+      WHERE request_id = ? AND owner_id = ? AND team_id = ? AND slack_user_id = ? AND command = 'ticket_source'`)
+      .bind(id, metadata.ownerId, metadata.teamId, metadata.slackUserId)
+      .first<{ status: string; result_json: string; updated_at: string }>();
+    if (!row) throw new Error("Slack Ticket source scope changed");
+    if (row.status === "succeeded") {
+      const saved = JSON.parse(row.result_json) as SlackTicketFormContent;
+      if (typeof saved.title !== "string" || typeof saved.description !== "string" || typeof saved.messageCount !== "number") throw new Error("Invalid Ticket source");
+      return saved;
+    }
+    if (row.status === "processing" && Date.now() - Date.parse(row.updated_at) < 90_000) {
+      throw new SlackWorkIntakeError("이 요청의 양식을 준비하고 있습니다. 잠시 후 다시 열어 주세요.", "ticket_source_pending");
+    }
+    const claimed = await env.DB.prepare(`UPDATE slack_work_command_operations SET status = 'processing', updated_at = ?
+      WHERE request_id = ? AND owner_id = ? AND team_id = ? AND slack_user_id = ? AND status = ? AND updated_at = ?`)
+      .bind(now, id, metadata.ownerId, metadata.teamId, metadata.slackUserId, row.status, row.updated_at).run();
+    if (!claimed.meta.changes) throw new Error("Slack Ticket source is busy");
+  }
+  try {
+    const content = await prepareSlackTicketForm({ authorization, token, canvasToken, botUserId, query: metadata.query,
+      event: { channel: metadata.sourceThread!.channel, channelType: metadata.sourceChannelType || "channel", user: metadata.slackUserId,
+        text: "!티켓생성", ts: metadata.sourceMessageTs, threadTs: metadata.sourceThread!.ts } });
+    await env.DB.prepare("UPDATE slack_work_command_operations SET status = 'succeeded', result_json = ?, updated_at = ? WHERE request_id = ? AND owner_id = ? AND team_id = ? AND slack_user_id = ? AND status = 'processing'")
+      .bind(JSON.stringify(content), new Date().toISOString(), id, metadata.ownerId, metadata.teamId, metadata.slackUserId).run();
+    return content;
+  } catch (error) {
+    await env.DB.prepare("UPDATE slack_work_command_operations SET status = 'failed', updated_at = ? WHERE request_id = ? AND owner_id = ? AND team_id = ? AND slack_user_id = ? AND status = 'processing'")
+      .bind(new Date().toISOString(), id, metadata.ownerId, metadata.teamId, metadata.slackUserId).run();
+    throw error;
+  }
 }
 
 function boundedFormContent(metadata: CommandMetadata, content: { title: string; description: string }) {
@@ -436,7 +486,7 @@ async function executeCommand(authorization: RequestAuthorization, metadata: Com
   throw new Error(t("지원하지 않는 명령입니다."));
 }
 
-async function commandModal(metadata: CommandMetadata, authorization: RequestAuthorization, t: Translator, sourceContent?: { title: string; description: string }) {
+async function commandModal(metadata: CommandMetadata, authorization: RequestAuthorization, t: Translator, sourceContent?: { title: string; description: string; messageCount?: number; notice?: string }) {
   const members = (await getTeam(authorization.ownerId, authorization.userId)).members.slice(0, 100);
   const memberOptions = members.map((member) => option(member.displayName || member.email, member.id));
   const actor = memberOptions.find((entry) => entry.value === metadata.memberId);
@@ -469,6 +519,8 @@ async function commandModal(metadata: CommandMetadata, authorization: RequestAut
     blocks.push(input("work_description", t("설명"), { ...plainInput("work_description", description), multiline: true }, true));
   }
   if (metadata.command === "ticket_create") {
+    if (sourceContent?.messageCount !== undefined) blocks.push(context(t("스레드 {count}개 메시지를 읽어 채웠습니다. 제출 전 내용을 확인해 주세요.", { count: sourceContent.messageCount })));
+    if (sourceContent?.notice) blocks.push(context(t(sourceContent.notice)));
     blocks.push(input("work_ticket_client", t("클라이언트"), externalSelect("work_ticket_client", t("클라이언트 검색")), true));
     blocks.push(input("work_ticket_products", t("제품"), externalMultiSelect("work_ticket_products", t("제품 검색")), true));
     blocks.push(context(t("실행 담당자는 Ticket 아래 Task에서 지정합니다.")));

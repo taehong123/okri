@@ -1,4 +1,12 @@
 const messages = {
+  "!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다.": "!티켓생성 reads the entire thread and fills the title and description. Review and submit to create the Ticket.",
+  "느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요.": "Exclamation commands are received only in channels the bot has joined. Invite the OKRI app to the channel once.",
+  "스레드 전체를 읽지 못했습니다. 메시지 수나 길이를 줄인 뒤 다시 시도해 주세요.": "Could not read the entire thread. Reduce its message count or length and try again.",
+  "AI 요약을 사용할 수 없어 스레드 원문을 채웠습니다. 내용을 확인해 주세요.": "AI summarization is unavailable, so the original thread text was filled in. Please review it.",
+  "스레드에 업무 내용이 없습니다. 제목과 설명을 입력해 주세요.": "The thread has no work details. Enter a title and description.",
+  "스레드 내용을 불러오지 못했습니다. 봇이 이 채널에 참여했는지 확인한 뒤 다시 열어 주세요.": "Could not load the thread. Check that the bot has joined this channel, then reopen the form.",
+  "이 요청의 양식을 준비하고 있습니다. 잠시 후 다시 열어 주세요.": "This request's form is being prepared. Reopen it shortly.",
+  "스레드 {count}개 메시지를 읽어 채웠습니다. 제출 전 내용을 확인해 주세요.": "Filled from {count} thread messages. Review before submitting.",
   "처리 대기": "Ready to process",
   "클라이언트 · 제품 · 상태(기본: 처리 대기) · 우선순위 · 기한": "Client · Products · Status (default: Ready to process) · Priority · Due date",
   "제목을 입력해 주세요.": "Enter a title.",

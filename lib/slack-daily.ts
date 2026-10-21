@@ -64,10 +64,17 @@ export async function slackCanvasTokenForConnection(connection: Pick<SlackConnec
 }
 
 export async function slackApi<T extends SlackApiResult>(token: string, method: string, body: Record<string, unknown> = {}, signal?: AbortSignal) {
-  const response = await fetch(`https://slack.com/api/${method}`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify(body),
+  // Slack read methods require query/form arguments; JSON POST bodies can be
+  // ignored and return invalid_arguments even with valid channel/thread IDs.
+  const read = /^(?:conversations\.(?:info|list|history|replies|members)|users\.(?:info|list|lookupByEmail)|files\.(?:info|list)|chat\.scheduledMessages\.list|auth\.test)$/.test(method);
+  const url = new URL(`https://slack.com/api/${method}`);
+  if (read) for (const [key, value] of Object.entries(body)) {
+    if (value !== undefined && value !== null) url.searchParams.set(key, typeof value === "object" ? JSON.stringify(value) : String(value));
+  }
+  const response = await fetch(url.href, {
+    method: read ? "GET" : "POST",
+    headers: { Authorization: `Bearer ${token}`, ...(!read ? { "Content-Type": "application/json; charset=utf-8" } : {}) },
+    ...(!read ? { body: JSON.stringify(body) } : {}),
     signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000),
   });
   const result = await response.json() as T;

@@ -1,5 +1,16 @@
 # Native parity ledger
 
+## 2026-10-21 · Full-thread Slack Ticket forms and channel reads
+
+- Ticket commands open a loading modal before paginating the complete source
+  thread. One budgeted summary fills an editable title/description; repeated
+  opens reuse the actor/workspace-scoped draft. Submit is still required and
+  idempotent. Partial history failures cannot masquerade as complete summaries.
+- Slack read methods use query arguments; mutating methods keep JSON POSTs.
+  Channel membership remains required, without auto-joining unrelated channels.
+- Slack-only change. Native v1 contracts, auth, database schema, native screens,
+  historical migrations, store binaries and OTA behavior are unchanged.
+
 ## 2026-10-20 · Ticket ready-to-process status
 
 - Tickets add the existing `todo` value as “처리 대기” and use it for new-item

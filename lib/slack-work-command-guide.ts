@@ -49,7 +49,8 @@ export function slackWorkGuideText(t: GuideTranslator) {
     `*${t("OKRI Slack 업무 매뉴얼")}*`,
     t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요."),
     t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다."),
-    t("!티켓생성도 지원합니다. 본문을 받을 때 양식 내용을 보관하므로 양식을 열 때 스레드를 다시 조회하지 않습니다."),
+    t("!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다."),
+    t("느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요."),
   ];
   for (const group of SLACK_WORK_GUIDE_GROUPS) {
     lines.push("", `*${t(group.label)}*`, t(group.description));
@@ -69,7 +70,7 @@ export function slackWorkGuideBlocks(t: GuideTranslator) {
     },
     {
       type: "section",
-      text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}\n${t("!티켓생성도 지원합니다. 본문을 받을 때 양식 내용을 보관하므로 양식을 열 때 스레드를 다시 조회하지 않습니다.")}` },
+      text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}\n${t("!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다.")}\n${t("느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요.")}` },
     },
     ...SLACK_WORK_GUIDE_GROUPS.map((group) => ({
       type: "section",

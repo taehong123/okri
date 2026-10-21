@@ -110,7 +110,10 @@ function harness(t) {
   const originalFetch = globalThis.fetch;
   globalThis.fetch = async (url, options) => {
     assert.ok(url.startsWith("https://slack.com/api/"), "only mocked Slack requests are allowed");
-    const method = url.split("/").at(-1), body = JSON.parse(options.body);
+    const parsed = new URL(url);
+    const method = parsed.pathname.split("/").at(-1);
+    const body = options.body ? JSON.parse(options.body) : Object.fromEntries([...parsed.searchParams].map(([key, value]) => [key,
+      ["limit", "count"].includes(key) ? Number(value) : ["true", "false"].includes(value) ? value === "true" : value]));
     const owner = options.headers.Authorization.replace("Bearer mock-token-", "");
     assert.ok(["workspace", "other"].includes(owner), "each Slack call uses its own workspace token");
     calls.push({ method, body, owner });

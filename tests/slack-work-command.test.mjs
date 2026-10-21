@@ -94,7 +94,7 @@ test("channel, private channel, DM and tagged multiline commands reach their for
 });
 
 function commandFixture(sourceText, options = {}) {
-  const calls = [], pending = [], writes = [];
+  const calls = [], pending = [], writes = [], ticketReads = [];
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(`CREATE TABLE slack_work_command_operations (
     request_id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, slack_user_id TEXT,
@@ -118,6 +118,7 @@ function commandFixture(sourceText, options = {}) {
     "@/lib/client-directory": {},
     "@/lib/slack-daily": {
       slackTokenForConnection: async () => "test-token",
+      slackCanvasTokenForConnection: async () => null,
       resolveSlackMemberForEvent: async () => ({ authorization, memberId: "member" }),
       slackApi: async (_token, method, payload) => {
         calls.push({ method, payload });
@@ -135,13 +136,21 @@ function commandFixture(sourceText, options = {}) {
     "@/lib/language-preferences": { readLanguagePreferences: async () => ({ resolvedLanguage: "ko" }) },
     "@/lib/server-language": { serverTranslator: async () => (key) => key },
     "@/lib/slack-work-command-parser": parser,
-    "@/lib/slack-work-intake": {},
+    "@/lib/slack-work-intake": { SlackWorkIntakeError: class extends Error {} },
+    "@/lib/slack-ticket-intake": { prepareSlackTicketForm: async (input) => {
+      ticketReads.push(input);
+      await sourceReady;
+      if (options.missing) throw new Error("not_in_channel");
+      const content = slackWorkCommandFormContent(sourceText);
+      const link = `https://slack.com/archives/C1/p${(event.threadTs || event.ts).replace(".", "")}`;
+      return { title: content.title, description: `${content.description.slice(0, 3000 - link.length - 2)}\n\n${link}`, messageCount: 1 };
+    } },
     "@/lib/slack-work-command-guide": {},
   });
-  return { command, authorization, connection, event, calls, pending, writes, releaseSource, sqlite, runtime };
+  return { command, authorization, connection, event, calls, pending, writes, ticketReads, releaseSource, sqlite, runtime };
 }
 
-test("multiline Ticket command posts a durable thread button and creates once without a history API read", async () => {
+test("Ticket command reads the whole thread once, caches the form and creates only on submit", async () => {
   const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
   const sourceText = "!티켓생성 <@UOTHER>\n> 업로드 오류 수정\n> 상세 내용\n> 완료 기준: 실제 파일 업로드";
   const f = commandFixture(sourceText, { domainSource, historyDenied: true, reply: true });
@@ -165,6 +174,10 @@ test("multiline Ticket command posts a durable thread button and creates once wi
   assert.match(description, /완료 기준: 실제 파일 업로드/);
   assert.doesNotMatch(description, /다른 사람의 업무/);
   assert.ok(view.submit);
+  await f.command.openSlackWorkCommandModal("trigger-again", f.authorization, "member", button.value, "T1", "U1");
+  await Promise.all(f.pending);
+  assert.equal(f.ticketReads.length, 1);
+  assert.equal(f.ticketReads[0].event.threadTs, f.event.threadTs);
   const state = { work_title: { work_title: { value: title } }, work_description: { work_description: { value: description } } };
   for (let retry = 0; retry < 2; retry++) await f.command.submitSlackWorkCommand(f.authorization, "member", view.private_metadata, state, "T1", "U1");
   assert.equal(f.writes.length, 1);
@@ -179,14 +192,13 @@ test("long Ticket details fit Slack bounds with an original link; missing source
     const f = commandFixture(text, { domainSource, missing });
     await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(text));
     const raw = f.calls.find((call) => call.method === "chat.postMessage").payload.blocks[1].elements[0].value;
-    if (missing) f.sqlite.exec("DELETE FROM slack_work_command_operations WHERE command = 'command_source'");
     await assert.rejects(() => f.command.openSlackWorkCommandModal("trigger", f.authorization, "another-member", raw, "T1", "U1"));
     await f.command.openSlackWorkCommandModal("trigger", f.authorization, "member", raw, "T1", "U1");
     await Promise.all(f.pending);
     const view = f.calls.find((call) => call.method === "views.update").payload.view;
     if (missing) {
       assert.equal(view.submit, undefined);
-      assert.match(view.blocks[0].text.text, /원문을 불러오지 못했습니다/);
+      assert.match(view.blocks[0].text.text, /스레드 내용을 불러오지 못했습니다/);
     } else {
       const description = view.blocks.find((block) => block.block_id === "work_description").element.initial_value;
       assert.ok(description.length <= 3_000);
@@ -203,6 +215,7 @@ test("legacy form buttons still acknowledge before exact-message history lookup"
   await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(f.event.text));
   const metadata = JSON.parse(f.calls.find((call) => call.method === "chat.postMessage").payload.blocks[1].elements[0].value);
   delete metadata.sourceSnapshot;
+  delete metadata.ticketThread;
   await f.command.openSlackWorkCommandModal("trigger", f.authorization, "member", JSON.stringify(metadata), "T1", "U1");
   assert.equal(f.calls.find((call) => call.method === "views.open").payload.view.submit, undefined);
   f.releaseSource();
@@ -214,6 +227,30 @@ test("legacy form buttons still acknowledge before exact-message history lookup"
   assert.ok(f.calls.find((call) => call.method === "views.update").payload.view.submit);
 });
 
+test("concurrent Ticket opens share one preparation and changed roles or foreign scopes cannot read it", async () => {
+  const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
+  const f = commandFixture("!티켓생성\n서버 오류 확인\n최신 스레드 내용", { domainSource, slow: true, reply: true });
+  await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(f.event.text));
+  const raw = f.calls.find((call) => call.method === "chat.postMessage").payload.blocks[1].elements[0].value;
+  await assert.rejects(() => f.command.openSlackWorkCommandModal("t", { ...f.authorization, role: "viewer" }, "member", raw, "T1", "U1"));
+  await assert.rejects(() => f.command.openSlackWorkCommandModal("t", { ...f.authorization, ownerId: "other" }, "member", raw, "T1", "U1"));
+  await assert.rejects(() => f.command.openSlackWorkCommandModal("t", f.authorization, "member", raw, "T2", "U1"));
+  await assert.rejects(() => f.command.openSlackWorkCommandModal("t", f.authorization, "member", raw, "T1", "U2"));
+  await f.command.openSlackWorkCommandModal("first", f.authorization, "member", raw, "T1", "U1");
+  // Let the first request claim the source before opening a second view.
+  await new Promise((resolve) => setImmediate(resolve));
+  await f.command.openSlackWorkCommandModal("second", f.authorization, "member", raw, "T1", "U1");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(f.ticketReads.length, 1);
+  assert.ok(f.calls.some((call) => call.method === "views.update" && !call.payload.view.submit));
+  f.releaseSource();
+  await Promise.all(f.pending);
+  assert.equal(f.ticketReads.length, 1);
+  assert.equal(f.writes.length, 0);
+  assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM slack_work_command_operations WHERE command='ticket_source' AND status='succeeded'").get().n, 1);
+  f.sqlite.close();
+});
+
 test("Ticket forms distinguish received/reviewing/ready/processing/closed and default to ready", async () => {
   const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
   for (const selected of [undefined, "backlog", "policy_discussion", "todo", "in_progress", "done"]) {
@@ -221,7 +258,8 @@ test("Ticket forms distinguish received/reviewing/ready/processing/closed and de
     await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(f.event.text));
     const raw = f.calls.find((call) => call.method === "chat.postMessage").payload.blocks[1].elements[0].value;
     await f.command.openSlackWorkCommandModal("trigger", f.authorization, "member", raw, "T1", "U1");
-    const view = f.calls.find((call) => call.method === "views.open").payload.view;
+    await Promise.all(f.pending);
+    const view = f.calls.find((call) => call.method === "views.update").payload.view;
     const status = view.blocks.find((block) => block.block_id === "work_status").element;
     assert.equal(status.initial_option.value, "todo");
     assert.deepEqual(status.options.map((entry) => [entry.value, entry.text.text]), [
@@ -233,6 +271,26 @@ test("Ticket forms distinguish received/reviewing/ready/processing/closed and de
     assert.equal(f.writes[0].status, selected ?? "todo");
     f.sqlite.close();
   }
+});
+
+test("a failed thread read is retryable without creating an item or caching an empty success", async () => {
+  const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
+  const options = { domainSource, missing: true, reply: true };
+  const f = commandFixture("!티켓생성\n실제 스레드 요청\n복구 후에 읽을 내용", options);
+  await f.command.handleSlackWorkCommandEvent(new Request("https://okri.test"), f.connection, f.event, parseSlackWorkCommand(f.event.text));
+  const raw = f.calls.find((call) => call.method === "chat.postMessage").payload.blocks[1].elements[0].value;
+  await f.command.openSlackWorkCommandModal("first", f.authorization, "member", raw, "T1", "U1");
+  await Promise.all(f.pending);
+  assert.equal(f.sqlite.prepare("SELECT status FROM slack_work_command_operations WHERE command='ticket_source'").get().status, "failed");
+  assert.equal(f.writes.length, 0);
+  options.missing = false;
+  await f.command.openSlackWorkCommandModal("retry", f.authorization, "member", raw, "T1", "U1");
+  await Promise.all(f.pending);
+  assert.equal(f.sqlite.prepare("SELECT status FROM slack_work_command_operations WHERE command='ticket_source'").get().status, "succeeded");
+  assert.equal(f.ticketReads.length, 2);
+  assert.equal(f.writes.length, 0);
+  assert.ok(f.calls.filter((call) => call.method === "views.update").at(-1).payload.view.submit);
+  f.sqlite.close();
 });
 
 test("production-shaped Ticket event reaches a durable button and source-filled modal with duplicate delivery suppressed", async () => {

@@ -383,7 +383,8 @@ async function waitForRetry(value: string | null) {
   await new Promise((resolve) => setTimeout(resolve, milliseconds));
 }
 
-export async function readSlackThread(token: string, event: SlackWorkIntakeEvent, canvasToken?: string | null) {
+export async function readSlackThread(token: string, event: SlackWorkIntakeEvent, canvasToken?: string | null, options: { full?: boolean } = {}) {
+  const threadText = (value: string) => options.full ? value.replace(/\r\n?/g, "\n").trim() : cleanSlackText(value);
   const rootTs = event.threadTs || event.ts;
   if (!rootTs) {
     return { messages: [{ user: event.user, text: cleanSlackText(event.text) }], truncated: false,
@@ -404,6 +405,9 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   let truncated = false;
   let imagesTruncated = false;
   let pages = 0;
+  const messageLimit = options.full ? 600 : maxThreadMessages;
+  const charLimit = options.full ? 100_000 : maxThreadChars;
+  const readSignal = options.full ? AbortSignal.timeout(20_000) : undefined;
   let threadReadError: unknown = null;
   do {
     pages += 1;
@@ -412,8 +416,9 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       result = await slackApi<SlackThreadResult>(token, "conversations.replies", {
         channel: event.channel,
         ts: rootTs,
+        ...(options.full ? { limit: 15 } : {}),
         ...(cursor ? { cursor } : {}),
-      });
+      }, readSignal);
     } catch (error) {
       threadReadError = error;
       truncated = true;
@@ -436,17 +441,20 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
           urlPrivateDownload: file.url_private_download || file.url_private || "",
         });
       }
-      const text = cleanSlackText(message.text ?? "");
+      const text = threadText(message.text ?? "");
       if (!text) continue;
       collected.push({ user: message.user ?? "", text, botId: message.bot_id, ts: message.ts });
-      if (collected.length >= maxThreadMessages) { truncated = Boolean(result.response_metadata?.next_cursor); break; }
+      if (collected.length >= messageLimit) { truncated = Boolean(result.response_metadata?.next_cursor); break; }
     }
     cursor = result.response_metadata?.next_cursor ?? "";
-  } while (cursor && collected.length < maxThreadMessages && pages < 1);
+  } while (cursor && collected.length < messageLimit && pages < (options.full ? 40 : 1));
   if (cursor) {
     truncated = true;
     imagesTruncated = true;
   }
+  // Full Ticket capture must not silently turn a partial/failed history read
+  // into a confident draft based only on the invocation message.
+  if (options.full && threadReadError) throw threadReadError;
   if (event.threadTs && !collected.some((message) => message.ts && message.ts !== event.ts)) {
     try {
       const rootResult = await slackApi<SlackThreadResult>(token, "conversations.history", {
@@ -473,7 +481,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
             urlPrivateDownload: file.url_private_download || file.url_private || "",
           });
         }
-        const text = cleanSlackText(root.text ?? "");
+        const text = threadText(root.text ?? "");
         if (text && !collected.some((message) => message.ts === root.ts)) {
           collected.unshift({ user: root.user ?? "", text, botId: root.bot_id, ts: root.ts });
         }
@@ -482,6 +490,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
       if (!threadReadError) threadReadError = error;
     }
   }
+  if (options.full && threadReadError) throw threadReadError;
   let canvasReadCount = 0;
   if (huddleCanvasCandidates.size) {
     const canvasResults = await Promise.all([...huddleCanvasCandidates.values()].slice(0, maxHuddleCanvasCandidates)
@@ -506,7 +515,7 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
   let chars = 0;
   const bounded: typeof collected = [];
   for (const message of collected.toReversed()) {
-    const remaining = maxThreadChars - chars;
+    const remaining = charLimit - chars;
     if (remaining <= 0) { truncated = true; break; }
     const text = message.text.slice(-remaining);
     bounded.push({ ...message, text });
@@ -867,7 +876,7 @@ function clean(value: unknown, max: number) {
   return typeof value === "string" ? value.trim().replace(/\s+/g, " ").slice(0, max) : "";
 }
 
-function responseUsage(data: Record<string, unknown>, inputChars: number) {
+export function responseUsage(data: Record<string, unknown>, inputChars: number) {
   const usage = data.usage && typeof data.usage === "object" ? data.usage as Record<string, unknown> : {};
   return {
     inputTokens: numberValue(usage.input_tokens) || numberValue(usage.prompt_tokens) || estimateTokensFromChars(inputChars),
@@ -875,7 +884,7 @@ function responseUsage(data: Record<string, unknown>, inputChars: number) {
   };
 }
 
-function responseText(data: Record<string, unknown>) {
+export function responseText(data: Record<string, unknown>) {
   if (typeof data.output_text === "string") return data.output_text;
   const output = Array.isArray(data.output) ? data.output : [];
   return output.flatMap((entry) => entry && typeof entry === "object" && Array.isArray((entry as { content?: unknown }).content)
@@ -884,7 +893,7 @@ function responseText(data: Record<string, unknown>) {
     .filter(Boolean).join("\n");
 }
 
-function estimateCostWonMicros(runtime: RuntimeEnv, inputTokens: number, outputTokens: number) {
+export function estimateCostWonMicros(runtime: RuntimeEnv, inputTokens: number, outputTokens: number) {
   const inputRate = nonnegative(runtime.OKRI_AI_INPUT_WON_PER_1K_TOKENS ?? runtime.OKRPTR_AI_INPUT_WON_PER_1K_TOKENS, 0.2);
   const outputRate = nonnegative(runtime.OKRI_AI_OUTPUT_WON_PER_1K_TOKENS ?? runtime.OKRPTR_AI_OUTPUT_WON_PER_1K_TOKENS, 2);
   const minimum = nonnegative(runtime.OKRI_AI_MIN_CALL_COST_WON ?? runtime.OKRPTR_AI_MIN_CALL_COST_WON, 25);
@@ -901,7 +910,7 @@ function nonnegative(value: string | undefined, fallback: number) {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
-function estimateTokensFromChars(value: number) { return Math.max(1, Math.ceil(value / 2)); }
+export function estimateTokensFromChars(value: number) { return Math.max(1, Math.ceil(value / 2)); }
 function numberValue(value: unknown) { return typeof value === "number" && Number.isFinite(value) ? value : 0; }
 function koreaDate() {
   const parts = new Intl.DateTimeFormat("en", { timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());

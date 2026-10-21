@@ -1,5 +1,13 @@
 import type { Catalog } from "./en";
 const messages = {
+  "!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다.": "!티켓생성 lee todo el hilo y rellena el título y la descripción. Revisa y envía para crear el Ticket.",
+  "느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요.": "Los comandos con exclamación solo se reciben en canales donde está el bot. Invita una vez a la app OKRI al canal.",
+  "스레드 전체를 읽지 못했습니다. 메시지 수나 길이를 줄인 뒤 다시 시도해 주세요.": "No se pudo leer todo el hilo. Reduce la cantidad o longitud de los mensajes e inténtalo de nuevo.",
+  "AI 요약을 사용할 수 없어 스레드 원문을 채웠습니다. 내용을 확인해 주세요.": "El resumen con IA no está disponible; se ha rellenado el texto original del hilo. Revísalo.",
+  "스레드에 업무 내용이 없습니다. 제목과 설명을 입력해 주세요.": "El hilo no contiene detalles del trabajo. Introduce un título y una descripción.",
+  "스레드 내용을 불러오지 못했습니다. 봇이 이 채널에 참여했는지 확인한 뒤 다시 열어 주세요.": "No se pudo cargar el hilo. Comprueba que el bot esté en este canal y vuelve a abrir el formulario.",
+  "이 요청의 양식을 준비하고 있습니다. 잠시 후 다시 열어 주세요.": "Se está preparando el formulario de esta solicitud. Vuelve a abrirlo en unos instantes.",
+  "스레드 {count}개 메시지를 읽어 채웠습니다. 제출 전 내용을 확인해 주세요.": "Rellenado a partir de {count} mensajes del hilo. Revisa antes de enviar.",
   "처리 대기": "Pendiente de tramitar",
   "클라이언트 · 제품 · 상태(기본: 처리 대기) · 우선순위 · 기한": "Cliente · Productos · Estado (predeterminado: Pendiente de tramitar) · Prioridad · Fecha límite",
   "제목을 입력해 주세요.": "Introduce un título.",
