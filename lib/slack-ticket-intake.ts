@@ -16,8 +16,9 @@ export async function prepareSlackTicketForm(input: {
   authorization: RequestAuthorization; token: string; canvasToken?: string | null;
   botUserId: string; event: SlackWorkIntakeEvent; query: string;
   textOnly?: boolean;
+  evidenceMessages?: {user:string;text:string}[];
 }): Promise<SlackTicketFormContent> {
-  const thread = await readSlackThread(input.token, input.event, input.canvasToken, { full: true, includeCanvas: !input.textOnly });
+  const thread = input.evidenceMessages ? {messages:input.evidenceMessages,truncated:false} : await readSlackThread(input.token, input.event, input.canvasToken, { full: true, includeCanvas: !input.textOnly });
   if (thread.truncated) throw new SlackWorkIntakeError("스레드 전체를 읽지 못했습니다. 메시지 수나 길이를 줄인 뒤 다시 시도해 주세요.", "ticket_thread_incomplete");
   const messages = thread.messages.filter((message) => message.user !== input.botUserId).map((message) => {
     const command = slackWorkCommandFormContent(message.text);

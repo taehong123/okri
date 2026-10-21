@@ -2828,6 +2828,13 @@ const messages = {
   "저장소 추가": "Add repository",
   "제품 설정 저장": "Save product settings",
   "완료 안내 전송 대기": "Completion delivery pending",
+  "중계 앱 요청": "Relay app requests",
+  "허용할 중계 봇 사용자 ID": "Allowed relay bot user IDs",
+  "수신 메시지 시작 문구": "Incoming message prefix",
+  "본문 시작 표시": "Content start marker",
+  "본문 끝 표시": "Content end marker",
+  "허용한 봇의 수신 본문만 분석합니다. 발송 결과는 제외하고 완료 공유 전 실제 Slack 요청자를 지정하세요.": "Analyze incoming content only from allowed bots. Exclude delivery reports and select a real Slack requester before sharing completion.",
+  "요청자 지정 필요": "Select a requester",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

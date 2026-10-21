@@ -64,6 +64,11 @@ function fixture(t, options = {}) {
   return { ...ticket, intake, requests, metering, input };
 }
 
+test('automation can summarize already-validated evidence without fetching the raw thread again',async t=>{
+  const f=fixture(t);await f.prepareSlackTicketForm({...f.input,textOnly:true,evidenceMessages:[{user:'U1',text:'Reviewed request with metadata removed.'}]});
+  assert.equal(f.requests.filter(r=>r.method==='conversations.replies').length,0);const payload=f.requests.find(r=>r.method==='model').body;assert.deepEqual(JSON.parse(payload.input[1].content).messages,[{user:'U1',text:'Reviewed request with metadata removed.'}]);
+});
+
 test("real Slack wire contract sends read arguments in GET queries and keeps writes as JSON without retries", async (t) => {
   const f = fixture(t);
   await slackApi("mock-token", "conversations.info", { channel: "C1", include_locale: false, cursor: undefined });

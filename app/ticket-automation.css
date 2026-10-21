@@ -19,6 +19,7 @@
 .ticket-automation .ticket-check { display:flex; align-items:center; min-height:var(--control-height); gap:var(--space-2); }
 .ticket-check input { flex-shrink:0; width:1.125rem; height:1.125rem; accent-color:var(--text-primary); }
 .ticket-channel-rule { display:grid; grid-template-columns:minmax(12rem,2fr) repeat(3,minmax(8rem,1fr)); align-items:end; gap:var(--space-3); padding-block:var(--space-4); border-bottom:1px solid var(--border-default); }
+.ticket-relay-settings { grid-column:1/-1; }
 .ticket-automation .ticket-request-row,.ticket-port-row { display:grid; grid-template-columns:minmax(0,3fr) repeat(3,minmax(0,1fr)); gap:var(--space-4); width:100%; min-height:3rem; text-align:left; padding-block:var(--space-4); border:0; border-bottom:1px solid var(--border-default); background:var(--bg-surface); color:var(--text-primary); }
 .ticket-port-row>button { align-self:center; }
 .ticket-request-row span,.ticket-port-row>div { min-width:0; overflow-wrap:anywhere; }

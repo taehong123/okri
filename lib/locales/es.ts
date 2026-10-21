@@ -2829,5 +2829,12 @@ const messages = {
   "저장소 추가": "Añadir repositorio",
   "제품 설정 저장": "Guardar producto",
   "완료 안내 전송 대기": "Aviso pendiente de envío",
+  "중계 앱 요청": "Solicitudes de aplicaciones intermediarias",
+  "허용할 중계 봇 사용자 ID": "ID de bots intermediarios permitidos",
+  "수신 메시지 시작 문구": "Prefijo de mensajes entrantes",
+  "본문 시작 표시": "Marca de inicio",
+  "본문 끝 표시": "Marca de final",
+  "허용한 봇의 수신 본문만 분석합니다. 발송 결과는 제외하고 완료 공유 전 실제 Slack 요청자를 지정하세요.": "Analiza solo contenido entrante de bots permitidos. Excluye informes de envío y elige un solicitante real antes de compartir.",
+  "요청자 지정 필요": "Selecciona un solicitante",
 } satisfies Catalog;
 export default messages;

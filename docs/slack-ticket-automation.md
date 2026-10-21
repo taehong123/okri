@@ -8,6 +8,12 @@ configuration, never application constants.
 1. Ticket → Ticket automation → Channel settings: load channels, select the
    management channel and customer prefix, and connect matches. Private channels
    appear after their members add the existing OKRI app.
+   Trusted relay apps are optional per-channel settings: allowlisted bot user IDs,
+   incoming-message prefix and optional content start/end markers. Unknown bots
+   and OKRI itself never trigger intake. Configure markers to omit transport
+   metadata and delivery reports. Common Korean mobile numbers are removed before
+   persistence or summarization. A relay bot is never the completion recipient;
+   the operator must select an active human from the original Slack channel.
    First configure Product/repositories: reviewed product specification, canonical
    HTTPS Git repositories, dependency installation roots and PC setup instructions.
    Product revisions accompany every job; edits invalidate earlier approvals.
