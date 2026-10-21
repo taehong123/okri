@@ -44,6 +44,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
 
 type GuideTranslator = (key: string) => string;
 export const SLACK_TICKET_AUTOMATION_GUIDE = "고객 채널 자동화는 웹의 Ticket > 티켓 자동화에서 설정합니다. 개발 승인 후 포트에서 보안 검증하며, 완료 안내는 문안 승인 후 지정한 요청자를 태그해 원문 스레드에 공유합니다.";
+export const SLACK_TICKET_SETUP_GUIDE = "제품 명세·Git 저장소·PC 준비 지침과 기본 모델을 설정하고, PC별 포트 개수를 정해 본인의 Codex에 연결합니다. 선행 작업 반영 후 긴급·높음·보통·낮음 순으로 검토합니다. 중계 앱은 허용한 봇의 수신 본문만 분석하며, 완료 공유 전 실제 Slack 요청자를 지정합니다. 포트는 검토용 패치를 준비하고 실제 병합·배포는 별도 승인합니다.";
 
 export function slackWorkGuideText(t: GuideTranslator) {
   const lines = [
@@ -53,6 +54,7 @@ export function slackWorkGuideText(t: GuideTranslator) {
     t("!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다."),
     t("느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요."),
     t(SLACK_TICKET_AUTOMATION_GUIDE),
+    t(SLACK_TICKET_SETUP_GUIDE),
   ];
   for (const group of SLACK_WORK_GUIDE_GROUPS) {
     lines.push("", `*${t(group.label)}*`, t(group.description));
@@ -87,7 +89,7 @@ export function slackWorkGuideBlocks(t: GuideTranslator) {
     })),
     {
       type: "context",
-      elements: [{ type: "mrkdwn", text: `${t("Ticket의 실행 담당자는 하위 Task에서 지정합니다. 연결 대상을 고르지 않은 Task는 General에 저장됩니다.")}\n${t(SLACK_TICKET_AUTOMATION_GUIDE)}` }],
+      elements: [{ type: "mrkdwn", text: `${t("Ticket의 실행 담당자는 하위 Task에서 지정합니다. 연결 대상을 고르지 않은 Task는 General에 저장됩니다.")}\n${t(SLACK_TICKET_AUTOMATION_GUIDE)}` },{type:'mrkdwn',text:t(SLACK_TICKET_SETUP_GUIDE)}],
     },
   ];
 }
