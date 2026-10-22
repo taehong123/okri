@@ -150,7 +150,7 @@ export async function reconcileTicketIntake(){
 }
 export async function runTicketIntake(){
   await reconcileTicketIntake().catch(()=>undefined);
-  const due=await rows<{id:string}>(`SELECT q.id FROM ticket_intake_messages q JOIN ticket_automation_settings s ON s.owner_id=q.owner_id AND s.enabled=1 WHERE (q.state IN ('pending','retry') AND q.next_attempt_at<=?) OR (q.state='processing' AND q.lease_until<?) ORDER BY json_extract(q.event_json,'$.recovery'),q.received_at LIMIT 6`,now(),now());
+  const due=await rows<{id:string}>(`SELECT id FROM (SELECT q.id,q.received_at,COALESCE(json_extract(q.event_json,'$.recovery'),0) AS recovery,ROW_NUMBER() OVER(PARTITION BY q.owner_id,q.channel_id ORDER BY COALESCE(json_extract(q.event_json,'$.recovery'),0),q.received_at,q.id) AS channel_rank FROM ticket_intake_messages q JOIN ticket_automation_settings s ON s.owner_id=q.owner_id AND s.enabled=1 WHERE (q.state IN ('pending','retry') AND q.next_attempt_at<=?) OR (q.state='processing' AND q.lease_until<?)) WHERE channel_rank=1 ORDER BY recovery,received_at,id LIMIT 6`,now(),now());
   // Keep live intake responsive without allowing duplicate workers or unbounded model concurrency.
   for(let i=0;i<due.length;i+=2)await Promise.all(due.slice(i,i+2).map(r=>processTicketReceipt(r.id)));
 }

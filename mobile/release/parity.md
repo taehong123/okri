@@ -1,5 +1,12 @@
 # Native parity ledger
 
+## 2026-10-22 · Existing ticket status follow-ups
+
+- Backend/Slack only: evidence-backed status clarifications update an existing
+  ticket even when there is no new work. They never create duplicate tickets,
+  launch development, approve scope changes or authorize completion notices.
+- No schema, native v1 payload, auth, mobile screen or binary release changes.
+
 ## 2026-10-22 · Ticket analysis availability and scoped test accounts
 
 - Web/Slack only: explicit analysis pause reasons, reset times, one daily
