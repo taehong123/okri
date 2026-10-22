@@ -299,7 +299,7 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
   if (assessment.risk !== "blocked"&&source.safe.trim()) {
     const form = await prepareSlackTicketForm({ authorization: { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false }, token: source.token, botUserId: connection.botUserId,
       event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages,classifyRequest:true,recommendation:{model:c.defaultModel||'gpt-6.1-sol',productSpecification:product?.specification||'',focusMessage:focus,knownRequests,sourceRoots,temporaryAllowance:c.temporaryAllowance} });
-    if(!form.analysisModel||!form.recommendations)throw new TicketAutomationError('원문은 수집됐으며 추천 분석을 다시 시도합니다.',503);
+    if(!form.analysisModel||!form.recommendations)throw Object.assign(new TicketAutomationError('원문은 수집됐으며 추천 분석을 다시 시도합니다.',503),form.analysisFailure);
     if(form.actionable===false&&(manualImport||!event.forceReview&&!event.hasAttachments))return {state:'no_work',requestIds:[],reason:form.noWorkReason};
     await applyProblemUpdates(form.updates||[],s,c,event,sources,form.analysisModel);
     if(!form.recommendations.length&&((form.existingRequestIds||[]).length||!event.forceReview&&!event.hasAttachments))return {state:'existing',requestIds:form.existingRequestIds||[]};

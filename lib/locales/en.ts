@@ -2883,6 +2883,15 @@ const messages = {
   "고객 채널과 제품·포트 연결 후 /okri ticket 또는 !티켓관리로 Slack에서 운영합니다. 내용·담당자·포트 수정, 개발 승인, 질문 답변, 보안 경고 확인, 완료 문안 수정·공유를 같은 티켓에 반영합니다. 완료 안내는 최종 승인 후 지정한 요청자를 태그합니다.": "After connecting customer channels, products and slots, use /okri ticket or !티켓관리 in Slack. Edit scope, assignees and slots, approve development, answer questions, review security warnings, and edit and share completion wording on the same ticket. Final approval tags the selected requester.",
   "원문 아래에 버그 픽스·기능 개선·기능 추가·단순 안내로 분류하고 고객의 문제와 해결안을 제안합니다. 단순 안내는 개발 없이 문안 승인을 거칩니다. 원문을 먼저 저장하고 과거 대화·댓글과 분석 실패를 다시 대조합니다. 제외 사유와 미처리 상태도 수집 점검에서 확인합니다.": "Proposals below the source classify bug fixes, improvements, new features and guidance, explaining the customer problem and solution. Guidance requires wording approval without development. Originals are saved first; historical conversations, replies and analysis failures are reconciled. Intake coverage also shows exclusion reasons and pending work.",
   "댓글 대조 중": "Reconciling replies",
+  "오늘의 AI 분석 횟수 한도에 도달했습니다.": "The daily AI analysis limit has been reached.",
+  "AI 금액 예산 한도에 도달했습니다.": "The AI spending budget has been reached.",
+  "AI 분석 요청이 몰려 잠시 대기합니다.": "AI analysis is waiting because requests are arriving too quickly.",
+  "AI 서비스의 요청 한도로 잠시 대기합니다.": "Waiting for the AI provider’s request limit to reset.",
+  "AI 분석 결과를 검증하지 못해 다시 분석합니다.": "The AI analysis could not be validated and will be retried.",
+  "AI 연결 설정을 확인해 주세요.": "Check the AI connection settings.",
+  "AI 서비스에 연결하지 못해 다시 시도합니다.": "The AI service could not be reached and will be retried.",
+  "수집은 계속되며 AI 분석은 한도 초기화까지 대기합니다.": "Message collection continues while AI analysis waits for the limit to reset.",
+  "자동 재시도 예정": "Automatic retry scheduled",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

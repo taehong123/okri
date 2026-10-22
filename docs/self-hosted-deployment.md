@@ -129,6 +129,18 @@ until the final verification says to retire it.
 
 ## Exact request for the other account
 
+### Operator-managed ticket analysis test accounts
+
+`OKRI_TICKET_AI_TEST_ACCOUNTS` is an optional runtime JSON array of exact
+`workspaceId` and `userId` pairs. Leave it unset for normal customer billing.
+Only ticket recommendation analysis checks this deployment policy; workspace
+settings and Slack content cannot grant it. Matched test accounts bypass daily
+analysis and monetary budget limits, retain minute/concurrency controls and
+record real tokens/cost under `slack_ticket_test`. Those records do not consume
+normal daily allowances or billable AI budgets. Other accounts and manual AI
+flows retain their limits. Removing a pair revokes the exemption on the next
+request. Record operator authorization in the automation audit log.
+
 Send this, unchanged if useful:
 
 > OKRI를 ChatGPT Sites 의존 없이 자체 서버로 이전합니다. 현재 Sites 프로젝트

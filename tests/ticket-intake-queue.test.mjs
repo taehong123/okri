@@ -7,14 +7,14 @@ const read=p=>readFile(new URL(`../${p}`,import.meta.url),'utf8');
 const source=await read('lib/ticket-intake-queue.ts'),migration=await read('drizzle/0074_ticket_intake_coverage.sql'),policy=compile(await read('lib/ticket-policy.ts'));
 const problemMigration=await read('drizzle/0075_ticket_problem_followups.sql');
 function fixture(t,options={}){
-  const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("PRAGMA foreign_keys=ON;CREATE TABLE workspaces(id TEXT PRIMARY KEY);INSERT INTO workspaces VALUES('w1'),('w2');CREATE TABLE ticket_automation_settings(owner_id TEXT,team_id TEXT,config_json TEXT,enabled INTEGER);CREATE TABLE ticket_automation_audit(id TEXT,owner_id TEXT,actor_user_id TEXT,action TEXT,details_json TEXT,created_at TEXT);");db.exec(migration.slice(migration.indexOf('CREATE TABLE ticket_intake_messages')));db.exec(problemMigration);
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("PRAGMA foreign_keys=ON;CREATE TABLE workspaces(id TEXT PRIMARY KEY);INSERT INTO workspaces VALUES('w1'),('w2');CREATE TABLE ticket_automation_settings(owner_id TEXT,team_id TEXT,config_json TEXT,enabled INTEGER);CREATE TABLE ticket_automation_audit(id TEXT PRIMARY KEY,owner_id TEXT,actor_user_id TEXT,action TEXT,details_json TEXT,created_at TEXT);");db.exec(migration.slice(migration.indexOf('CREATE TABLE ticket_intake_messages')));db.exec(problemMigration);
   const config={channels:[{id:'C1',name:'customer-one',enabled:true,autoApprove:'manual'}],destination:'CMGMT'};db.prepare('INSERT INTO ticket_automation_settings VALUES(?,?,?,1)').run('w1','T1',JSON.stringify(config));
   db.exec('CREATE TABLE ticket_automation_requests(id TEXT PRIMARY KEY,owner_id TEXT,state TEXT);CREATE TABLE local_agent_jobs(id TEXT PRIMARY KEY);');
   const statement=(sql,args=[])=>({bind:(...v)=>statement(sql,v),first:async()=>db.prepare(sql).get(...args)||null,all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:{changes:Number(db.prepare(sql).run(...args).changes)}})});
   let failure=options.failure,modelCalls=0;const slackCalls=[],events=[];
   const connection={ownerId:'w1',teamId:'T1',botUserId:'UBOT'};
   const api=async(_token,method,body)=>{slackCalls.push({method,body});if(options.slack)return options.slack(method,body);return {ok:true,messages:[]};};
-  const service=compile(source,{'cloudflare:workers':{env:{DB:{prepare:statement}}},'@/lib/pace-data':{getSlackConnection:async owner=>owner==='w1'?connection:null,canManageTeam:a=>a.role==='owner'},'@/lib/slack-daily':{slackApi:api,slackTokenForConnection:async()=>'mock'},'@/lib/ticket-automation':{analyzeTicketEvent:async(_c,e)=>{modelCalls++;events.push(e);if(options.delay)await new Promise(resolve=>setTimeout(resolve,20));if(failure)throw Error('provider offline');return {state:options.noWork?'no_work':'analyzed',requestIds:[],reason:options.noWork?'감사 인사이며 새 요청이 없습니다.':undefined};}},'@/lib/ticket-policy':policy});
+  const service=compile(source,{'cloudflare:workers':{env:{DB:{prepare:statement}}},'@/lib/pace-data':{getSlackConnection:async owner=>owner==='w1'?connection:null,canManageTeam:a=>a.role==='owner'},'@/lib/slack-daily':{slackApi:api,slackTokenForConnection:async()=>'mock'},'@/lib/ticket-automation':{analyzeTicketEvent:async(_c,e)=>{modelCalls++;events.push(e);if(options.delay)await new Promise(resolve=>setTimeout(resolve,20));if(failure)throw Object.assign(Error('provider offline'),typeof failure==='object'?failure:{});return {state:options.noWork?'no_work':'analyzed',requestIds:[],reason:options.noWork?'감사 인사이며 새 요청이 없습니다.':undefined};}},'@/lib/ticket-policy':policy});
   const event={channel:'C1',ts:'100.000001',user:'UCUSTOMER',text:'견적서 화면이 새하얘졌어요'};
   return {db,config,service,event,connection,slackCalls,events,get modelCalls(){return modelCalls;},setFailure:v=>{failure=v;}};
 }
@@ -46,6 +46,30 @@ test('downtime recovery discovers new replies on old unknown roots without impor
 test('model failure and an abandoned processing lease remain visible and are retried',async t=>{
   const f=fixture(t,{failure:true}),id=await f.service.captureTicketMessage(f.connection,f.event);await f.service.processTicketReceipt(id);let r=f.db.prepare('SELECT * FROM ticket_intake_messages').get();assert.equal(r.state,'retry');assert.equal(r.last_error,'analysis_retry_required');assert.equal(r.attempts,1);
   f.setFailure(false);f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000',state='processing',lease_until='2000'");await f.service.processTicketReceipt(id);r=f.db.prepare('SELECT * FROM ticket_intake_messages').get();assert.equal(r.state,'analyzed');assert.equal(r.attempts,2);
+});
+
+test('daily limits persist the exact reset, keep capture active and notify only the authorized workspace once',async t=>{
+  const f=fixture(t,{failure:{code:'ai_daily_limit_reached'}});Object.assign(f.config,{notificationsAuthorized:true,intakeStartAt:new Date(Date.now()-60000).toISOString()});f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  const id=await f.service.captureTicketMessage(f.connection,{...f.event,ts:String(Date.now()/1000)});f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");
+  await Promise.all([f.service.processTicketReceipt(id),f.service.processTicketReceipt(id)]);
+  let row=f.db.prepare('SELECT * FROM ticket_intake_messages').get();assert.equal(row.last_error,'ai_daily_limit_reached');assert.equal(row.next_attempt_at,new Date(new Date().setUTCHours(24,0,0,0)).toISOString());
+  const posts=f.slackCalls.filter(c=>c.method==='chat.postMessage');assert.equal(posts.length,1);assert.equal(posts[0].body.channel,'CMGMT');assert.match(posts[0].body.text,/새 고객 메시지 수집은 계속/);assert.doesNotMatch(posts[0].body.text,/견적서/);
+  await f.service.processTicketReceipt(id);assert.equal(f.modelCalls,1,'waiting for reset must not call the model');
+  const second=await f.service.captureTicketMessage(f.connection,{...f.event,ts:String(Date.now()/1000+1)});assert.ok(second);f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");await f.service.processTicketReceipt(second);assert.equal(f.slackCalls.filter(c=>c.method==='chat.postMessage').length,1);
+  row=(await f.service.ticketIntakeStatus('w1')).messages[0];assert.equal(row.last_error,'ai_daily_limit_reached');assert.ok(row.next_attempt_at);
+});
+
+test('overdue retry messages are analyzed in a bounded batch and paused together without losing receipts',async t=>{
+  const f=fixture(t,{failure:{code:'ai_daily_limit_reached'}});f.config.intakeStartAt=new Date(Date.now()-60000).toISOString();f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  const root=String(Date.now()/1000),ids=[];for(let i=0;i<23;i++)ids.push(await f.service.captureTicketMessage(f.connection,{...f.event,threadTs:root,ts:String(Date.now()/1000+i),text:`Issue ${i}`}));
+  f.db.exec("UPDATE ticket_intake_messages SET state='retry',next_attempt_at='2000',received_at='2000'");await f.service.processTicketReceipt(ids[0]);assert.equal(f.events[0].batchEvents.length,20);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_intake_messages WHERE last_error='ai_daily_limit_reached'").get().n,20);assert.equal(f.slackCalls.filter(c=>c.method==='chat.postMessage').length,0,'no notification authorization');
+  f.setFailure(false);f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");await f.service.processTicketReceipt(ids[0]);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_intake_messages WHERE state='analyzed'").get().n,20);assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,23);
+});
+
+test('a budget pause preserves its period and an uncertain Slack notice never blindly resends',async t=>{
+  const retryAt=new Date(Date.now()+86400000).toISOString();const f=fixture(t,{failure:{code:'ai_budget_exceeded',retryAt},slack:async()=>{throw Error('timeout after post');}});f.config.notificationsAuthorized=true;f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  const id=await f.service.captureTicketMessage(f.connection,f.event);await f.service.processTicketReceipt(id);assert.equal(f.db.prepare('SELECT next_attempt_at FROM ticket_intake_messages').get().next_attempt_at,retryAt);assert.equal(JSON.parse(f.db.prepare('SELECT details_json FROM ticket_automation_audit').get().details_json).state,'unconfirmed');
+  f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");await f.service.processTicketReceipt(id);assert.equal(f.slackCalls.filter(c=>c.method==='chat.postMessage').length,1);
 });
 test('edits preserve separate versions, redact secrets/contact details, and untrusted relay messages remain auditable',async t=>{
   const f=fixture(t);await f.service.captureTicketMessage(f.connection,f.event);await f.service.captureTicketMessage(f.connection,{...f.event,text:'다른 문제 01012345678 API_KEY=sk-proj-abcdefghijklmnop123456789'});assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,2);const saved=f.db.prepare('SELECT event_json FROM ticket_intake_messages ORDER BY rowid DESC').get().event_json;assert.doesNotMatch(saved,/01012345678|sk-proj/);assert.equal(JSON.parse(saved).securityBlocked,true);

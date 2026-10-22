@@ -1860,9 +1860,9 @@ export async function getAiUsageSummary(ownerId: string, userId: string): Promis
   await ensureSchema();
   const [summary] = await getDb().select({
     spentWonMicros: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} then ${aiUsageEvents.estimatedCostWonMicros} else 0 end), 0)`,
-    requestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
+    requestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.source} NOT IN ('slack_ticket_test','pending:slack_ticket_test') and ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
     requestsThisMinute: sql<number>`coalesce(sum(case when ${aiUsageEvents.userId} = ${userId} and ${aiUsageEvents.createdAt} >= datetime('now', '-1 minute') then 1 else 0 end), 0)`,
-    workspaceRequestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
+    workspaceRequestsToday: sql<number>`coalesce(sum(case when ${aiUsageEvents.source} NOT IN ('slack_ticket_test','pending:slack_ticket_test') and ${aiUsageEvents.createdAt} >= datetime('now', 'start of day') then 1 else 0 end), 0)`,
     workspaceRequestsThisMinute: sql<number>`coalesce(sum(case when ${aiUsageEvents.createdAt} >= datetime('now', '-1 minute') then 1 else 0 end), 0)`,
   }).from(aiUsageEvents).where(eq(aiUsageEvents.ownerId, ownerId));
   return {
@@ -1922,9 +1922,9 @@ export async function reserveAiUsageEvent(input: AiUsageEventInput & { limits: A
     (id, owner_id, user_id, model, source, input_chars, input_tokens, output_tokens, estimated_cost_won_micros, created_at)
     SELECT ?, ?, ?, ?, ?, ?, 0, 0, ?, CURRENT_TIMESTAMP
     WHERE (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND created_at >= datetime('now', '-1 minute')) < ?
-      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND created_at >= datetime('now', 'start of day')) < ?
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND user_id = ? AND source NOT IN ('slack_ticket_test','pending:slack_ticket_test') AND created_at >= datetime('now', 'start of day')) < ?
       AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at >= datetime('now', '-1 minute')) < ?
-      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND created_at >= datetime('now', 'start of day')) < ?`)
+      AND (SELECT count(*) FROM ai_usage_events WHERE owner_id = ? AND source NOT IN ('slack_ticket_test','pending:slack_ticket_test') AND created_at >= datetime('now', 'start of day')) < ?`)
     .bind(
       id, input.ownerId, input.userId, input.model, source,
       Math.max(0, Math.round(input.inputChars)), Math.max(0, Math.round(input.estimatedCostWonMicros)),

@@ -173,6 +173,15 @@ test("lightweight summary preserves Free owner aggregation and paid workspace bo
   }
 });
 
+test('ticket test metering keeps actual costs but never spends normal free or paid budgets',async t=>{
+  const {DatabaseSync}=require('node:sqlite'),db=new DatabaseSync(':memory:');t.after(()=>db.close());
+  db.exec("CREATE TABLE workspaces(id TEXT,owner_user_id TEXT);CREATE TABLE workspace_subscriptions(workspace_id TEXT,plan TEXT);CREATE TABLE ai_usage_events(owner_id TEXT,source TEXT,estimated_cost_won_micros INTEGER,created_at TEXT);INSERT INTO workspaces VALUES('w1','owner'),('w2','other');INSERT INTO workspace_subscriptions VALUES('w1','free'),('w2','team');");
+  const insert=db.prepare('INSERT INTO ai_usage_events VALUES(?,?,?,?)');for(const [owner,source,cost] of [['w1','slack_work',200],['w1','slack_ticket_test',800],['w1','pending:slack_ticket_test',300],['w2','web',500]])insert.run(owner,source,cost,'2026-10-22T01:00:00Z');
+  const ast=ts.createSourceFile('billing.ts',billingSource,ts.ScriptTarget.Latest,true),fn=ast.statements.find(n=>ts.isFunctionDeclaration(n)&&n.name?.text==='getAiMonthlyUsage').getText(ast);
+  const {getAiMonthlyUsage}=compile(`const {env}=require('deps');\n${fn}\nexport {getAiMonthlyUsage};`,{deps:{env:{DB:{prepare:sql=>({bind:(...args)=>({first:async()=>db.prepare(sql).get(...args)})})}}}});
+  const period={startsAt:'2026-10-01',resetsAt:'2026-11-01'};assert.equal(await getAiMonthlyUsage('w1','owner','free',period),200);assert.equal(await getAiMonthlyUsage('w1','owner','team',period),200);assert.equal(await getAiMonthlyUsage('w2','other','team',period),500);assert.equal(db.prepare("SELECT sum(estimated_cost_won_micros) n FROM ai_usage_events WHERE source LIKE '%slack_ticket_test'").get().n,1100);
+});
+
 test("usage route is read-only, authorized and never leaks billing details", async () => {
   let scope;
   const route = compile(routeSource, {
