@@ -30,7 +30,9 @@ receipts, expiring processing leases and retries survive failed analysis or
 process restarts. Activation saves a future-only start time; recovery reads newer
 messages, never silently importing an old backlog. An admin may explicitly import
 one source with `import_source` (at most one recommendation, always manual review),
-without moving that cursor. Each independent issue in a message is
+or by sharing its source link in the configured management channel, without
+moving that cursor. Only a linked workspace admin can import an old source.
+Each independent issue in a message is
 committed atomically with its source and recommendation outbox records. Recovery
 never automatically approves old work. Request lists and collection receipts are
 paginated rather than silently hidden behind the first 200 requests.

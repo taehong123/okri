@@ -261,8 +261,12 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
     if(event.isRelay)return ignored;
     const link=event.text.match(/https:\/\/[a-z0-9-]+\.slack\.com\/archives\/([CG][A-Z0-9]+)\/p([0-9]{16,})/i);
     if(!link||!c.channels.some(r=>r.enabled&&r.id===link[1]))return ignored;
-    const ts=`${link[2].slice(0,-6)}.${link[2].slice(-6)}`;
-    return analyzeTicketEvent(connection,{...event,channel:link[1],ts,threadTs:undefined});
+    const operator=await dailyMemberBySlack(connection.teamId,event.user);
+    if(!operator||!canManageTeam(operator.authorization))return ignored;
+    const queue=await import('@/lib/ticket-intake-queue');
+    const id=await queue.importTicketSource(operator.authorization,`https://app.slack.com/archives/${link[1]}/p${link[2]}`);
+    await queue.processTicketReceipt(id);
+    return {state:'existing',requestIds:[]};
   }
   const rule = c.channels.find(r => r.id === event.channel && r.enabled);
   if (!rule) return ignored;
