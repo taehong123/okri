@@ -1,5 +1,13 @@
 # Native parity ledger
 
+## 2026-10-22 · Short acknowledgement follow-ups
+
+- Backend/Slack only: exact short acknowledgements on an already linked source
+  thread append the literal reply without another AI request. Prior facts and
+  the actual recommendation model are retained; no resolution or execution
+  approval is inferred. Attachments, new facts and explicit reviews use AI.
+- No schema, native v1 payload, auth, mobile screen or binary release changes.
+
 ## 2026-10-22 · Existing ticket status follow-ups
 
 - Backend/Slack only: evidence-backed status clarifications update an existing

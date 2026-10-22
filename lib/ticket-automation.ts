@@ -20,6 +20,8 @@ const one = <T>(sql: string, ...args: unknown[]) => env.DB.prepare(sql).bind(...
 const run = (sql: string, ...args: unknown[]) => env.DB.prepare(sql).bind(...args).run();
 async function updateTicketRevision(sql:string,...args:unknown[]) {const result=await run(sql,...args);if(!result.meta.changes)fail("내용이 변경되었습니다. 다시 확인해 주세요.",409);return result;}
 const text = (v: unknown, max = 4000) => typeof v === "string" ? v.trim().slice(0, max) : "";
+const shortAcknowledgement=(value:string)=>value.length<=64&&/^(?:네|넵|넹|예|네네|넵넵|감사합니다|감사해요|고맙습니다|알겠습니다|확인했습니다|확인했어요|ok|okay|yes|thanks|thank you|thx|はい|了解しました|ありがとうございます|好的|谢谢|收到|gracias|vale|sí)[\s.!~。！🙏👍]*$/u.test(value.normalize('NFC').trim().toLowerCase());
+function acknowledgementOnlyChange(before:string,after:string){const separator='\n\n---\n\n',prefix=before+separator;return before===after||(after.startsWith(prefix)&&after.slice(prefix.length).split(separator).every(shortAcknowledgement));}
 export class TicketAutomationError extends Error { constructor(message: string, public status = 400) { super(message); this.name='TicketAutomationError'; } }
 function fail(message: string, status = 400): never { throw new TicketAutomationError(message, status); }
 function config(row: Settings): TicketAutomationConfig { return JSON.parse(row.config_json); }
@@ -295,6 +297,16 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
   if(evidenceMessages.reduce((n,m)=>n+m.text.length,0)>48000)throw new TicketAutomationError('대화가 길어 자동 병합을 중지했습니다. 수집 내역에서 범위를 확인해 주세요.',409);
   const product=rule.productId?await one<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=? AND id=?',s.owner_id,rule.productId):null;
   const focus=batch.map(e=>sources.get(e.threadTs||e.ts)?.evidenceMessages.find(m=>m.ts===e.ts)).filter(Boolean).map(m=>m!.text).join('\n\n')||redactTicketText(event.text);
+  // A one-word confirmation is not enough evidence for an AI-generated claim of resolution.
+  // Preserve the exact reply only on problems already linked to its real source thread.
+  const confirmations=batch.map(e=>({root:e.threadTs||e.ts,message:sources.get(e.threadTs||e.ts)?.evidenceMessages.find(m=>m.ts===e.ts),attachments:e.hasAttachments}));
+  const matchingRoots=(r:TicketAutomationRequest)=>sourceRoots.filter(root=>r.source_ts===root&&acknowledgementOnlyChange(r.source_text,sources.get(root)!.safe));
+  const confirmedRequests=knownRecords.filter(r=>matchingRoots(r).length);
+  if(!manualImport&&!event.forceReview&&assessment.risk!=='blocked'&&confirmations.length&&confirmations.every(v=>!v.attachments&&v.message&&shortAcknowledgement(v.message.text))&&confirmedRequests.length>0&&confirmedRequests.length<=30&&sourceRoots.every(root=>confirmedRequests.some(r=>matchingRoots(r).includes(root)))){
+    const updates:TicketProblemUpdate[]=confirmedRequests.map(r=>{const roots=matchingRoots(r),quotes=confirmations.filter(v=>roots.includes(v.root)).map(v=>v.message!.text),prior=JSON.parse(r.analysis_json||'{}').memory;return {requestId:r.id,sourceRoots:roots,evidenceQuotes:quotes,kind:'clarification',summary:`${typeof prior==='string'?prior.slice(0,1500)+'\n':''}추가 확인 응답: ${quotes.join(' / ').slice(0,200)}\n새 요청이나 해결 완료를 의미하지 않습니다.`};});
+    await applyProblemUpdates(updates,s,c,event,sources);
+    return {state:'existing',requestIds:confirmedRequests.map(r=>r.id)};
+  }
   let proposals:TicketProposal[]=[{category:'improvement',title:'보안 검토가 필요한 고객 요청',problem:focus,solution:'요청의 비밀정보·권한·데이터 접근 범위를 담당자가 먼저 확인합니다. 차단된 내용은 개발 실행에 전달하지 않습니다.',acceptanceCriteria:['보안 경계를 위반하는 명령과 정보 전송을 실행하지 않음'],questions:[]}],classified=false,model='';
   if (assessment.risk !== "blocked"&&source.safe.trim()) {
     const form = await prepareSlackTicketForm({ authorization: { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false }, token: source.token, botUserId: connection.botUserId,
@@ -339,7 +351,7 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
   }
   return {state:'analyzed',requestIds};
 }
-async function applyProblemUpdates(updates:TicketProblemUpdate[],s:Settings,c:TicketAutomationConfig,event:TicketIntakeEvent,sources:Map<string,Awaited<ReturnType<typeof readSource>>>,model:string){
+async function applyProblemUpdates(updates:TicketProblemUpdate[],s:Settings,c:TicketAutomationConfig,event:TicketIntakeEvent,sources:Map<string,Awaited<ReturnType<typeof readSource>>>,model?:string){
   const rule=c.channels.find(ch=>ch.id===event.channel)!;
   for(const update of updates){
     const r=await one<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=? AND source_channel=? AND COALESCE(product_id,'')=? AND repository_id=? AND state NOT IN ('published','dismissed')",update.requestId,s.owner_id,event.channel,rule.productId||'',rule.repositoryId||'');if(!r)continue;
@@ -347,7 +359,7 @@ async function applyProblemUpdates(updates:TicketProblemUpdate[],s:Settings,c:Ti
     const summary=redactTicketText(update.summary),changeDigest=await digest(JSON.stringify({roots:selected.map(root=>[root,sources.get(root)!.hash]),summary}));
     if(await one('SELECT id FROM ticket_problem_changes WHERE owner_id=? AND request_id=? AND digest=?',r.owner_id,r.id,changeDigest))continue;
     const active=['queued','running'].includes(r.state),needsReview=update.kind==='scope_change'||assessTicketText(summary).risk==='blocked'||selected.some(root=>assessTicketText(sources.get(root)!.raw).risk==='blocked');
-    const memory=JSON.parse(r.analysis_json||'{}');memory.memory=summary;memory.model=model;
+    const memory=JSON.parse(r.analysis_json||'{}');memory.memory=summary;if(model)memory.model=model;
     const primary=sources.get(r.source_ts),time=now(),description=`${r.description.slice(0,2200)}\n\n최신 대화 반영\n${summary}\n${selected.map(root=>sourceLink({source_channel:event.channel,source_ts:root})).join('\n')}`.slice(0,4000);
     // Every mutation is gated by a fresh change id, inside the same transaction as the revision check.
     const changeId=crypto.randomUUID(),result=await env.DB.batch([
