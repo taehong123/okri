@@ -34,6 +34,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
     description: "기존 Project와 Task를 Slack에서 확인하고 변경합니다.",
     entries: [
       { command: "!내업무", label: "내 업무" },
+      { command: "/okri ticket [검색어] · !티켓관리", label: "Slack 티켓 운영", fields: "원문·분류·해결안 · 담당자·포트 · 승인·완료 안내 · 수집 점검" },
       { command: "!프로젝트조회 · !프로젝트수정 · !프로젝트상태", label: "Project 관리" },
       { command: "!테스크조회 · !테스크수정 · !테스크완료 · !테스크재열기", label: "Task 관리" },
       { command: "!도움말", label: "최신 사용법" },
@@ -43,9 +44,9 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
 ] as const;
 
 type GuideTranslator = (key: string) => string;
-export const SLACK_TICKET_AUTOMATION_GUIDE = "고객 채널 자동화는 웹의 Ticket > 티켓 자동화에서 설정합니다. 개발 승인 후 포트에서 보안 검증하며, 완료 안내는 문안 승인 후 지정한 요청자를 태그해 원문 스레드에 공유합니다.";
+export const SLACK_TICKET_AUTOMATION_GUIDE = "고객 채널과 제품·포트 연결 후 /okri ticket 또는 !티켓관리로 Slack에서 운영합니다. 내용·담당자·포트 수정, 개발 승인, 질문 답변, 보안 경고 확인, 완료 문안 수정·공유를 같은 티켓에 반영합니다. 완료 안내는 최종 승인 후 지정한 요청자를 태그합니다.";
 export const SLACK_TICKET_SETUP_GUIDE = "제품 명세·Git 저장소·PC 준비 지침과 기본 모델을 설정하고, PC별 포트 개수를 정해 본인의 Codex에 연결합니다. 선행 작업 반영 후 긴급·높음·보통·낮음 순으로 검토합니다. 중계 앱은 허용한 봇의 수신 본문만 분석하며, 완료 공유 전 실제 Slack 요청자를 지정합니다. 포트는 검토용 패치를 준비하고 실제 병합·배포는 별도 승인합니다.";
-export const SLACK_TICKET_CLASSIFICATION_GUIDE = "감사·확인 대화와 단순 발송 결과는 추천에서 제외합니다. AI 요청 판별이 불가하면 자동 승인 없이 수동 검토로 남깁니다.";
+export const SLACK_TICKET_CLASSIFICATION_GUIDE = "원문 아래에 버그 픽스·기능 개선·기능 추가·단순 안내로 분류하고 고객의 문제와 해결안을 제안합니다. 단순 안내는 개발 없이 문안 승인을 거칩니다. 원문을 먼저 저장하고 과거 대화·댓글과 분석 실패를 다시 대조합니다. 제외 사유와 미처리 상태도 수집 점검에서 확인합니다.";
 
 export function slackWorkGuideText(t: GuideTranslator) {
   const lines = [

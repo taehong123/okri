@@ -1,0 +1,85 @@
+import {env} from 'cloudflare:workers';
+import {getSlackConnection} from '@/lib/pace-data';
+import {dailyMemberBySlack,slackApi,slackTokenForConnection} from '@/lib/slack-daily';
+import {changeTicketRequest,ticketRequestFor,queueTicketUpdate,type TicketDevelopmentProduct,type TicketRepository} from '@/lib/ticket-automation';
+import {TICKET_CATEGORIES,TICKET_CATEGORY_LABELS} from '@/lib/ticket-recommendation';
+import {TICKET_PRIORITIES,TICKET_PRIORITY_LABELS} from '@/lib/ticket-policy';
+type State=Record<string,Record<string,{value?:string;selected_option?:{value:string};selected_options?:{value:string}[];selected_user?:string}>>;
+type Option={text:{type:'plain_text';text:string};value:string};
+const option=(value:string,label:string):Option=>({text:{type:'plain_text',text:label.slice(0,75)},value:value||'_'});
+const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bind(...args).all<T>()).results||[];
+const pick=(state:State,key:string)=>{const value=Object.values(state[key]||{})[0];return value?.selected_option?.value||value?.selected_user||value?.value||'';};
+const scalar=(state:State,key:string)=>pick(state,key)==='_'?'':pick(state,key);
+function metadata(value:string){const [id,revision]=value.split(':');if(!id||!Number.isInteger(Number(revision)))throw new Error('invalid_ticket_revision');return {id,revision:Number(revision)};}
+async function actor(team:string,user:string,value:string){
+  const linked=await dailyMemberBySlack(team,user);if(!linked)throw new Error('OKRI 계정을 먼저 연결해 주세요.');
+  const m=metadata(value),r=await ticketRequestFor(linked.authorization,m.id);
+  if(r.team_id!==team||r.revision!==m.revision)throw new Error('내용이 변경되었습니다. 최신 티켓 버튼으로 다시 열어 주세요.');
+  const connection=await getSlackConnection(linked.authorization.ownerId);if(!connection||connection.teamId!==team)throw new Error('Slack 연결을 확인해 주세요.');
+  return {a:linked.authorization,r,token:await slackTokenForConnection(connection)};
+}
+const field=(id:string,label:string,element:Record<string,unknown>,optional=false)=>({type:'input',block_id:id,label:{type:'plain_text',text:label},element:{action_id:id,...element},optional});
+const input=(id:string,label:string,value:string,multiline=false,max=3000)=>field(id,label,{type:'plain_text_input',initial_value:value,multiline,max_length:max});
+const select=(id:string,label:string,values:Option[],current:string)=>field(id,label,{type:'static_select',options:values,initial_option:values.find(v=>v.value===(current||'_'))||values[0]});
+const external=(id:string,label:string,current:Option)=>field(id,label,{type:'external_select',min_query_length:0,placeholder:{type:'plain_text',text:'이름으로 검색'},initial_option:current});
+export async function openTicketSlackEditor(team:string,user:string,trigger:string,value:string,push=false){
+  const {a,r,token}=await actor(team,user,value);
+  const blocks:Record<string,unknown>[]=[{type:'context',elements:[{type:'mrkdwn',text:`고객 원문과 개발 승인은 유지됩니다. 저장 후 같은 스레드에서 다음 단계를 선택하세요.`}]}];
+  if(['recommended','created'].includes(r.state)){
+    const products=await rows<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=?',a.ownerId);
+    const product=products.find(p=>p.id===r.product_id),repo=product?(JSON.parse(product.repositories_json) as TicketRepository[]).find(v=>v.id===r.repository_id):undefined;
+    const member=r.member_id?(await rows<{display_name:string}>('SELECT display_name FROM workspace_members WHERE id=? AND workspace_id=?',r.member_id,a.ownerId))[0]:null;
+    const port=r.port_id?(await rows<{name:string}>('SELECT name FROM ticket_execution_ports WHERE id=? AND owner_id=?',r.port_id,a.ownerId))[0]:null;
+    blocks.push(input('ta_title','제목',r.title,false,240),input('ta_description','고객의 문제·해결 제안',r.description.slice(0,3000),true));
+    if(r.description.length>3000)blocks.push(input('ta_description_tail','요청 내용 (계속)',r.description.slice(3000),true,1000));
+    blocks.push(select('ta_category','분류',TICKET_CATEGORIES.map(v=>option(v,TICKET_CATEGORY_LABELS[v])),r.category),select('ta_priority','우선순위',TICKET_PRIORITIES.map(v=>option(v,TICKET_PRIORITY_LABELS[v])),r.priority),external('ta_repository','제품·Git 저장소',option(product&&repo?`${product.id}:${repo.id}`:'',product&&repo?`${product.name} / ${repo.name}`:'미지정')),external('ta_member','담당자',option(r.member_id||'',member?.display_name||'미지정')),external('ta_port','실행 포트',option(r.port_id||'',port?.name||'자동 배정')));
+    const dependencies=JSON.parse(r.dependencies_json||'[]') as string[];
+    const selected=dependencies.length?await rows<{id:string;title:string}>('SELECT id,title FROM ticket_automation_requests WHERE owner_id=? AND id IN (SELECT value FROM json_each(?))',a.ownerId,JSON.stringify(dependencies)):[];
+    blocks.push(field('ta_dependencies','선행 티켓',{type:'multi_external_select',min_query_length:0,placeholder:{type:'plain_text',text:'선행 티켓 검색'},...(selected.length?{initial_options:selected.map(v=>option(v.id,v.title))}:{})},true));
+  }else if(r.state==='security_review'){
+    const security=JSON.parse(r.security_json||'{}');if(security.verdict!=='warning')throw new Error('차단된 요청은 강제로 진행할 수 없습니다.');
+    blocks.push({type:'section',text:{type:'plain_text',text:`보안 경고: ${(security.codes||[]).join(', ')}\n허용된 변경 범위를 확인해 주세요. 비밀정보·유출·권한 우회 차단은 해제할 수 없습니다.`}},input('ta_reason','경고 확인 사유','',true,500),field('ta_ack','경고 확인',{type:'checkboxes',options:[option('ack','경고와 작업 범위를 확인했습니다.')]},true));
+  }else if(r.state==='waiting_answer'){
+    blocks.push({type:'section',text:{type:'plain_text',text:r.question.slice(0,3000)}},input('ta_answer','담당자 답변','',true));
+  }else if(r.state==='review'){
+    blocks.push(input('ta_notice','고객에게 보낼 완료 안내',r.notice.slice(0,3000),true));
+    if(r.notice.length>3000)blocks.push(input('ta_notice_tail','완료 안내 (계속)',r.notice.slice(3000),true,1000));
+  }else{
+    blocks.push({type:'section',text:{type:'plain_text',text:`${r.title}\n\n${r.description}`.slice(0,3000)}});
+    await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',title:{type:'plain_text',text:'티켓 처리 현황'},close:{type:'plain_text',text:'닫기'},blocks}});return;
+  }
+  if(['recommended','created','review'].includes(r.state))blocks.push(field('ta_requester','완료 안내를 받을 Slack 요청자',{type:'users_select',...(r.requester_slack_user?{initial_user:r.requester_slack_user}:{}),placeholder:{type:'plain_text',text:'원문 고객 채널의 요청자 선택'}},!r.requester_slack_user));
+  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}`,title:{type:'plain_text',text:'티켓 내용·담당자 수정'},submit:{type:'plain_text',text:'수정 저장'},close:{type:'plain_text',text:'취소'},blocks}});
+}
+export async function ticketSlackEditorOptions(team:string,user:string,value:string,action:string,query:string,rawState:Record<string,Record<string,Record<string,unknown>>>={}){
+  const state=rawState as State;
+  const {a,r}=await actor(team,user,value),q=query.toLocaleLowerCase();
+  let options:Option[]=[];
+  const pair=scalar(state,'ta_repository')||`${r.product_id||''}:${r.repository_id||''}`,[product,repository]=pair.split(':');
+  if(action==='ta_member')options=[option('','미지정'),...(await rows<{id:string;display_name:string}>("SELECT id,display_name FROM workspace_members WHERE workspace_id=? AND status='active' AND user_id IS NOT NULL ORDER BY display_name",a.ownerId)).map(v=>option(v.id,v.display_name))];
+  if(action==='ta_repository')options=[option('','미지정'),...(await rows<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=? ORDER BY name',a.ownerId)).flatMap(p=>(JSON.parse(p.repositories_json) as TicketRepository[]).map(repo=>option(`${p.id}:${repo.id}`,`${p.name} / ${repo.name}`)))];
+  if(action==='ta_port'){
+    const member=state.ta_member?scalar(state,'ta_member'):r.member_id||'';
+    options=[option('','자동 배정'),...(await rows<{id:string;name:string;computer_label:string}>('SELECT id,name,computer_label FROM ticket_execution_ports WHERE owner_id=? AND member_id=? AND product_id=? AND repository_id=? AND enabled=1 ORDER BY name',a.ownerId,member,product,repository)).map(p=>option(p.id,`${p.name} · ${p.computer_label}`))];
+  }
+  if(action==='ta_dependencies')options=(await rows<{id:string;title:string}>("SELECT id,title FROM ticket_automation_requests WHERE owner_id=? AND product_id=? AND repository_id=? AND id<>? AND state<>'dismissed' ORDER BY created_at DESC",a.ownerId,product,repository,r.id)).map(v=>option(v.id,v.title));
+  return {options:options.filter(v=>v.value==='_'||v.text.text.toLocaleLowerCase().includes(q)).slice(0,100)};
+}
+export async function submitTicketSlackEditor(team:string,user:string,value:string,rawState:Record<string,Record<string,Record<string,unknown>>>){
+  const state=rawState as State;
+  const {a,r}=await actor(team,user,value),requester=scalar(state,'ta_requester');
+  try{
+    if(r.state==='security_review')await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'force',reason:scalar(state,'ta_reason'),acknowledged:Boolean(Object.values(state.ta_ack||{})[0]?.selected_options?.some(o=>o.value==='ack'))});
+    else if(r.state==='waiting_answer'){
+      await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'answer',answer:scalar(state,'ta_answer')});
+      const latest=await ticketRequestFor(a,r.id);await changeTicketRequest(a,{id:r.id,revision:latest.revision,action:'approve'});
+    }else if(r.state==='review')await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'review_notice',notice:scalar(state,'ta_notice')+scalar(state,'ta_notice_tail'),...(requester?{requesterSlackUser:requester}:{})});
+    else{
+      const [productId,repositoryId]=scalar(state,'ta_repository').split(':');
+      const dependencies=Object.values(state.ta_dependencies||{})[0]?.selected_options?.map(o=>o.value)||[];
+      await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'edit',title:scalar(state,'ta_title'),description:scalar(state,'ta_description')+scalar(state,'ta_description_tail'),category:scalar(state,'ta_category'),priority:scalar(state,'ta_priority'),productId:productId||'',repositoryId:repositoryId||'',memberId:scalar(state,'ta_member'),portId:scalar(state,'ta_port'),dependencies,...(requester?{requesterSlackUser:requester}:{})});
+    }
+    await queueTicketUpdate(a,r.id,'edited');
+    return {};
+  }catch(error){return {response_action:'errors',errors:{[r.state==='review'?'ta_notice':r.state==='security_review'?'ta_reason':r.state==='waiting_answer'?'ta_answer':'ta_title']:error instanceof Error?error.message:'저장하지 못했습니다. 내용을 확인해 주세요.'}};}
+}

@@ -61,5 +61,12 @@
     "rollbackPlan": "Keep all additive tables and pending rows when rolling back application code. No historical migration is modified and no native support window is shortened.",
     "dataPreservation": "Only new tables and indexes are created. Foreign-key deletion actions affect only newly owned automation records on ordinary workspace or item deletion; the migration itself mutates no customer data.",
     "reviewedBy": "Codex source-bound installed-client and ticket-isolation review, 2026-10-22"
+  },
+  "drizzle/0074_ticket_intake_coverage.sql": {
+    "sha256": "6edca133eb31fe500e3970c9eaa7bf1e9f87a2f666b0e81d8dfc0e66ece60132",
+    "v1Compatibility": "Ticket automation tables are outside the frozen mobile v1 consumer. Request IDs, source references and existing job relationships are preserved; no native API, authentication or item payload changes.",
+    "rollbackPlan": "Keep the new schema and every request/receipt row on application rollback. Pause ticket automation while running an older application version; restore compatible code before resuming. Do not run destructive down-migrations.",
+    "dataPreservation": "The migrator executes one transaction with foreign keys enabled. Both request and outbox copies are populated before the old child and parent tables are replaced. Row IDs, delivery states and message timestamps survive; replacement uniqueness allows independent issues and rejects orphan deliveries. Legacy-data and foreign-key fixtures verify this behavior.",
+    "reviewedBy": "Codex source-bound SQLite migration and native-contract review, 2026-10-22"
   }
 }

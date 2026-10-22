@@ -37,6 +37,12 @@
 .ticket-release-row code { font-family:var(--font-ui); overflow-wrap:anywhere; }
 .ticket-port-row details form { margin-top:var(--space-3); }
 .ticket-automation-empty { padding-block:var(--space-6); }
+.ticket-original-text { white-space:pre-wrap; overflow-wrap:anywhere; font-family:var(--font-ui); font-size:var(--type-body); line-height:1.6; max-height:24rem; overflow:auto; }
+.ticket-intake-table { width:100%; table-layout:fixed; border-collapse:collapse; margin-block:var(--space-4); font-size:var(--type-label); }
+.ticket-intake-table caption { text-align:left; padding-block:var(--space-3); }
+.ticket-intake-table :is(th,td) { text-align:left; vertical-align:top; overflow-wrap:anywhere; padding:var(--space-3) var(--space-2); border-bottom:1px solid var(--border-default); }
+.ticket-intake-table th { font-weight:500; }
+.ticket-intake-message { padding-block:var(--space-3); border-bottom:1px solid var(--border-default); overflow-wrap:anywhere; }
 @media(max-width:980px) { .ticket-channel-rule { grid-template-columns:repeat(2,minmax(0,1fr)); } .ticket-automation .ticket-request-row,.ticket-port-row { grid-template-columns:minmax(0,2fr) minmax(0,1fr); } }
 @media(max-width:980px) { .ticket-port-row>button { grid-column:1/-1; justify-self:start; } }
 @media(max-width:420px) { .ticket-channel-rule { grid-template-columns:minmax(0,1fr); } }

@@ -24,6 +24,12 @@ export async function POST(request: Request) {
   const t = await serverTranslator(linked
     ? await memberMessageLanguage(env.DB, linked.authorization.ownerId, linked.memberId)
     : await workspaceMessageLanguage(env.DB, connection.ownerId));
+  if(/^(?:tickets?|티켓(?:\s*관리)?)(?:\s|$)/iu.test(text)){
+    if(!linked)return slackMessage(t('OKRI 계정을 먼저 연결해 주세요.'));
+    const trigger=body.get('trigger_id')||'';if(!trigger)return slackMessage(t('Slack 입력창을 다시 열어 주세요.'));
+    try{await (await import('@/lib/ticket-slack-queue')).openTicketSlackQueue(teamId,slackUserId,trigger,text.replace(/^(?:tickets?|티켓(?:\s*관리)?)\s*/iu,''));return new Response(null,{status:200});}
+    catch{return slackMessage(t('티켓 운영 창을 열지 못했습니다. 연결 계정과 권한을 확인해 주세요.'));}
+  }
 
   if (["daily", "데일리", "daily 작성", "데일리 작성"].includes(text.toLocaleLowerCase())) {
     if (!linked) {

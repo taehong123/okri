@@ -1,5 +1,17 @@
 # Native parity ledger
 
+## 2026-10-22 · Slack-operated customer tickets and durable intake
+
+- Web/Slack only: source-first, model-based recommendations classify bug fixes,
+  improvements, features and guidance. Slack modals and queue controls share the
+  same request revisions as OKRI. Guidance does not create a development job.
+- Durable message receipts, history/reply reconciliation, retries, exclusion
+  reasons and paginated request/collection views expose incomplete intake.
+- New migration 0074 preserves existing request/outbox rows and foreign keys
+  while allowing distinct issues per source event; historical SQL is unchanged.
+- Frozen `/api/mobile/v1` payloads and semantics, native auth, native screens,
+  store binaries and OTA behavior remain unchanged. No native parity claim.
+
 ## 2026-10-21 · Full-thread Slack Ticket forms and channel reads
 
 - Ticket commands open a loading modal before paginating the complete source

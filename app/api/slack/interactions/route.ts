@@ -45,9 +45,34 @@ export async function POST(request: Request) {
     return new Response(null, { status: 200 });
   }
   const ticketAction = payload.actions?.find(action => action.action_id?.startsWith("ticket_auto_"));
+  const queueAction=payload.actions?.find(action=>action.action_id?.startsWith('ticket_queue_'));
+  if(payload.type==='block_actions'&&queueAction&&payload.team?.id&&payload.user?.id){
+    waitUntil(import('@/lib/ticket-slack-queue').then(async({openTicketSlackQueue,updateTicketSlackQueue})=>{
+      if(queueAction.action_id==='ticket_queue_open'&&payload.trigger_id)await openTicketSlackQueue(payload.team!.id!,payload.user!.id!,payload.trigger_id);
+      else if(payload.view?.id)await updateTicketSlackQueue(payload.team!.id!,payload.user!.id!,payload.view.id,queueAction.value||payload.view.private_metadata||'{}',queueAction.action_id||'',payload.view.state?.values);
+    }).catch(()=>undefined));return new Response(null,{status:200});
+  }
+  if((payload.type==='block_suggestion'&&payload.action_id?.startsWith('ta_'))||(payload.type==='view_submission'&&payload.view?.callback_id==='ticket_edit_submit')){
+    const {ticketSlackEditorOptions,submitTicketSlackEditor}=await import('@/lib/ticket-slack-editor');
+    try{
+      return Response.json(payload.type==='block_suggestion'?await ticketSlackEditorOptions(payload.team?.id||'',payload.user?.id||'',payload.view?.private_metadata||'',payload.action_id||'',payload.value||'',payload.view?.state?.values):await submitTicketSlackEditor(payload.team?.id||'',payload.user?.id||'',payload.view?.private_metadata||'',payload.view?.state?.values||{}));
+    }catch{return Response.json(payload.type==='block_suggestion'?{options:[]}:{response_action:'errors',errors:{ta_title:'최신 티켓 버튼으로 다시 열어 주세요.'}});}
+  }
   if (payload.type === "block_actions" && ticketAction?.value && payload.team?.id && payload.user?.id) {
-    waitUntil(import("@/lib/ticket-automation").then(({ ticketSlackAction }) => ticketSlackAction(payload.team!.id!, payload.user!.id!, ticketAction.action_id!.slice(12), ticketAction.value!))
-      .catch(error => console.error("Ticket action rejected", { name: error instanceof Error ? error.name : "unknown" })));
+    if(ticketAction.action_id==='ticket_auto_edit'&&payload.trigger_id){
+      waitUntil(import('@/lib/ticket-slack-editor').then(({openTicketSlackEditor})=>openTicketSlackEditor(payload.team!.id!,payload.user!.id!,payload.trigger_id!,ticketAction.value!,payload.view?.callback_id==='ticket_queue')).catch(async()=>{
+        const connection=await getSlackConnectionByTeam(payload.team!.id!);if(connection)await slackApi(await slackTokenForConnection(connection),'chat.postEphemeral',{channel:payload.container?.channel_id||payload.channel?.id,user:payload.user!.id!,text:'입력창을 열지 못했습니다. 최신 티켓 버튼과 담당자 권한을 확인해 주세요.'}).catch(()=>undefined);
+      }));
+      return new Response(null,{status:200});
+    }
+    waitUntil(import("@/lib/ticket-automation").then(async({ ticketSlackAction,deliverTicketOutbox }) => {
+      await ticketSlackAction(payload.team!.id!, payload.user!.id!, ticketAction.action_id!.slice(12), ticketAction.value!);
+      if(payload.view?.callback_id==='ticket_queue'&&payload.view.id)await (await import('@/lib/ticket-slack-queue')).updateTicketSlackQueue(payload.team!.id!,payload.user!.id!,payload.view.id,payload.view.private_metadata||'{}','ticket_queue_refresh',payload.view.state?.values);
+      await deliverTicketOutbox();
+    }).catch(async error => {
+      const connection=await getSlackConnectionByTeam(payload.team!.id!),channel=payload.container?.channel_id||payload.channel?.id;
+      if(connection&&channel)await slackApi(await slackTokenForConnection(connection),'chat.postEphemeral',{channel,user:payload.user!.id,text:error instanceof Error&&error.name==='TicketAutomationError'?error.message:'티켓을 처리하지 못했습니다. 최신 상태와 담당자 권한을 확인해 주세요.'}).catch(()=>undefined);
+    }));
     return new Response(null, { status: 200 });
   }
   const checklistButton = payload.type === "block_actions" && payload.view?.callback_id === "daily_checklist_submit"
@@ -246,7 +271,7 @@ function dailyDatabaseDiagnostic(error: unknown) {
   // D1's leading reason excludes the subsequent SQL, column name and bound values.
   const reason = error instanceof Error && /\bSQLITE_[A-Z_]+\b/.test(error.message)
     ? error.message.match(/D1_ERROR:\s*([^:\n]+)/)?.[1]
-      ?.replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "[value]").replace(/[^a-zA-Z ()\[\]._-]/g, "").slice(0, 160) : undefined;
+      ?.replace(/'[^']*'|"[^"]*"|`[^`]*`/g, "[value]").replace(/[^a-zA-Z ()[\]._-]/g, "").slice(0, 160) : undefined;
   return { dbReasons: [...reasons], dbCodes: [...codes], reason, frames };
 }
 
