@@ -9,7 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import {prepareTicketNodeCache} from './prepare-ticket-node-cache.mjs';
 
-const VERSION = "0.4.0";
+const VERSION = "0.4.1";
 const TICKET_IMAGE = "okri-ticket-codex:0.4.0";
 const POLL_INTERVAL_MS = 3_000;
 const REPORT_INTERVAL_MS = 30_000;

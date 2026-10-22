@@ -37,6 +37,12 @@ test('explicit single import is admin-only, channel-scoped and does not reset fu
   const id=await f.service.importTicketSource(a,'https://app.slack.com/archives/C1/p1792641620306119');const row=f.db.prepare('SELECT event_json FROM ticket_intake_messages WHERE id=?').get(id);assert.equal(JSON.parse(row.event_json).operatorImport,true);
   await assert.rejects(f.service.importTicketSource(a,'https://app.slack.com/archives/COTHER/p1792641620306119'));assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,1);
 });
+test('downtime recovery discovers new replies on old unknown roots without importing old messages',async t=>{
+  const recent=String(Date.now()/1000-10),f=fixture(t,{slack:async(method,body)=>method==='conversations.history'?(body.oldest?{ok:true,messages:[]}:{ok:true,messages:[{ts:'100.000001',user:'U1',text:'Do not reanalyze the past',reply_count:1,latest_reply:recent}]}):{ok:true,messages:[{ts:'100.000001',user:'U1',text:'Do not import this root'},{ts:recent,user:'U1',text:'새로운 증상이 발생했습니다.'}]}});
+  f.config.intakeStartAt=new Date(Date.now()-60000).toISOString();f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  await f.service.reconcileTicketIntake();const receipts=f.db.prepare('SELECT * FROM ticket_intake_messages').all();assert.equal(receipts.length,1);assert.equal(receipts[0].message_ts,recent);assert.equal(receipts[0].root_ts,'100.000001');assert.equal(f.modelCalls,0);
+  assert.ok(f.slackCalls.find(c=>c.method==='conversations.replies').body.oldest);await f.service.reconcileTicketIntake();assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,1);
+});
 test('model failure and an abandoned processing lease remain visible and are retried',async t=>{
   const f=fixture(t,{failure:true}),id=await f.service.captureTicketMessage(f.connection,f.event);await f.service.processTicketReceipt(id);let r=f.db.prepare('SELECT * FROM ticket_intake_messages').get();assert.equal(r.state,'retry');assert.equal(r.last_error,'analysis_retry_required');assert.equal(r.attempts,1);
   f.setFailure(false);f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000',state='processing',lease_until='2000'");await f.service.processTicketReceipt(id);r=f.db.prepare('SELECT * FROM ticket_intake_messages').get();assert.equal(r.state,'analyzed');assert.equal(r.attempts,2);

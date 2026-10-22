@@ -70,7 +70,7 @@
     "reviewedBy": "Codex source-bound SQLite migration and native-contract review, 2026-10-22"
   },
   "drizzle/0075_ticket_problem_followups.sql": {
-    "sha256": "dbdf7ed2159973a397558984f3669dd767a65c653e0be787179045c8e5de6aca",
+    "sha256": "89a2557c57bc206f43d6be554a24f421e978596a02f42d4ba5fd769e172eddc6",
     "v1Compatibility": "Adds isolated ticket source links, problem deltas and customer-channel analysis leases. Frozen mobile v1 payloads, auth and item semantics are unchanged.",
     "rollbackPlan": "Pause ticket automation on code rollback and retain all additive tables and pending deltas for a forward fix.",
     "dataPreservation": "Only new tables and indexes are added. Existing requests, jobs, sources, native records and customer data are preserved.",

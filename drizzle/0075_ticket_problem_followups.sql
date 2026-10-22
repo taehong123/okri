@@ -31,3 +31,12 @@ CREATE TABLE ticket_intake_channel_leases (
   lease_until TEXT,
   PRIMARY KEY(owner_id,channel_id)
 );
+--> statement-breakpoint
+CREATE TABLE ticket_intake_reply_discovery (
+  owner_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+  channel_id TEXT NOT NULL,
+  cursor TEXT NOT NULL DEFAULT '',
+  next_scan_at TEXT NOT NULL,
+  last_error TEXT NOT NULL DEFAULT '',
+  PRIMARY KEY(owner_id,channel_id)
+);

@@ -63,6 +63,8 @@ cancels the old job and requires operator review and fresh approval. The final
 completion check also rereads the linked source hashes. Older runners cannot
 silently finish with unacknowledged changes; update their runner script to consume
 the additive report response. No new customer text grants tools or permissions.
+Metadata-only history discovery also finds new replies on older, previously
+unknown roots after downtime; only replies newer than the cutoff become receipts.
 
 An admin can grant 1–100 additional analyses until the next UTC midnight through
 `analysis_allowance`. This replaces the day's extra allowance rather than stacking

@@ -91,6 +91,22 @@ export async function reconcileTicketIntake(){
         await run(`UPDATE ticket_intake_scans SET cursor=?,completed_passes=completed_passes+?,messages_seen=messages_seen+?,last_checked_at=?,last_completed_at=CASE WHEN ?='' THEN ? ELSE last_completed_at END,next_scan_at=?,last_error='' WHERE owner_id=? AND channel_id=?`,cursor,cursor?0:1,page.messages?.length||0,time,cursor,time,new Date(Date.now()+(cursor?0:300000)).toISOString(),s.owner_id,scan.channel_id);
       }catch{await run("UPDATE ticket_intake_scans SET last_checked_at=?,last_error='history_retry_required',next_scan_at=? WHERE owner_id=? AND channel_id=?",time,lock,s.owner_id,scan.channel_id);}
     }
+    // Metadata discovery closes the downtime gap for NEW replies attached to OLD unknown roots.
+    // Old message bodies never become receipts or AI requests. The saved cursor makes this bounded/fair.
+    if(c.intakeStartAt){
+      for(const ch of enabled)await run('INSERT OR IGNORE INTO ticket_intake_reply_discovery(owner_id,channel_id,next_scan_at) VALUES(?,?,?)',s.owner_id,ch.id,now());
+      const discovery=await rows<Scan>('SELECT * FROM ticket_intake_reply_discovery WHERE owner_id=? AND channel_id IN(SELECT value FROM json_each(?)) AND next_scan_at<=? ORDER BY next_scan_at,channel_id LIMIT 2',s.owner_id,channels,now());
+      for(const scan of discovery){
+        const time=now(),lock=new Date(Date.now()+180000).toISOString();
+        if(!(await run('UPDATE ticket_intake_reply_discovery SET next_scan_at=? WHERE owner_id=? AND channel_id=? AND next_scan_at<=?',lock,s.owner_id,scan.channel_id,time)).meta.changes)continue;
+        try{
+          const page=await slackApi<{ok:boolean;messages?:SlackMessage[];response_metadata?:{next_cursor?:string};has_more?:boolean}>(token,'conversations.history',{channel:scan.channel_id,limit:100,...(scan.cursor?{cursor:scan.cursor}:{})});
+          const cursor=page.response_metadata?.next_cursor||'';if(page.has_more&&!cursor)throw new Error('history_cursor_missing');
+          for(const m of page.messages||[])if(m.ts&&m.reply_count&&Number(m.latest_reply)*1000>=Date.parse(c.intakeStartAt))await run(`INSERT INTO ticket_intake_threads(owner_id,channel_id,root_ts,latest_reply,next_scan_at) VALUES(?,?,?,?,?) ON CONFLICT(owner_id,channel_id,root_ts) DO UPDATE SET latest_reply=MAX(latest_reply,excluded.latest_reply)`,s.owner_id,scan.channel_id,m.thread_ts||m.ts,m.latest_reply,now());
+          await run("UPDATE ticket_intake_reply_discovery SET cursor=?,next_scan_at=?,last_error='' WHERE owner_id=? AND channel_id=?",cursor,new Date(Date.now()+(cursor?60000:300000)).toISOString(),s.owner_id,scan.channel_id);
+        }catch{await run("UPDATE ticket_intake_reply_discovery SET next_scan_at=?,last_error='reply_discovery_retry_required' WHERE owner_id=? AND channel_id=?",lock,s.owner_id,scan.channel_id);}
+      }
+    }
     const threads=await rows<Scan>(`SELECT * FROM ticket_intake_threads WHERE owner_id=? AND channel_id IN (SELECT value FROM json_each(?)) AND next_scan_at<=? ORDER BY next_scan_at,root_ts LIMIT 4`,s.owner_id,channels,now());
     for(const scan of threads){
       const time=now(),lock=new Date(Date.now()+180000).toISOString();
@@ -118,7 +134,10 @@ export async function ticketIntakeStatus(owner:string,page:{offset?:number;state
     rows<{state:string;count:number}>('SELECT state,count(*) AS count FROM ticket_intake_messages WHERE owner_id=? GROUP BY state',owner),
     rows<TicketIntakeStatus['channels'][number]>(`SELECT s.*,(SELECT count(*) FROM ticket_intake_threads t WHERE t.owner_id=s.owner_id AND t.channel_id=s.channel_id AND (t.cursor<>'' OR t.latest_reply>t.scanned_reply)) AS pending_threads,(SELECT count(*) FROM ticket_intake_threads t WHERE t.owner_id=s.owner_id AND t.channel_id=s.channel_id AND t.last_error<>'') AS thread_errors FROM ticket_intake_scans s WHERE s.owner_id=? ORDER BY s.channel_id`,owner),
     rows<TicketIntakeStatus['messages'][number]>(`SELECT id,channel_id,root_ts,message_ts,state,attempts,last_error,received_at,json_extract(event_json,'$.text') AS text FROM ticket_intake_messages WHERE owner_id=? AND (?='' OR state=?) ORDER BY CASE WHEN state IN ('pending','retry','processing') THEN 0 ELSE 1 END,received_at DESC,id LIMIT 100 OFFSET ?`,owner,filter,filter,offset),
-  ]);const total=counts.filter(v=>!filter||v.state===filter).reduce((n,v)=>n+v.count,0);return {offset,total,hasMore:offset+100<total,counts,channels,messages};
+  ]);
+  const discoveryErrors=await rows<{channel_id:string;last_error:string}>("SELECT channel_id,last_error FROM ticket_intake_reply_discovery WHERE owner_id=? AND last_error<>''",owner);
+  for(const channel of channels)if(!channel.last_error)channel.last_error=discoveryErrors.find(e=>e.channel_id===channel.channel_id)?.last_error||'';
+  const total=counts.filter(v=>!filter||v.state===filter).reduce((n,v)=>n+v.count,0);return {offset,total,hasMore:offset+100<total,counts,channels,messages};
 }
 export async function requestTicketReconciliation(a:RequestAuthorization,id?:string){
   if(a.apiToken||!canManageTeam(a))throw new Error('workspace_admin_required');
