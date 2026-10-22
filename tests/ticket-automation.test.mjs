@@ -5,6 +5,7 @@ import test from "node:test";
 import { compileLanguageModule as compile } from "./helpers/language-fixture.mjs";
 import { ticketSnapshotPathAllowed, parseTicketPreflight } from "../public/local-agent/okri-local-agent.mjs";
 const editorSource=await readFile(new URL("../lib/ticket-slack-editor.ts",import.meta.url),"utf8");
+const queueSource=await readFile(new URL("../lib/ticket-slack-queue.ts",import.meta.url),"utf8");
 const source = await readFile(new URL("../lib/ticket-automation.ts", import.meta.url), "utf8");
 const policy = compile(await readFile(new URL("../lib/ticket-policy.ts", import.meta.url), "utf8"));
 const recommendation=compile(await readFile(new URL("../lib/ticket-recommendation.ts",import.meta.url),"utf8"));
@@ -262,6 +263,13 @@ test('Slack port suggestions work without unsaved form state and retain workspac
   const ports=await f.editor.ticketSlackEditorOptions('T1','U1',value,'ta_port','');assert.ok(ports.options.some(p=>p.value==='p1'));assert.equal(ports.options[0].value,'_');
   const restricted=await f.editor.ticketSlackEditorOptions('T1','U1',value,'ta_port','',{ta_member:{ta_member:{selected_option:{value:'not-this-member'}}}});assert.deepEqual(restricted.options.map(p=>p.value),['_']);
   await assert.rejects(f.editor.ticketSlackEditorOptions('T2','U1',value,'ta_port',''));await assert.rejects(f.change('edit',{title:r.title,description:r.description,memberId:'not-this-member',portId:'p1'}));assert.equal(f.current().revision,r.revision);
+});
+test('Slack ticket queue supplies the required submit control and search updates the same modal without writes',async t=>{
+  const f=fixture(t);await f.intake();let view;
+  const queue=compile(queueSource,{'cloudflare:workers':{env:{DB:f.d1}},'@/lib/pace-data':{canManageTeam:()=>true,getSlackConnection:async()=>f.connection},'@/lib/slack-daily':{dailyMemberBySlack:async(team,user)=>team==='T1'&&user==='U1'?{authorization:a}:null,slackTokenForConnection:async()=>'mock',slackApi:async(_token,method,body)=>{assert.equal(method,'views.open');view=body.view;return{ok:true};}},'@/lib/ticket-policy':policy,'@/lib/ticket-recommendation':recommendation,'@/lib/ticket-intake-queue':{ticketIntakeStatus:async()=>({counts:[],channels:[],messages:[]}),requestTicketReconciliation:async()=>{throw new Error('No reconciliation expected');}}});
+  await queue.openTicketSlackQueue('T1','U1','trigger');assert.equal(view.submit.type,'plain_text');assert.ok(view.blocks.filter(b=>b.type==='input').every(b=>b.dispatch_action));
+  const result=await queue.submitTicketSlackQueue('T1','U1','{}',{ticket_queue_query:{ticket_queue_query:{value:'no matching request'}}});assert.equal(result.response_action,'update');assert.ok(result.view.blocks.some(b=>b.text?.text==='이 상태의 티켓이 없습니다.'));assert.equal(f.current().revision,1);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
+  await assert.rejects(queue.openTicketSlackQueue('T2','U1','trigger'));
 });
 test('Slack creates and approves through refreshed in-thread buttons, not a web-only handoff',async t=>{
   const f=fixture(t,{notifications:true});await f.intake();await f.service.deliverTicketOutbox();let r=f.current();await f.service.ticketSlackAction('T1','U1','create',`${r.id}:${r.revision}`);await f.service.deliverTicketOutbox();const card=f.writes.filter(w=>w.method==='chat.postMessage').at(-1).body;assert.ok(card.thread_ts);assert.ok(card.blocks.at(-1).elements.some(b=>b.action_id==='ticket_auto_approve'&&b.value.endsWith(`:${f.current().revision}`)));assert.equal(f.current().state,'created');
