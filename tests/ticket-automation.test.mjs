@@ -257,6 +257,12 @@ test('Slack modal rejects outside recipients, stale revisions and unlinked opera
   const f=fixture(t);await f.intake();const r=f.current();const rejected=await f.editor.submitTicketSlackEditor('T1','U1',`${r.id}:${r.revision}`,editorState(r,{ta_title:{value:'Must not save'},ta_requester:{selected_user:'UOUTSIDE'}}));assert.equal(rejected.response_action,'errors');assert.equal(f.current().title,r.title);assert.equal(f.current().revision,r.revision);
   await assert.rejects(f.editor.openTicketSlackEditor('T1','UOUTSIDE','trigger',`${r.id}:${r.revision}`));await f.change('edit',{title:r.title,description:r.description,memberId:'m1',portId:''});await assert.rejects(f.editor.submitTicketSlackEditor('T1','U1',`${r.id}:${r.revision}`,editorState(r)),/변경/);
 });
+test('Slack port suggestions work without unsaved form state and retain workspace and final assignment guards',async t=>{
+  const f=fixture(t);await f.intake();const r=f.current(),value=`${r.id}:${r.revision}`;
+  const ports=await f.editor.ticketSlackEditorOptions('T1','U1',value,'ta_port','');assert.ok(ports.options.some(p=>p.value==='p1'));assert.equal(ports.options[0].value,'_');
+  const restricted=await f.editor.ticketSlackEditorOptions('T1','U1',value,'ta_port','',{ta_member:{ta_member:{selected_option:{value:'not-this-member'}}}});assert.deepEqual(restricted.options.map(p=>p.value),['_']);
+  await assert.rejects(f.editor.ticketSlackEditorOptions('T2','U1',value,'ta_port',''));await assert.rejects(f.change('edit',{title:r.title,description:r.description,memberId:'not-this-member',portId:'p1'}));assert.equal(f.current().revision,r.revision);
+});
 test('Slack creates and approves through refreshed in-thread buttons, not a web-only handoff',async t=>{
   const f=fixture(t,{notifications:true});await f.intake();await f.service.deliverTicketOutbox();let r=f.current();await f.service.ticketSlackAction('T1','U1','create',`${r.id}:${r.revision}`);await f.service.deliverTicketOutbox();const card=f.writes.filter(w=>w.method==='chat.postMessage').at(-1).body;assert.ok(card.thread_ts);assert.ok(card.blocks.at(-1).elements.some(b=>b.action_id==='ticket_auto_approve'&&b.value.endsWith(`:${f.current().revision}`)));assert.equal(f.current().state,'created');
 });
