@@ -21,7 +21,9 @@ export async function POST(request: Request) {
       resultText: payload.resultText,
       errorText: payload.errorText,
     });
-    return Response.json({ job }, { headers: { "Cache-Control": "no-store" } });
+    const {ticketProblemChanges}=await import('@/lib/ticket-automation');
+    const problemChanges=payload.status==='running'&&typeof payload.id==='string'?await ticketProblemChanges(payload.id,payload.appliedProblemChangeIds):[];
+    return Response.json({ job,problemChanges }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return localAgentErrorResponse(error);
   }
