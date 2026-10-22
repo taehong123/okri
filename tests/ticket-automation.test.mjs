@@ -84,6 +84,14 @@ test('a changed customer outcome cancels the old execution and requires a new op
   await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'124.000',threadTs:'123.000',user:'UCUSTOMER',text:'취소 부탁드립니다.'});
   assert.equal(f.current().state,'blocked');assert.equal(f.db.prepare('SELECT status FROM local_agent_jobs').get().status,'cancelled');assert.equal(f.db.prepare('SELECT state FROM ticket_problem_changes').get().state,'needs_review');await assert.rejects(f.service.requireTicketPreflightForCompletion(f.current().job_id));
 });
+test('unassigned approval exposes a specific safe error and opens a Slack assignment form without creating a job',async t=>{
+  const f=fixture(t);await f.intake();await f.change('create');f.db.exec('UPDATE ticket_automation_requests SET member_id=NULL,port_id=NULL');
+  await assert.rejects(f.change('approve'),{name:'TicketAutomationError',message:/담당자를 먼저 지정/});assert.equal(f.current().state,'created');assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
+  assert.equal(await f.editor.openMissingTicketAssignment('T1','U1','trigger',`${f.current().id}:${f.current().revision}`),true);
+  const view=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(view.title.text,'담당자 지정 후 승인');assert.match(view.private_metadata,/:assignment$/);assert.equal(view.blocks.find(b=>b.block_id==='ta_port').element.initial_option.text.text,'자동 배정');
+  const result=await f.editor.submitTicketSlackEditor('T1','U1',view.private_metadata,{});assert.match(result.errors.ta_member,/담당자/);assert.equal(f.current().revision,2);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
+  await f.change('edit',{title:f.current().title,description:f.current().description,memberId:'m1',portId:'',productId:'prod1',repositoryId:'repo1',dependencies:[]});assert.equal(await f.editor.openMissingTicketAssignment('T1','U1','trigger',`${f.current().id}:${f.current().revision}`),false);await f.change('approve');assert.equal(f.current().state,'queued');assert.equal(f.current().port_id,'p1');
+});
 test("intake, review, generation, approval, progress and final publication preserve separate approval boundaries",async t=>{
   const f=fixture(t,{notifications:true});await f.intake();await f.intake();assert.equal(f.db.prepare("SELECT COUNT(*) n FROM ticket_automation_requests").get().n,1);
   assert.equal(f.current().state,"recommended");await f.change("create");assert.equal(f.current().state,"created");assert.equal(f.db.prepare("SELECT COUNT(*) n FROM items").get().n,2);

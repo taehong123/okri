@@ -70,10 +70,12 @@ export async function POST(request: Request) {
       return new Response(null,{status:200});
     }
     waitUntil(import("@/lib/ticket-automation").then(async({ ticketSlackAction,deliverTicketOutbox }) => {
+      if(ticketAction.action_id==='ticket_auto_approve'&&payload.trigger_id&&await (await import('@/lib/ticket-slack-editor')).openMissingTicketAssignment(payload.team!.id!,payload.user!.id!,payload.trigger_id,ticketAction.value!,payload.view?.callback_id==='ticket_queue'))return;
       await ticketSlackAction(payload.team!.id!, payload.user!.id!, ticketAction.action_id!.slice(12), ticketAction.value!);
       if(payload.view?.callback_id==='ticket_queue'&&payload.view.id)await (await import('@/lib/ticket-slack-queue')).updateTicketSlackQueue(payload.team!.id!,payload.user!.id!,payload.view.id,payload.view.private_metadata||'{}','ticket_queue_refresh',payload.view.state?.values);
       await deliverTicketOutbox();
     }).catch(async error => {
+      console.error('Slack ticket action failed',{action:ticketAction.action_id?.slice(0,80),name:error instanceof Error?error.name:'unknown',status:typeof error?.status==='number'?error.status:500});
       const connection=await getSlackConnectionByTeam(payload.team!.id!),channel=payload.container?.channel_id||payload.channel?.id;
       if(connection&&channel)await slackApi(await slackTokenForConnection(connection),'chat.postEphemeral',{channel,user:payload.user!.id,text:error instanceof Error&&error.name==='TicketAutomationError'?error.message:'티켓을 처리하지 못했습니다. 최신 상태와 담당자 권한을 확인해 주세요.'}).catch(()=>undefined);
     }));

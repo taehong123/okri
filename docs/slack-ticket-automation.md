@@ -19,6 +19,11 @@ slot, dependencies and completion requester. Buttons create and approve tickets;
 replies or modals answer questions. Warning acknowledgement, stop, reanalysis,
 completion wording and exact-text sharing also remain in Slack. These operations
 write the same workspace-scoped request and revision used by OKRI.
+If a created ticket has no assignee, its approval button opens the assignment
+form directly. Saving requires an explicit assignee and preserves automatic slot
+assignment; the operator then approves the refreshed ticket button. Saving the
+form alone never starts development. Expected validation failures retain their
+specific safe message instead of appearing as a generic permission failure.
 Set the Slack app's Options Load URL to `/api/slack/interactions` for dynamic
 member, repository, slot and dependency searches. Existing bot/user scopes suffice.
 When Slack omits unsaved modal inputs from a search request, slots are labeled

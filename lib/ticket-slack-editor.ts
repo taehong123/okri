@@ -22,9 +22,14 @@ const field=(id:string,label:string,element:Record<string,unknown>,optional=fals
 const input=(id:string,label:string,value:string,multiline=false,max=3000)=>field(id,label,{type:'plain_text_input',initial_value:value,multiline,max_length:max});
 const select=(id:string,label:string,values:Option[],current:string)=>field(id,label,{type:'static_select',options:values,initial_option:values.find(v=>v.value===(current||'_'))||values[0]});
 const external=(id:string,label:string,current:Option)=>field(id,label,{type:'external_select',min_query_length:0,placeholder:{type:'plain_text',text:'이름으로 검색'},initial_option:current});
-export async function openTicketSlackEditor(team:string,user:string,trigger:string,value:string,push=false){
+export async function openMissingTicketAssignment(team:string,user:string,trigger:string,value:string,push=false){
+  const {r}=await actor(team,user,value);
+  if(r.state!=='created'||r.member_id)return false;
+  await openTicketSlackEditor(team,user,trigger,value,push,true);return true;
+}
+export async function openTicketSlackEditor(team:string,user:string,trigger:string,value:string,push=false,requireAssignment=false){
   const {a,r,token}=await actor(team,user,value);
-  const blocks:Record<string,unknown>[]=[{type:'context',elements:[{type:'mrkdwn',text:`고객 원문과 개발 승인은 유지됩니다. 저장 후 같은 스레드에서 다음 단계를 선택하세요.`}]}];
+  const blocks:Record<string,unknown>[]=[{type:'context',elements:[{type:'mrkdwn',text:requireAssignment?'담당자를 지정해 저장한 뒤 같은 스레드에서 승인을 누르세요. 개발 티켓의 실행 포트는 자동 배정이 기본입니다.':'내용과 담당자를 확인해 저장한 뒤 같은 스레드에서 다음 단계를 선택하세요. 변경한 내용은 다시 승인이 필요합니다.'}]}];
   if(['recommended','created'].includes(r.state)){
     const products=await rows<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=?',a.ownerId);
     const product=products.find(p=>p.id===r.product_id),repo=product?(JSON.parse(product.repositories_json) as TicketRepository[]).find(v=>v.id===r.repository_id):undefined;
@@ -49,7 +54,7 @@ export async function openTicketSlackEditor(team:string,user:string,trigger:stri
     await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',title:{type:'plain_text',text:'티켓 처리 현황'},close:{type:'plain_text',text:'닫기'},blocks}});return;
   }
   if(['recommended','created','review'].includes(r.state))blocks.push(field('ta_requester','완료 안내를 받을 Slack 요청자',{type:'users_select',...(r.requester_slack_user?{initial_user:r.requester_slack_user}:{}),placeholder:{type:'plain_text',text:'원문 고객 채널의 요청자 선택'}},!r.requester_slack_user));
-  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}`,title:{type:'plain_text',text:'티켓 내용·담당자 수정'},submit:{type:'plain_text',text:'수정 저장'},close:{type:'plain_text',text:'취소'},blocks}});
+  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}${requireAssignment?':assignment':''}`,title:{type:'plain_text',text:requireAssignment?'담당자 지정 후 승인':'티켓 내용·담당자 수정'},submit:{type:'plain_text',text:requireAssignment?'담당자 저장':'수정 저장'},close:{type:'plain_text',text:'취소'},blocks}});
 }
 export async function ticketSlackEditorOptions(team:string,user:string,value:string,action:string,query:string,rawState:Record<string,Record<string,Record<string,unknown>>>={}){
   const state=rawState as State;
@@ -70,6 +75,7 @@ export async function ticketSlackEditorOptions(team:string,user:string,value:str
 export async function submitTicketSlackEditor(team:string,user:string,value:string,rawState:Record<string,Record<string,Record<string,unknown>>>){
   const state=rawState as State;
   const {a,r}=await actor(team,user,value),requester=scalar(state,'ta_requester');
+  if(value.endsWith(':assignment')&&!scalar(state,'ta_member'))return {response_action:'errors',errors:{ta_member:'승인할 티켓의 담당자를 선택해 주세요. 포트는 자동 배정으로 두어도 됩니다.'}};
   try{
     if(r.state==='security_review')await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'force',reason:scalar(state,'ta_reason'),acknowledged:Boolean(Object.values(state.ta_ack||{})[0]?.selected_options?.some(o=>o.value==='ack'))});
     else if(r.state==='waiting_answer'){
