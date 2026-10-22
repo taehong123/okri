@@ -650,10 +650,11 @@ async function getAiMonthlyUsage(workspaceId: string, billingOwnerUserId: string
         INNER JOIN workspaces AS workspace ON workspace.id = usage.owner_id
         LEFT JOIN workspace_subscriptions AS subscription ON subscription.workspace_id = workspace.id
         WHERE workspace.owner_user_id = ? AND coalesce(subscription.plan, 'free') = 'free'
+          AND usage.source NOT IN ('slack_ticket_test','pending:slack_ticket_test')
           AND usage.created_at >= ? AND usage.created_at < ?`)
       .bind(billingOwnerUserId, period.startsAt, period.resetsAt).first<{ spent: number }>()
     : await d1.prepare(`SELECT coalesce(sum(estimated_cost_won_micros), 0) AS spent FROM ai_usage_events
-        WHERE owner_id = ? AND created_at >= ? AND created_at < ?`)
+        WHERE owner_id = ? AND source NOT IN ('slack_ticket_test','pending:slack_ticket_test') AND created_at >= ? AND created_at < ?`)
       .bind(workspaceId, period.startsAt, period.resetsAt).first<{ spent: number }>();
   return Number(row?.spent ?? 0);
 }

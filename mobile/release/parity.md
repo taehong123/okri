@@ -1,5 +1,14 @@
 # Native parity ledger
 
+## 2026-10-22 · Ticket analysis availability and scoped test accounts
+
+- Web/Slack only: explicit analysis pause reasons, reset times, one daily
+  operational Slack notice and bounded retry batches preserve captured messages.
+- Deployment-only exact workspace/account exemptions apply to ticket analysis,
+  retain metering and minute limits, and do not waive development security or
+  approvals. Test usage is excluded from customer billing and daily quotas.
+- No mobile v1 payload, auth, schema, native screen or binary release changes.
+
 ## 2026-10-22 · Slack approval assignment repair
 
 - Backend/Slack only: unassigned approvals open the existing assignment modal,

@@ -15,7 +15,7 @@ const ticketSource = await read("lib/slack-ticket-intake.ts");
 const recommendation=compile(await read("lib/ticket-recommendation.ts"));
 
 function fixture(t, options = {}) {
-  const requests = [], metering = [];
+  const requests = [], metering = [],budgetCalls=[];
   const runtime = { DB: {}, OPENAI_API_KEY: "mock-key", ...options.env };
   const usage = { requestsToday: 0, requestsThisMinute: 0, workspaceRequestsToday: 0, workspaceRequestsThisMinute: 0, ...options.usage };
   const data = {
@@ -24,7 +24,7 @@ function fixture(t, options = {}) {
     finalizeAiUsageEvent: async (_id, value) => metering.push({ type: "finalize", value }),
     releaseAiUsageReservation: async () => metering.push({ type: "release" }),
   };
-  const billing = { assertAiBudget: async () => ({ limitWon: 500, spentWonMicros: 0 }), BillingLimitError: class extends Error {} };
+  const billing = { assertAiBudget: async (...args) => {budgetCalls.push(args);if(options.budgetFailure)throw Object.assign(Error('budget'),{code:'ai_budget_exceeded'});return { limitWon: 500, spentWonMicros: 0 };}, BillingLimitError: class extends Error {} };
   const language = { readLanguagePreferences: async () => ({ resolvedLanguage: "ko" }) };
   const intake = compile(intakeSource, { "cloudflare:workers": { env: runtime }, "@/lib/billing": billing,
     "@/lib/language-preferences": language, "@/lib/pace-data": data, "@/lib/slack-daily": { slackApi },
@@ -62,12 +62,31 @@ function fixture(t, options = {}) {
   t.after(() => { globalThis.fetch = original; });
   const input = { authorization: { ownerId: "ws", userId: "user", role: "member" }, token: "mock-token", botUserId: "UBOT",
     event: { channel: "C1", channelType: "channel", user: "U1", text: "!티켓생성", ts: "3.0", threadTs: "1.0" }, query: "" };
-  return { ...ticket, intake, requests, metering, input };
+  return { ...ticket, intake, requests, metering,budgetCalls, input };
 }
 
 test('automation can summarize already-validated evidence without fetching the raw thread again',async t=>{
   const f=fixture(t);await f.prepareSlackTicketForm({...f.input,textOnly:true,evidenceMessages:[{user:'U1',text:'Reviewed request with metadata removed.'}]});
   assert.equal(f.requests.filter(r=>r.method==='conversations.replies').length,0);const payload=f.requests.find(r=>r.method==='model').body;assert.deepEqual(JSON.parse(payload.input[1].content).messages,[{user:'U1',text:'Reviewed request with metadata removed.'}]);
+});
+
+test('daily exhaustion returns its cause and reset without reserving or sending a model request',async t=>{
+  const f=fixture(t,{usage:{requestsToday:80}}),result=await f.prepareSlackTicketForm({...f.input,evidenceMessages:[{user:'U1',text:'New customer issue'}],recommendation:{temporaryAllowance:{extra:40,expiresAt:new Date(new Date().setUTCHours(24,0,0,0)).toISOString()}}});
+  assert.equal(result.analysisFailure.code,'ai_daily_limit_reached');assert.equal(result.analysisFailure.retryAt,new Date(new Date().setUTCHours(24,0,0,0)).toISOString());assert.equal(f.requests.length,0);assert.equal(f.metering.length,0);
+});
+
+test('deployment-only test exemption is exact-account and ticket-only, retains metering and minute limits',async t=>{
+  const allow=JSON.stringify([{workspaceId:'ws',userId:'user'}]),recommendation={model:'gpt-6.1-sol',knownRequests:[],sourceRoots:['1.0']},modelOutput=JSON.stringify({actionable:false,recommendations:[],existingRequestIds:[],updates:[],noWorkReason:'No new work.'});
+  await t.test('authorized account continues beyond daily and billing limits with auditable test usage',async child=>{
+    const f=fixture(child,{env:{OKRI_TICKET_AI_TEST_ACCOUNTS:allow},usage:{requestsToday:1000,workspaceRequestsToday:1000},budgetFailure:true,modelOutput});
+    const result=await f.prepareSlackTicketForm({...f.input,recommendation});assert.equal(result.analysisModel,'gpt-6.1-sol');assert.equal(f.budgetCalls.length,0);assert.equal(f.metering[0].value.source,'slack_ticket_test');assert.equal(f.metering[1].value.source,'slack_ticket_test');assert.equal(f.metering[1].value.inputTokens,123);assert.equal(f.metering[0].value.limits.userMinute,5);assert.equal(f.metering[0].value.limits.workspaceMinute,12);assert.equal(f.metering[0].value.limits.userDay,Number.MAX_SAFE_INTEGER);
+  });
+  for(const policy of [JSON.stringify([{workspaceId:'other',userId:'user'}]),JSON.stringify([{workspaceId:'ws',userId:'other'}]),'true','invalid'])await t.test(`no privilege from ${policy}`,async child=>{
+    const f=fixture(child,{env:{OKRI_TICKET_AI_TEST_ACCOUNTS:policy},budgetFailure:true});const result=await f.prepareSlackTicketForm({...f.input,recommendation});assert.equal(result.analysisFailure.code,'ai_budget_exceeded');assert.equal(f.budgetCalls.length,1);assert.equal(f.requests.some(r=>r.method==='model'),false);
+  });
+  await t.test('manual forms and minute bursts do not inherit unlimited privileges',async child=>{
+    const f=fixture(child,{env:{OKRI_TICKET_AI_TEST_ACCOUNTS:allow},usage:{requestsThisMinute:5},budgetFailure:true});assert.equal((await f.prepareSlackTicketForm(f.input)).analysisFailure.code,'ai_budget_exceeded');assert.equal((await f.prepareSlackTicketForm({...f.input,recommendation})).analysisFailure.code,'ai_rate_limited');assert.equal(f.requests.some(r=>r.method==='model'),false);
+  });
 });
 
 test('optional automation classification distinguishes acknowledgement from work without changing manual forms',async t=>{
