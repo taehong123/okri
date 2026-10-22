@@ -85,6 +85,19 @@ test('resolved status evidence updates the existing ticket without duplicating o
   const result=await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'124.000',threadTs:'123.000',user:'UCUSTOMER',text:'해결되었습니다.'});
   assert.equal(result.state,'existing');assert.deepEqual(result.requestIds,[id]);assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_automation_requests').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);assert.match(f.current().analysis_json,/고객이 해결되었다고 확인함/);assert.equal(f.current().state,'recommended');assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE kind='completion'").get().n,0);
 });
+
+test('a short acknowledgement updates only its known source thread, preserves facts and needs no AI call',async t=>{
+  const f=fixture(t);f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'기존 오류를 확인해 주세요.'}]);await f.intake();const initial=f.current(),memory={...JSON.parse(initial.analysis_json),memory:'지난 확인 사실: 옵션 A에만 영향을 줍니다.'};f.db.prepare('UPDATE ticket_automation_requests SET analysis_json=? WHERE id=?').run(JSON.stringify(memory),initial.id);
+  f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'기존 오류를 확인해 주세요.'},{ts:'124.000',user:'UCUSTOMER',text:'넹'}]);
+  const result=await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'124.000',threadTs:'123.000',user:'UCUSTOMER',text:'넹'});
+  assert.equal(result.state,'existing');assert.deepEqual(result.requestIds,[initial.id]);assert.equal(f.contexts.length,1);assert.equal(f.current().state,'recommended');assert.equal(f.current().job_id,null);assert.match(f.current().analysis_json,/옵션 A에만 영향을 줍니다/);assert.match(f.current().analysis_json,/추가 확인 응답: 넹/);assert.equal(JSON.parse(f.current().analysis_json).model,'gpt-6.1-sol');assert.notEqual(f.current().source_digest,initial.source_digest);assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_automation_requests').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
+});
+
+test('unlinked acknowledgements, substantive replies, attachments and explicit reviews retain normal analysis',async t=>{
+  for(const variant of [{root:'456.000',reply:'넹'},{reply:'네, 그런데 여전히 오류가 납니다.'},{reply:'넹',hasAttachments:true},{reply:'넹',forceReview:true},{reply:'넹',unseenScope:true}])await t.test(JSON.stringify(variant),async child=>{
+    const f=fixture(child);f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'기존 오류를 확인해 주세요.'}]);await f.intake();f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'기존 오류를 확인해 주세요.'},...(variant.unseenScope?[{ts:'123.500',user:'UCUSTOMER',text:'배송비 처리 기능도 추가해 주세요.'}]:[]),{ts:'124.000',user:'UCUSTOMER',text:variant.reply}]);await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'124.000',threadTs:variant.root||'123.000',user:'UCUSTOMER',text:variant.reply,hasAttachments:variant.hasAttachments,forceReview:variant.forceReview});assert.equal(f.contexts.length,2);
+  });
+});
 test('a changed customer outcome cancels the old execution and requires a new operator approval',async t=>{
   const f=fixture(t,{followup:{kind:'scope_change',summary:'단가 수정 대신 발주 취소를 요청함. 운영 작업 권한은 별도 확인 필요.',sourceRoots:['123.000'],evidenceQuotes:['취소 부탁드립니다.']}});
   await f.intake();await f.change('create');await f.change('approve');await startSecurityReview(f);
