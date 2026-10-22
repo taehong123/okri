@@ -176,3 +176,13 @@ test('cross-thread matches require known IDs, allowed roots and verbatim evidenc
   assert.equal(recommendation.validProblemUpdates([u],c,'옵션 A에서 발생합니다.'),true);
   for(const bad of [{...u,requestId:'foreign'},{...u,sourceRoots:['foreign']},{...u,evidenceQuotes:['모든 문제가 해결됨']}])assert.equal(recommendation.validProblemUpdates([bad],c,'옵션 A에서 발생합니다.'),false);
 });
+
+test('status-only replies can update an evidenced existing issue without authorizing a scope change',async t=>{
+  const update={requestId:'r1',summary:'Customer reports the issue is resolved.',kind:'clarification',sourceRoots:['1.0'],evidenceQuotes:['해결되었습니다.']};
+  const value={title:'',description:'',actionable:false,recommendations:[],existingRequestIds:['r1'],updates:[update],noWorkReason:'Resolved status update without new work.'};
+  const context={model:'gpt-6.1-sol',knownRequests:[{id:'r1',title:'Known issue',description:'Prior scope'}],sourceRoots:['1.0']};
+  for(const [name,changes,accepted] of [['valid',{},true],['scope change',{updates:[{...update,kind:'scope_change'}]},false],['unmatched update',{existingRequestIds:[]},false],['invented evidence',{updates:[{...update,evidenceQuotes:['No such source quote']} ]},false]])await t.test(name,async child=>{
+    const f=fixture(child,{modelOutput:JSON.stringify({...value,...changes})}),result=await f.prepareSlackTicketForm({...f.input,evidenceMessages:[{user:'U1',text:'해결되었습니다.'}],recommendation:context});
+    assert.equal(Boolean(result.analysisModel),accepted);if(accepted){assert.equal(result.actionable,false);assert.deepEqual(result.existingRequestIds,['r1']);assert.equal(result.updates[0].kind,'clarification');}else assert.equal(result.analysisFailure.code,'analysis_invalid_response');
+  });
+});

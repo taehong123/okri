@@ -66,6 +66,12 @@ test('overdue retry messages are analyzed in a bounded batch and paused together
   f.setFailure(false);f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");await f.service.processTicketReceipt(ids[0]);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_intake_messages WHERE state='analyzed'").get().n,20);assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,23);
 });
 
+test('a scheduler tick selects one representative per channel so siblings remain available to its batch',async t=>{
+  const f=fixture(t,{delay:true});f.config.intakeStartAt=new Date(Date.now()-60000).toISOString();f.config.channels.push({...f.config.channels[0],id:'C2'});f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  const root=String(Date.now()/1000);for(let i=0;i<3;i++)await f.service.captureTicketMessage(f.connection,{...f.event,threadTs:root,ts:String(Number(root)+i)});await f.service.captureTicketMessage(f.connection,{...f.event,channel:'C2',ts:root});f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");
+  await f.service.runTicketIntake();assert.equal(f.modelCalls,2);assert.equal(f.events.find(e=>e.channel==='C1').batchEvents.length,3);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_intake_messages WHERE state='analyzed'").get().n,4);
+});
+
 test('a budget pause preserves its period and an uncertain Slack notice never blindly resends',async t=>{
   const retryAt=new Date(Date.now()+86400000).toISOString();const f=fixture(t,{failure:{code:'ai_budget_exceeded',retryAt},slack:async()=>{throw Error('timeout after post');}});f.config.notificationsAuthorized=true;f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
   const id=await f.service.captureTicketMessage(f.connection,f.event);await f.service.processTicketReceipt(id);assert.equal(f.db.prepare('SELECT next_attempt_at FROM ticket_intake_messages').get().next_attempt_at,retryAt);assert.equal(JSON.parse(f.db.prepare('SELECT details_json FROM ticket_automation_audit').get().details_json).state,'unconfirmed');
