@@ -146,3 +146,14 @@ test("invalid model text is charged once and explicit titles stay under user con
   assert.match(form.notice, /원문/);
   assert.deepEqual(f.metering.map((entry) => entry.type), ["reserve", "finalize"]);
 });
+test('temporary ticket-only allowance expires at UTC reset and preserves atomic rate and budget reservations',async t=>{
+  const f=fixture(t,{usage:{requestsToday:40}}),context={model:'gpt-6.1-sol',productSpecification:'Reviewed spec',focusMessage:'New request',knownRequests:[],temporaryAllowance:{extra:40,expiresAt:new Date(new Date().setUTCHours(24,0,0,0)).toISOString()}};
+  await f.prepareSlackTicketForm({...f.input,recommendation:context});assert.equal(f.requests.filter(r=>r.method==='model').length,1);assert.equal(f.metering[0].value.limits.userDay,80);assert.equal(f.metering[0].value.limits.workspaceDay,120);
+  assert.equal(JSON.parse(f.requests.find(r=>r.method==='model').body.input[1].content).context.temporaryAllowance,undefined);
+  const before=f.requests.length;await f.prepareSlackTicketForm({...f.input,recommendation:{...context,temporaryAllowance:{extra:40,expiresAt:'2000-01-01T00:00:00Z'}}});assert.equal(f.requests.filter(r=>r.method==='model').length,1);assert.equal(f.requests.length,before+3,'expired extra must not cause a provider call');
+});
+test('cross-thread matches require known IDs, allowed roots and verbatim evidence anchors',()=>{
+  const c={knownRequests:[{id:'r1'}],sourceRoots:['root1']},u={requestId:'r1',summary:'Latest fact',kind:'clarification',sourceRoots:['root1'],evidenceQuotes:['옵션 A에서 발생']};
+  assert.equal(recommendation.validProblemUpdates([u],c,'옵션 A에서 발생합니다.'),true);
+  for(const bad of [{...u,requestId:'foreign'},{...u,sourceRoots:['foreign']},{...u,evidenceQuotes:['모든 문제가 해결됨']}])assert.equal(recommendation.validProblemUpdates([bad],c,'옵션 A에서 발생합니다.'),false);
+});

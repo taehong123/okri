@@ -5,12 +5,12 @@ import { createLocalAgentPairing } from "@/lib/local-agent";
 import { prepareSlackTicketForm } from "@/lib/slack-ticket-intake";
 import { readSlackThread } from "@/lib/slack-work-intake";
 import { assessTicketText, canAutoApproveTicket, escapeSlackText, redactTicketText, TICKET_PRIORITIES, ticketPriorityRank, type TicketPriority, type TicketRisk, type TicketState } from "@/lib/ticket-policy";
-import {ticketProposalDescription,TICKET_CATEGORIES,TICKET_CATEGORY_LABELS,type TicketCategory,type TicketProposal} from '@/lib/ticket-recommendation';
+import {ticketProposalDescription,TICKET_CATEGORIES,TICKET_CATEGORY_LABELS,type TicketCategory,type TicketProposal,type TicketProblemUpdate} from '@/lib/ticket-recommendation';
 
 export type TicketChannelRule = { id: string; name: string; enabled: boolean; autoApprove: "manual" | "low_risk"; memberId: string; portId: string; productId?:string; repositoryId?:string;relayUserIds?:string[];relayPrefix?:string;relayContentStart?:string;relayContentEnd?:string };
 export type TicketRepository={id:string;name:string;remote:string;installRoots?:string[]};
 export type TicketDevelopmentProduct={id:string;owner_id:string;name:string;specification:string;setup_instructions:string;repositories_json:string;revision:number;updated_at:string};
-export type TicketAutomationConfig = { destination: string; prefix: string; channels: TicketChannelRule[]; actorUserId: string; notificationsAuthorized: boolean; defaultModel?: string };
+export type TicketAutomationConfig = { destination: string; prefix: string; channels: TicketChannelRule[]; actorUserId: string; notificationsAuthorized: boolean; defaultModel?: string;intakeStartAt?:string;temporaryAllowance?:{extra:number;expiresAt:string} };
 export type TicketAutomationRequest = { source_event_ts:string;issue_key:string;category:TicketCategory;analysis_json:string; id: string; owner_id: string; team_id: string; source_channel: string; source_ts: string; source_user: string; requester_slack_user: string; requester_name: string; source_digest: string; source_text: string; title: string; description: string; risk: TicketRisk; reasons_json: string; state: TicketState; member_id: string | null; port_id: string | null; ticket_id: string | null; task_id: string | null; job_id: string | null; revision: number; notice: string; question: string; answer: string; security_json: string; priority:TicketPriority; product_id:string|null;repository_id:string;dependencies_json:string;coordination_json:string;release_commit:string;release_confirmed_by:string|null; updated_at: string; created_at: string };
 type Port = { id: string; owner_id: string; member_id: string; device_id: string | null; name: string; chat_id: string | null; pairing_id:string|null; enabled: number; model: string; models_json: string; channel_ids_json: string; computer_label:string; product_id:string|null;repository_id:string;verified_remote:string };
 type Settings = { owner_id: string; team_id: string; enabled: number; config_json: string };
@@ -28,6 +28,14 @@ async function audit(owner: string, id: string | null, actor: string, action: st
   await run("INSERT INTO ticket_automation_audit(id,owner_id,request_id,actor_user_id,action,revision,details_json,created_at) VALUES(?,?,?,?,?,?,?,?)", crypto.randomUUID(), owner, id, actor, action, revision, JSON.stringify(details), now());
 }
 async function settings(owner: string) { return one<Settings>("SELECT * FROM ticket_automation_settings WHERE owner_id=?", owner); }
+export async function grantTicketAnalysisAllowance(a:RequestAuthorization,extra:unknown){
+  admin(a);if(!Number.isInteger(extra)||Number(extra)<1||Number(extra)>100)fail('추가 분석 횟수는 1~100회로 지정해 주세요.');
+  const s=await settings(a.ownerId);if(!s)fail('티켓 자동화를 먼저 설정해 주세요.');
+  const value=config(s),expiresAt=new Date(new Date().setUTCHours(24,0,0,0)).toISOString();
+  value.temporaryAllowance={extra:Number(extra),expiresAt};
+  await run('UPDATE ticket_automation_settings SET config_json=?,updated_at=? WHERE owner_id=?',JSON.stringify(value),now(),a.ownerId);
+  await audit(a.ownerId,null,a.userId,'temporary_analysis_allowance',null,{extra:Number(extra),expiresAt,monetaryBudgetUnchanged:true});return getTicketAutomation(a);
+}
 async function productContext(owner:string,id:string|null,repositoryId:string) {
   const product=id?await one<TicketDevelopmentProduct>("SELECT * FROM ticket_development_products WHERE id=? AND owner_id=?",id,owner):null;
   const repository=product?(JSON.parse(product.repositories_json) as TicketRepository[]).find(r=>r.id===repositoryId):null;
@@ -152,7 +160,8 @@ export async function saveTicketAutomation(a: RequestAuthorization, payload: Rec
   }
   const defaultModel = text(payload.defaultModel, 128);
   if (defaultModel && !(await rows<{ models_json: string }>("SELECT models_json FROM ticket_execution_ports WHERE owner_id=?", a.ownerId)).some(p => JSON.parse(p.models_json).includes(defaultModel))) fail("연결된 포트가 지원하는 모델을 선택해 주세요.");
-  const value: TicketAutomationConfig = { destination, prefix, channels, actorUserId: a.userId, notificationsAuthorized: payload.notificationsAuthorized === true, defaultModel };
+  const previous=await settings(a.ownerId),prior=previous?config(previous):null;
+  const value: TicketAutomationConfig = { destination, prefix, channels, actorUserId: a.userId, notificationsAuthorized: payload.notificationsAuthorized === true, defaultModel,intakeStartAt:prior?.intakeStartAt||now(),temporaryAllowance:prior?.temporaryAllowance };
   if (payload.enabled === true && !channels.some(c => c.enabled)) fail("연결할 고객 채널을 선택해 주세요.");
   await run(`INSERT INTO ticket_automation_settings(owner_id,team_id,config_json,enabled,updated_at) VALUES(?,?,?,?,?) ON CONFLICT(owner_id) DO UPDATE SET team_id=excluded.team_id,config_json=excluded.config_json,enabled=excluded.enabled,updated_at=excluded.updated_at`, a.ownerId, connection.teamId, JSON.stringify(value), payload.enabled === true ? 1 : 0, now());
   await audit(a.ownerId, null, a.userId, "settings_saved");
@@ -240,10 +249,10 @@ async function readSource(owner: string, channel: string, ts: string, user: stri
   const hasAttachments=Boolean(thread.attachmentsPresent||thread.imageFiles?.length||thread.canvasCandidateCount);
   return { connection, token, raw,safe,evidenceMessages:evidenceMessages.map(m=>({...m,text:redactTicketText(m.text).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]')})), requester: messages[0]?.user || user, hasAttachments, hash: await digest(JSON.stringify({messages:messages.map(m => ({ user: m.user, ts: m.ts, text: m.text })),hasAttachments,evidence})) };
 }
-export type TicketIntakeEvent={channel:string;ts:string;user:string;text:string;threadTs?:string;hasAttachments?:boolean;isRelay?:boolean;recovery?:boolean;forceReview?:boolean};
+export type TicketIntakeEvent={channel:string;ts:string;user:string;text:string;threadTs?:string;hasAttachments?:boolean;isRelay?:boolean;recovery?:boolean;forceReview?:boolean;batchEvents?:TicketIntakeEvent[]};
 export type TicketIntakeOutcome={state:'analyzed'|'no_work'|'existing'|'ignored';requestIds:string[];reason?:string};
 export async function intakeTicketEvent(connection:{ownerId:string;teamId:string;botUserId:string},event:TicketIntakeEvent){return (await analyzeTicketEvent(connection,event)).state!=='ignored';}
-export async function analyzeTicketEvent(connection: { ownerId: string; teamId: string; botUserId: string }, event: TicketIntakeEvent):Promise<TicketIntakeOutcome> {
+export async function analyzeTicketEvent(connection: { ownerId: string; teamId: string; botUserId: string }, event: TicketIntakeEvent,manualImport=false):Promise<TicketIntakeOutcome> {
   const s = await settings(connection.ownerId);
   const ignored:TicketIntakeOutcome={state:'ignored',requestIds:[]};
   if (!s?.enabled || s.team_id !== connection.teamId) return ignored;
@@ -257,46 +266,65 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
   }
   const rule = c.channels.find(r => r.id === event.channel && r.enabled);
   if (!rule) return ignored;
+  if(!manualImport&&c.intakeStartAt&&Number(event.ts)*1000<Date.parse(c.intakeStartAt))return ignored;
   if(event.isRelay&&(!rule.relayUserIds?.includes(event.user)||(rule.relayPrefix&&!event.text.trim().replace(/^\*+/,'').startsWith(rule.relayPrefix))))return ignored;
   const rootTs = event.threadTs || event.ts;
   const represented=await rows<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE owner_id=? AND source_channel=? AND source_ts=? AND source_event_ts=?",s.owner_id,event.channel,rootTs,event.ts);
   const source = await readSource(s.owner_id, event.channel, rootTs, event.user);
-  if(represented.length&&represented.every(r=>r.source_digest===source.hash)){for(const r of represented)await ensureTicketRecommendation(r,c,rule.name);return {state:'existing',requestIds:represented.map(r=>r.id)};}
-  const assessment = assessTicketText(source.raw);
+  if(!event.batchEvents?.length&&represented.length&&represented.every(r=>r.source_digest===source.hash)){for(const r of represented)await ensureTicketRecommendation(r,c,rule.name);return {state:'existing',requestIds:represented.map(r=>r.id)};}
+  const batch=(event.batchEvents||[event]).filter(e=>e.channel===event.channel&&e.user!==connection.botUserId).slice(0,20);
+  const sources=new Map([[rootTs,source]]);
+  for(const e of batch){const root=e.threadTs||e.ts;if(!sources.has(root))sources.set(root,await readSource(s.owner_id,event.channel,root,e.user));}
+  const sourceRoots=[...sources.keys()];
+  const assessment = assessTicketText([...sources.values()].map(v=>v.raw).join('\n'));
   const actor = await one<{ email: string; display_name: string; role: RequestAuthorization["role"] }>("SELECT email,display_name,role FROM workspace_members WHERE workspace_id=? AND user_id=? AND status='active' AND role IN ('owner','admin')", s.owner_id, c.actorUserId);
   if (!actor) throw new TicketAutomationError('수집 담당 관리자 계정을 확인해 주세요.',409);
-  const knownRequests=await rows<{id:string;title:string;description:string}>('SELECT id,title,description FROM ticket_automation_requests WHERE owner_id=? AND source_channel=? AND source_ts=?',s.owner_id,event.channel,rootTs);
+  const knownRecords=await rows<TicketAutomationRequest>(`SELECT * FROM ticket_automation_requests WHERE owner_id=? AND source_channel=? AND COALESCE(product_id,'')=? AND repository_id=? AND state NOT IN ('dismissed','published') ORDER BY CASE WHEN source_ts IN(SELECT value FROM json_each(?)) OR id IN(SELECT request_id FROM ticket_problem_sources WHERE owner_id=? AND root_ts IN(SELECT value FROM json_each(?))) THEN 0 ELSE 1 END,updated_at DESC LIMIT 40`,s.owner_id,event.channel,rule.productId||'',rule.repositoryId||'',JSON.stringify(sourceRoots),s.owner_id,JSON.stringify(sourceRoots));
+  const knownRequests=knownRecords.map(r=>({id:r.id,title:r.title,description:`${r.description.slice(0,1800)}\nLatest facts: ${JSON.parse(r.analysis_json||'{}').memory||''}`}));
+  const linkedRoots=await rows<{root_ts:string}>('SELECT DISTINCT root_ts FROM ticket_problem_sources WHERE owner_id=? AND channel_id=? AND root_ts IN (SELECT value FROM json_each(?))',s.owner_id,event.channel,JSON.stringify(sourceRoots));
+  const evidenceMessages=[...sources].flatMap(([root,v])=>{
+    const focusTs=new Set(batch.filter(e=>(e.threadTs||e.ts)===root).map(e=>e.ts));
+    // Known problems carry compact memory. Only new evidence and nearby/latest context re-enter the model.
+    const selected=knownRecords.some(r=>r.source_ts===root)||linkedRoots.some(r=>r.root_ts===root)?v.evidenceMessages.filter((m,i,all)=>focusTs.has(m.ts||'')||i>=all.length-8||all.slice(Math.max(0,i-1),i+2).some(n=>focusTs.has(n.ts||''))):v.evidenceMessages;
+    return selected.map(m=>({...m,text:`[sourceRoot=${root}; ts=${m.ts}; user=${m.user}]\n${m.text}`}));
+  });
+  if(evidenceMessages.reduce((n,m)=>n+m.text.length,0)>48000)throw new TicketAutomationError('대화가 길어 자동 병합을 중지했습니다. 수집 내역에서 범위를 확인해 주세요.',409);
   const product=rule.productId?await one<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=? AND id=?',s.owner_id,rule.productId):null;
-  const focus=source.evidenceMessages.find(m=>m.ts===event.ts)?.text||redactTicketText(event.text).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]');
+  const focus=batch.map(e=>sources.get(e.threadTs||e.ts)?.evidenceMessages.find(m=>m.ts===e.ts)).filter(Boolean).map(m=>m!.text).join('\n\n')||redactTicketText(event.text);
   let proposals:TicketProposal[]=[{category:'improvement',title:'보안 검토가 필요한 고객 요청',problem:focus,solution:'요청의 비밀정보·권한·데이터 접근 범위를 담당자가 먼저 확인합니다. 차단된 내용은 개발 실행에 전달하지 않습니다.',acceptanceCriteria:['보안 경계를 위반하는 명령과 정보 전송을 실행하지 않음'],questions:[]}],classified=false,model='';
   if (assessment.risk !== "blocked"&&source.safe.trim()) {
     const form = await prepareSlackTicketForm({ authorization: { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false }, token: source.token, botUserId: connection.botUserId,
-      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages:source.evidenceMessages,classifyRequest:true,recommendation:{model:c.defaultModel||'gpt-6.1-sol',productSpecification:product?.specification||'',focusMessage:focus,knownRequests} });
+      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages,classifyRequest:true,recommendation:{model:c.defaultModel||'gpt-6.1-sol',productSpecification:product?.specification||'',focusMessage:focus,knownRequests,sourceRoots,temporaryAllowance:c.temporaryAllowance} });
     if(!form.analysisModel||!form.recommendations)throw new TicketAutomationError('원문은 수집됐으며 추천 분석을 다시 시도합니다.',503);
-    if(form.actionable===false&&!event.forceReview&&!event.hasAttachments)return {state:'no_work',requestIds:[],reason:form.noWorkReason};
+    if(form.actionable===false&&(manualImport||!event.forceReview&&!event.hasAttachments))return {state:'no_work',requestIds:[],reason:form.noWorkReason};
+    await applyProblemUpdates(form.updates||[],s,c,event,sources,form.analysisModel);
     if(!form.recommendations.length&&((form.existingRequestIds||[]).length||!event.forceReview&&!event.hasAttachments))return {state:'existing',requestIds:form.existingRequestIds||[]};
     classified=form.actionable===true;
     proposals=form.recommendations.length?form.recommendations:[{...proposals[0],title:'담당자 확인이 필요한 고객 요청',problem:focus||'첨부 파일에 있는 요청',solution:'원문과 첨부 내용을 요청자와 확인한 다음 해결 범위를 정합니다.',acceptanceCriteria:['요청자와 담당자가 문제와 기대 동작을 확인함'],questions:['어떤 동작을 기대하셨나요?']}];model=form.analysisModel;
   }
   if(!source.safe.trim()&&event.hasAttachments)proposals=[{category:'improvement',title:'첨부된 고객 요청 확인',problem:'고객이 텍스트 없이 첨부 파일로 요청을 전달했습니다.',solution:'담당자가 Slack 원문의 첨부 파일을 확인하고 문제와 기대 동작을 요청자에게 확인합니다.',acceptanceCriteria:['첨부 원문을 확인하고 해결할 문제와 범위를 기록함'],questions:['첨부 내용에서 어떤 동작을 원하시나요?']}];
   const statements:ReturnType<typeof env.DB.prepare>[]=[],plans:{id:string;index:number;auto:boolean}[]=[];
-  for(const proposal of proposals){
+  for(const proposal of manualImport?proposals.slice(0,1):proposals){
+  const proposalRoot=proposal.sourceRoots?.find(root=>sources.has(root))||rootTs,proposalSource=sources.get(proposalRoot)!;
+  const proposalEvent=batch.find(e=>(e.threadTs||e.ts)===proposalRoot)||event;
   const title=redactTicketText(proposal.title).slice(0,240),description=redactTicketText(ticketProposalDescription(proposal)).slice(0,4000);
   const derived = assessTicketText(`${title}\n${description}`);
   const risk = assessment.risk === "blocked" || derived.risk === "blocked" ? "blocked" : assessment.risk;
   const autoPort = rule.autoApprove === "low_risk" && risk === "low" ? await chooseTicketPort(s.owner_id, rule.memberId, rule.portId || null, event.channel,rule.productId||null,rule.repositoryId||'') : null;
   const selectedPortId = rule.portId || null,eligibilityPortId=rule.portId||autoPort?.id||null;
   const id = crypto.randomUUID(), time = now();
-  const requester = await slackApi<{ ok:boolean; user?: {is_bot?:boolean;deleted?:boolean;real_name?: string; profile?: { display_name?: string } } }>(source.token,"users.info",{user:source.requester}).catch(()=>null);
-  const requesterId=requester?.user?.is_bot||requester?.user?.deleted?'':source.requester;
-  const requesterName = requesterId?(requester?.user?.profile?.display_name || requester?.user?.real_name || source.requester):'';
+  const requester = await slackApi<{ ok:boolean; user?: {is_bot?:boolean;deleted?:boolean;real_name?: string; profile?: { display_name?: string } } }>(source.token,"users.info",{user:proposalSource.requester}).catch(()=>null);
+  const requesterId=requester?.user?.is_bot||requester?.user?.deleted?'':proposalSource.requester;
+  const requesterName = requesterId?(requester?.user?.profile?.display_name || requester?.user?.real_name || proposalSource.requester):'';
   const issueKey=await digest(`${proposal.category}\n${title}\n${proposal.problem}`);
   plans.push({id,index:statements.length,auto:proposal.category!=='guidance'&&!event.recovery&&!event.forceReview&&classified&&canAutoApproveTicket({mode:rule.autoApprove,risk,memberId:rule.memberId,portId:eligibilityPortId,hasAttachments:event.hasAttachments||source.hasAttachments})});
-  statements.push(env.DB.prepare(`INSERT OR IGNORE INTO ticket_automation_requests(id,owner_id,team_id,source_channel,source_ts,source_event_ts,issue_key,category,analysis_json,source_user,requester_slack_user,requester_name,source_digest,source_text,title,description,risk,reasons_json,state,member_id,port_id,created_at,updated_at,product_id,repository_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, s.owner_id, s.team_id, event.channel, rootTs,event.ts,issueKey,proposal.category,JSON.stringify({model,proposal:JSON.parse(redactTicketText(JSON.stringify(proposal))),original:focus}), event.user, requesterId, requesterName, source.hash, source.safe, title, description, risk, JSON.stringify([...assessment.reasons, ...derived.reasons]), risk === "blocked" ? "blocked" : "recommended", rule.memberId || null, selectedPortId, time, time,rule.productId||null,rule.repositoryId||''));
+  statements.push(env.DB.prepare(`INSERT OR IGNORE INTO ticket_automation_requests(id,owner_id,team_id,source_channel,source_ts,source_event_ts,issue_key,category,analysis_json,source_user,requester_slack_user,requester_name,source_digest,source_text,title,description,risk,reasons_json,state,member_id,port_id,created_at,updated_at,product_id,repository_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, s.owner_id, s.team_id, event.channel, proposalRoot,proposalEvent.ts,issueKey,proposal.category,JSON.stringify({model,proposal:JSON.parse(redactTicketText(JSON.stringify(proposal))),original:focus}), proposalEvent.user, requesterId, requesterName, proposalSource.hash, proposalSource.safe, title, description, risk, JSON.stringify([...assessment.reasons, ...derived.reasons]), risk === "blocked" ? "blocked" : "recommended", rule.memberId || null, selectedPortId, time, time,rule.productId||null,rule.repositoryId||''));
   statements.push(env.DB.prepare("INSERT INTO ticket_automation_audit(id,owner_id,request_id,actor_user_id,action,revision,details_json,created_at) SELECT ?,owner_id,id,'slack','intake_validated',1,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=?").bind(crypto.randomUUID(),JSON.stringify({risk,sourceDigest:source.hash}),time,id,s.owner_id));
   const r={id,owner_id:s.owner_id,state:risk==='blocked'?'blocked' as const:'recommended' as const,revision:1,category:proposal.category};
-  statements.push(ticketMessageStatement(r,'source',c.destination,null,`#${rule.name} 고객 원문 · ${TICKET_CATEGORY_LABELS[proposal.category]}\n${focus}\n\n${sourceLink({source_channel:event.channel,source_ts:event.ts})}`));
-  statements.push(ticketMessageStatement(r,'recommendation',c.destination,null,`[${TICKET_CATEGORY_LABELS[proposal.category]}] ${escapeSlackText(title)}\n\n${escapeSlackText(description)}\n\n추천 모델: ${model||(risk==='blocked'?'보안 정책':'담당자 검토')}`));
+  for(const root of proposal.sourceRoots||[proposalRoot]){const linked=sources.get(root);if(linked)statements.push(env.DB.prepare('INSERT OR IGNORE INTO ticket_problem_sources SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ticket_automation_requests WHERE id=? AND owner_id=?)').bind(s.owner_id,id,event.channel,root,linked.hash,time,id,s.owner_id));}
+  const evidenceLinks=(proposal.sourceRoots||[proposalRoot]).filter(root=>sources.has(root)).map(root=>sourceLink({source_channel:event.channel,source_ts:root}));
+  statements.push(ticketMessageStatement(r,'source',c.destination,null,`#${rule.name} 고객 원문 · ${TICKET_CATEGORY_LABELS[proposal.category]}\n${escapeSlackText(focus||proposalSource.safe)}\n\n${evidenceLinks.join('\n')}`));
+  statements.push(ticketMessageStatement(r,'recommendation',c.destination,null,`[${TICKET_CATEGORY_LABELS[proposal.category]}] ${escapeSlackText(title)}\n\n${escapeSlackText(description)}\n\n관련 원문: ${evidenceLinks.join(' ')}\n추천 모델: ${model||(risk==='blocked'?'보안 정책':'담당자 검토')}`));
   }
   const results=await env.DB.batch(statements),inserted=plans.filter(p=>results[p.index]?.meta.changes),requestIds=inserted.map(p=>p.id);
   for(const {id,auto}of inserted)if(auto){
@@ -305,6 +333,39 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
     catch { /* Visible created/recommended state stays in the review queue. */ }
   }
   return {state:'analyzed',requestIds};
+}
+async function applyProblemUpdates(updates:TicketProblemUpdate[],s:Settings,c:TicketAutomationConfig,event:TicketIntakeEvent,sources:Map<string,Awaited<ReturnType<typeof readSource>>>,model:string){
+  const rule=c.channels.find(ch=>ch.id===event.channel)!;
+  for(const update of updates){
+    const r=await one<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=? AND source_channel=? AND COALESCE(product_id,'')=? AND repository_id=? AND state NOT IN ('published','dismissed')",update.requestId,s.owner_id,event.channel,rule.productId||'',rule.repositoryId||'');if(!r)continue;
+    const selected=update.sourceRoots.filter(root=>sources.has(root));if(!selected.length)continue;
+    const summary=redactTicketText(update.summary),changeDigest=await digest(JSON.stringify({roots:selected.map(root=>[root,sources.get(root)!.hash]),summary}));
+    if(await one('SELECT id FROM ticket_problem_changes WHERE owner_id=? AND request_id=? AND digest=?',r.owner_id,r.id,changeDigest))continue;
+    const active=['queued','running'].includes(r.state),needsReview=update.kind==='scope_change'||assessTicketText(summary).risk==='blocked'||selected.some(root=>assessTicketText(sources.get(root)!.raw).risk==='blocked');
+    const memory=JSON.parse(r.analysis_json||'{}');memory.memory=summary;memory.model=model;
+    const primary=sources.get(r.source_ts),time=now(),description=`${r.description.slice(0,2200)}\n\n최신 대화 반영\n${summary}\n${selected.map(root=>sourceLink({source_channel:event.channel,source_ts:root})).join('\n')}`.slice(0,4000);
+    // Every mutation is gated by a fresh change id, inside the same transaction as the revision check.
+    const changeId=crypto.randomUUID(),result=await env.DB.batch([
+      env.DB.prepare(`INSERT OR IGNORE INTO ticket_problem_changes(id,owner_id,request_id,job_id,digest,summary,kind,state,created_at) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=?)`).bind(changeId,r.owner_id,r.id,r.job_id,changeDigest,summary,update.kind,active?(needsReview?'needs_review':'pending'):'applied',time,r.id,r.owner_id,r.revision),
+      env.DB.prepare(`UPDATE ticket_automation_requests SET analysis_json=?,description=?,source_digest=?,source_text=?,state=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND EXISTS(SELECT 1 FROM ticket_problem_changes WHERE id=?)`).bind(JSON.stringify(memory),description,primary?.hash||r.source_digest,primary?.safe||r.source_text,active&&needsReview?'blocked':r.state,time,r.id,r.owner_id,r.revision,changeId),
+      ...selected.map(root=>env.DB.prepare(`INSERT INTO ticket_problem_sources SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ticket_problem_changes WHERE id=?) ON CONFLICT(owner_id,request_id,channel_id,root_ts) DO UPDATE SET source_digest=excluded.source_digest,checked_at=excluded.checked_at`).bind(r.owner_id,r.id,event.channel,root,sources.get(root)!.hash,time,changeId)),
+      ...(active&&needsReview?[env.DB.prepare("UPDATE local_agent_jobs SET status='cancelled',updated_at=? WHERE id=? AND status IN ('queued','running') AND EXISTS(SELECT 1 FROM ticket_problem_changes WHERE id=?)").bind(time,r.job_id,changeId)]:[]),
+      ...(r.ticket_id?[env.DB.prepare('UPDATE items SET description=?,updated_at=? WHERE id=? AND owner_id=? AND EXISTS(SELECT 1 FROM ticket_problem_changes WHERE id=?)').bind(description,time,r.ticket_id,r.owner_id,changeId)]:[]),
+    ]);
+    if(!result[0]?.meta.changes)fail('내용이 변경되어 추가 대화를 다시 분석합니다.',409);
+    await audit(r.owner_id,r.id,'slack','problem_updated',r.revision+1,{kind:update.kind,digest:changeDigest,requiresReview:active&&needsReview,roots:selected});
+    await queueTicketMessage(r.owner_id,r.id,`conversation:${changeDigest}`,c.destination,await managementThread(r.id),`추가 대화 반영 · ${escapeSlackText(r.title)}\n${escapeSlackText(summary)}\n${active&&needsReview?'범위가 달라져 실행을 중지했습니다. 내용을 확인하고 다시 승인해 주세요.':active?'현재 포트에 변경분을 전달합니다. 다음 작업 단계에서 반영합니다.':'티켓 내용에 반영했습니다.'}`);
+  }
+}
+/** Lease/device scoping is enforced by reportLocalAgentJob before this function is called. */
+export async function ticketProblemChanges(jobId:string,acknowledged:unknown=[]){
+  const ids=Array.isArray(acknowledged)?acknowledged.filter((id):id is string=>typeof id==='string').slice(0,30):[];
+  if(ids.length)await run("UPDATE ticket_problem_changes SET state='applied',applied_at=? WHERE job_id=? AND state='pending' AND id IN (SELECT value FROM json_each(?))",now(),jobId,JSON.stringify(ids));
+  return rows<{id:string;summary:string;kind:string}>("SELECT id,summary,kind FROM ticket_problem_changes WHERE job_id=? AND state='pending' ORDER BY created_at,id LIMIT 30",jobId);
+}
+async function linkedSourcesCurrent(r:TicketAutomationRequest){
+  const links=await rows<{channel_id:string;root_ts:string;source_digest:string}>('SELECT * FROM ticket_problem_sources WHERE owner_id=? AND request_id=? AND root_ts<>?',r.owner_id,r.id,r.source_ts);
+  for(const link of links){const source=await readSource(r.owner_id,link.channel_id,link.root_ts,r.source_user);if(source.hash!==link.source_digest||assessTicketText(source.raw).risk==='blocked')return false;}return true;
 }
 async function ensureTicketRecommendation(r:TicketAutomationRequest,c:TicketAutomationConfig,channelName:string){
   const analysis=JSON.parse(r.analysis_json||'{}');
@@ -443,7 +504,7 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     const s = await settings(a.ownerId); if (!s?.enabled) fail("티켓 자동화를 먼저 켜 주세요.");
     if (!config(s).channels.some(c => c.id === r.source_channel && c.enabled)) fail("고객 채널 연결을 확인해 주세요.");
     const source = await readSource(a.ownerId, r.source_channel, r.source_ts, r.source_user);
-    if (source.hash !== r.source_digest || assessTicketText(source.raw).risk === "blocked") {
+    if (source.hash !== r.source_digest || assessTicketText(source.raw).risk === "blocked"||!await linkedSourcesCurrent(r)) {
       await updateTicketRevision("UPDATE ticket_automation_requests SET state='blocked',risk='blocked',reasons_json=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?", JSON.stringify(["원문 변경 또는 보안 검증 실패: 원문을 확인하고 새 요청으로 검토해 주세요."]), time, r.id, a.ownerId, r.revision);
       fail("원문이 변경되었거나 보안 검증을 통과하지 못했습니다.", 409);
     }
@@ -689,7 +750,7 @@ export async function validateTicketJobPickup(jobId: string, isolatedTicketSuppo
     && await one(`SELECT p.id FROM ticket_execution_ports p JOIN workspace_members m ON m.id=p.member_id AND m.workspace_id=p.owner_id JOIN local_agent_jobs j ON j.id=? AND j.device_id=p.device_id AND j.workspace_id=p.owner_id AND j.user_id=m.user_id WHERE p.id=? AND p.owner_id=? AND p.member_id=? AND p.enabled=1 AND m.status='active' AND p.product_id=? AND p.repository_id=? AND EXISTS(SELECT 1 FROM json_each(p.channel_ids_json) WHERE value=?)`, jobId, r.port_id, r.owner_id, r.member_id,r.product_id,r.repository_id, r.source_channel);
   let safe = Boolean(valid && r.state === "queued" && r.risk !== "blocked");
   if (safe) {
-    try { const source = await readSource(r.owner_id, r.source_channel, r.source_ts, r.source_user); safe = source.hash === r.source_digest && assessTicketText(source.raw).risk !== "blocked"; }
+    try { const source = await readSource(r.owner_id, r.source_channel, r.source_ts, r.source_user); safe = source.hash === r.source_digest && assessTicketText(source.raw).risk !== "blocked"&&await linkedSourcesCurrent(r); }
     catch { return false; } // Transient read failures leave the queue intact.
   }
   if (!safe) await env.DB.batch([
@@ -718,6 +779,7 @@ export async function validateTicketPreflight(device:{id:string;workspaceId:stri
   const port=await one<Port>("SELECT p.* FROM ticket_execution_ports p JOIN workspace_members m ON m.id=p.member_id AND m.workspace_id=p.owner_id AND m.user_id=? AND m.status='active' WHERE p.id=? AND p.owner_id=? AND p.member_id=? AND p.device_id=? AND p.enabled=1",device.userId,r.port_id,r.owner_id,r.member_id,device.id);
   const source=await readSource(r.owner_id,r.source_channel,r.source_ts,r.source_user);
   const currentProduct=r.product_id?await one<TicketDevelopmentProduct>("SELECT * FROM ticket_development_products WHERE id=? AND owner_id=?",r.product_id,r.owner_id):null;
+  if(!await linkedSourcesCurrent(r)){verdict='blocked';codes.push('security_boundary');}
   if(!currentProduct||currentProduct.revision!==context.product?.revision||port?.product_id!==r.product_id||port?.repository_id!==r.repository_id){verdict='blocked';codes.push('security_boundary');}
   const paths=Array.isArray(p.paths)?[...new Set(p.paths.filter((v):v is string=>typeof v==='string'&&v.length>0&&v.length<=240&&!(v.startsWith('/')||v.startsWith('\\')||/[:\p{Cc}]/u.test(v))&&!v.replaceAll('\\','/').split('/').includes('..')).map(v=>v.replaceAll('\\','/')))].slice(0,50):[];
   const coordination={paths,updatedAt:now(),priority:r.priority};
@@ -746,4 +808,7 @@ export async function requireTicketPreflightForCompletion(jobId:string,device?:{
   if(device&&!await one("SELECT id FROM local_agent_jobs WHERE id=? AND device_id=? AND workspace_id=? AND user_id=?",jobId,device.id,device.workspaceId,device.userId))fail("유효한 포트 실행 권한이 없습니다.",403);
   const r=await one<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE job_id=?",jobId);
   if(r){const security=JSON.parse(r.security_json||"{}"),job=await one<{lease_id:string}>("SELECT lease_id FROM local_agent_jobs WHERE id=?",jobId);if(r.state!=="running"||!security.allow||security.jobId!==jobId||!job?.lease_id||security.leaseDigest!==await digest(job.lease_id))fail("포트의 최종 검증을 통과해야 완료할 수 있습니다.",409);}
+  if(r&&(await one("SELECT id FROM ticket_problem_changes WHERE job_id=? AND state='pending' LIMIT 1",jobId)))fail('추가 대화 반영을 확인해야 완료할 수 있습니다.',409);
+  if(r&&(!await linkedSourcesCurrent(r)))fail('연결된 원문이 변경되어 추가 대화 검토가 필요합니다.',409);
+  if(r){const source=await readSource(r.owner_id,r.source_channel,r.source_ts,r.source_user);if(source.hash!==r.source_digest||assessTicketText(source.raw).risk==='blocked')fail('원문이 변경되어 추가 대화 검토가 필요합니다.',409);}
 }

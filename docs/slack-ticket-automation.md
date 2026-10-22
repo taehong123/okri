@@ -27,8 +27,10 @@ requires the selected assignee, product, repository and slot to match.
 
 Customer events are committed before Slack is acknowledged. Versioned message
 receipts, expiring processing leases and retries survive failed analysis or
-process restarts. Full-history and old-thread reply scans paginate fairly across
-enabled channels with saved cursors. Each independent issue in a message is
+process restarts. Activation saves a future-only start time; recovery reads newer
+messages, never silently importing an old backlog. An admin may explicitly import
+one source with `import_source` (at most one recommendation, always manual review),
+without moving that cursor. Each independent issue in a message is
 committed atomically with its source and recommendation outbox records. Recovery
 never automatically approves old work. Request lists and collection receipts are
 paginated rather than silently hidden behind the first 200 requests.
@@ -40,6 +42,30 @@ enabled channels the app can read and messages Slack still retains; inaccessible
 channels and incomplete reads never count as complete. Ambiguous Slack sends are
 matched by a stable correlation id; absence of confirmation never causes a blind
 resend. Native mobile APIs and existing records remain compatible.
+
+Short message bursts wait 20 seconds, then a customer-channel lease serializes
+analysis across threads. A bounded burst (20 receipts) shares one model call.
+Existing issues are matched only within the same workspace, customer channel,
+product and repository using concrete entity and symptom/workflow evidence.
+Every issue retains its source-thread links. Known issues use compact scope and
+latest-fact memory plus new/nearby messages instead of replaying all old text.
+Oversized evidence remains in the retry queue for explicit review; it is never
+silently truncated and marked complete. Slack retention and read permissions
+still limit coverage.
+
+Linked threads are checked incrementally every five minutes (bounded, fair queue;
+large queues and provider retries can take longer). Unchanged messages cause no
+AI call. Clarifications reach the current isolated runner at its next turn
+boundary, are acknowledged after application, and gate completion. Changed scope
+cancels the old job and requires operator review and fresh approval. The final
+completion check also rereads the linked source hashes. Older runners cannot
+silently finish with unacknowledged changes; update their runner script to consume
+the additive report response. No new customer text grants tools or permissions.
+
+An admin can grant 1–100 additional analyses until the next UTC midnight through
+`analysis_allowance`. This replaces the day's extra allowance rather than stacking
+grants, preserves atomic reservations, minute/workspace limits and monetary
+budgets, and records the operator and expiry in the audit log.
 
 ## Setup
 

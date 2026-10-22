@@ -1,5 +1,14 @@
 # Native parity ledger
 
+## 2026-10-22 · Problem correlation and future-only Slack intake
+
+- Backend/Slack only: cross-thread issue links, burst batching, compact memory,
+  incremental reply watches, scoped runner deltas and renewed scope approval.
+- Additive local-agent report fields preserve older runner payloads; pending
+  deltas prevent unverified completion. Frozen mobile v1 routes are unchanged.
+- Migration 0075 adds only isolated ticket tables and indexes. No native screen,
+  mobile binary, auth change, or OTA release is part of this update.
+
 ## 2026-10-22 · Slack-operated customer tickets and durable intake
 
 - Web/Slack only: source-first, model-based recommendations classify bug fixes,

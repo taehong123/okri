@@ -68,5 +68,12 @@
     "rollbackPlan": "Keep the new schema and every request/receipt row on application rollback. Pause ticket automation while running an older application version; restore compatible code before resuming. Do not run destructive down-migrations.",
     "dataPreservation": "The migrator executes one transaction with foreign keys enabled. Both request and outbox copies are populated before the old child and parent tables are replaced. Row IDs, delivery states and message timestamps survive; replacement uniqueness allows independent issues and rejects orphan deliveries. Legacy-data and foreign-key fixtures verify this behavior.",
     "reviewedBy": "Codex source-bound SQLite migration and native-contract review, 2026-10-22"
+  },
+  "drizzle/0075_ticket_problem_followups.sql": {
+    "sha256": "dbdf7ed2159973a397558984f3669dd767a65c653e0be787179045c8e5de6aca",
+    "v1Compatibility": "Adds isolated ticket source links, problem deltas and customer-channel analysis leases. Frozen mobile v1 payloads, auth and item semantics are unchanged.",
+    "rollbackPlan": "Pause ticket automation on code rollback and retain all additive tables and pending deltas for a forward fix.",
+    "dataPreservation": "Only new tables and indexes are added. Existing requests, jobs, sources, native records and customer data are preserved.",
+    "reviewedBy": "Codex ticket correlation and installed-client compatibility review, 2026-10-22"
   }
 }

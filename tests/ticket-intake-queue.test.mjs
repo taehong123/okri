@@ -5,9 +5,11 @@ import test from 'node:test';
 import {compileLanguageModule as compile} from './helpers/language-fixture.mjs';
 const read=p=>readFile(new URL(`../${p}`,import.meta.url),'utf8');
 const source=await read('lib/ticket-intake-queue.ts'),migration=await read('drizzle/0074_ticket_intake_coverage.sql'),policy=compile(await read('lib/ticket-policy.ts'));
+const problemMigration=await read('drizzle/0075_ticket_problem_followups.sql');
 function fixture(t,options={}){
-  const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("PRAGMA foreign_keys=ON;CREATE TABLE workspaces(id TEXT PRIMARY KEY);INSERT INTO workspaces VALUES('w1'),('w2');CREATE TABLE ticket_automation_settings(owner_id TEXT,team_id TEXT,config_json TEXT,enabled INTEGER);CREATE TABLE ticket_automation_audit(id TEXT,owner_id TEXT,actor_user_id TEXT,action TEXT,details_json TEXT,created_at TEXT);");db.exec(migration.slice(migration.indexOf('CREATE TABLE ticket_intake_messages')));
+  const db=new DatabaseSync(':memory:');t.after(()=>db.close());db.exec("PRAGMA foreign_keys=ON;CREATE TABLE workspaces(id TEXT PRIMARY KEY);INSERT INTO workspaces VALUES('w1'),('w2');CREATE TABLE ticket_automation_settings(owner_id TEXT,team_id TEXT,config_json TEXT,enabled INTEGER);CREATE TABLE ticket_automation_audit(id TEXT,owner_id TEXT,actor_user_id TEXT,action TEXT,details_json TEXT,created_at TEXT);");db.exec(migration.slice(migration.indexOf('CREATE TABLE ticket_intake_messages')));db.exec(problemMigration);
   const config={channels:[{id:'C1',name:'customer-one',enabled:true,autoApprove:'manual'}],destination:'CMGMT'};db.prepare('INSERT INTO ticket_automation_settings VALUES(?,?,?,1)').run('w1','T1',JSON.stringify(config));
+  db.exec('CREATE TABLE ticket_automation_requests(id TEXT PRIMARY KEY,owner_id TEXT,state TEXT);CREATE TABLE local_agent_jobs(id TEXT PRIMARY KEY);');
   const statement=(sql,args=[])=>({bind:(...v)=>statement(sql,v),first:async()=>db.prepare(sql).get(...args)||null,all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:{changes:Number(db.prepare(sql).run(...args).changes)}})});
   let failure=options.failure,modelCalls=0;const slackCalls=[],events=[];
   const connection={ownerId:'w1',teamId:'T1',botUserId:'UBOT'};
@@ -20,6 +22,20 @@ test('a durable receipt exists before analysis, duplicate webhook/history copies
   const f=fixture(t),id=await f.service.captureTicketMessage(f.connection,f.event);assert.equal(f.modelCalls,0);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages').get().state,'pending');
   await f.service.captureTicketMessage(f.connection,{...f.event,recovery:true,threadTs:f.event.ts});assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,1);
   await Promise.all([f.service.processTicketReceipt(id),f.service.processTicketReceipt(id)]);assert.equal(f.modelCalls,1);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages').get().state,'analyzed');
+});
+test('future-only activation excludes the past, batches short cross-thread messages, and filters history reads',async t=>{
+  const f=fixture(t);f.config.intakeStartAt=new Date(Date.now()-60000).toISOString();f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
+  assert.equal(await f.service.captureTicketMessage(f.connection,f.event),null);
+  const ts=String(Date.now()/1000),first=await f.service.captureTicketMessage(f.connection,{...f.event,ts}),second=await f.service.captureTicketMessage(f.connection,{...f.event,ts:String(Number(ts)+0.0001),text:'같은 문제의 구체적인 상품명입니다.'});
+  await f.service.processTicketReceipt(first);assert.equal(f.modelCalls,0,'burst debounce must finish first');
+  f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");await f.service.processTicketReceipt(first);assert.equal(f.modelCalls,1);assert.equal(f.events[0].batchEvents.length,2);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages WHERE id=?').get(second).state,'analyzed');
+  await f.service.reconcileTicketIntake();assert.equal(f.slackCalls.find(c=>c.method==='conversations.history').body.oldest,String(Date.parse(f.config.intakeStartAt)/1000));
+});
+test('explicit single import is admin-only, channel-scoped and does not reset future-only settings',async t=>{
+  const f=fixture(t),a={ownerId:'w1',userId:'u1',role:'owner',apiToken:false};
+  await assert.rejects(f.service.importTicketSource({...a,role:'member'},'https://app.slack.com/archives/C1/p1792641620306119'));
+  const id=await f.service.importTicketSource(a,'https://app.slack.com/archives/C1/p1792641620306119');const row=f.db.prepare('SELECT event_json FROM ticket_intake_messages WHERE id=?').get(id);assert.equal(JSON.parse(row.event_json).operatorImport,true);
+  await assert.rejects(f.service.importTicketSource(a,'https://app.slack.com/archives/COTHER/p1792641620306119'));assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_intake_messages').get().n,1);
 });
 test('model failure and an abandoned processing lease remain visible and are retried',async t=>{
   const f=fixture(t,{failure:true}),id=await f.service.captureTicketMessage(f.connection,f.event);await f.service.processTicketReceipt(id);let r=f.db.prepare('SELECT * FROM ticket_intake_messages').get();assert.equal(r.state,'retry');assert.equal(r.last_error,'analysis_retry_required');assert.equal(r.attempts,1);

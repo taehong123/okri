@@ -1,7 +1,7 @@
 import { authorizeRequest } from "@/lib/pace-data";
 import {waitUntil} from 'cloudflare:workers';
-import {requestTicketReconciliation,runTicketIntake,ticketIntakeStatus} from '@/lib/ticket-intake-queue';
-import { bindTicketPort, changeTicketRequest, createTicketPorts, getTicketAutomation, pairTicketPort, pairOwnTicketPorts, saveTicketAutomation, saveTicketProduct, ticketRequesterOptions, TicketAutomationError } from "@/lib/ticket-automation";
+import {requestTicketReconciliation,runTicketIntake,ticketIntakeStatus,importTicketSource,processTicketReceipt} from '@/lib/ticket-intake-queue';
+import { bindTicketPort, changeTicketRequest, createTicketPorts, getTicketAutomation, pairTicketPort, pairOwnTicketPorts, saveTicketAutomation, saveTicketProduct, ticketRequesterOptions, TicketAutomationError,grantTicketAnalysisAllowance } from "@/lib/ticket-automation";
 const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {
   const a = await authorizeRequest(request, { allowViewerWrite: true }); if (a instanceof Response) return a;
@@ -19,6 +19,11 @@ export async function POST(request: Request) {
     const raw = await request.text(); if (raw.length > 100000) throw new TicketAutomationError("요청이 너무 큽니다.", 413);
     const p = JSON.parse(raw) as Record<string, unknown>;
     if (!p || typeof p !== "object" || Array.isArray(p)) throw new TicketAutomationError("요청을 확인해 주세요.");
+    if(p.operation==='import_source'){
+      const id=await importTicketSource(a,String(p.url||''));waitUntil(processTicketReceipt(id));
+      return Response.json({receiptId:id},{headers});
+    }
+    if(p.operation==='analysis_allowance')return Response.json(await grantTicketAnalysisAllowance(a,p.extra),{headers});
     if(p.operation==='reconcile'){
       await requestTicketReconciliation(a,typeof p.id==='string'?p.id:undefined);
       waitUntil(runTicketIntake().catch(()=>undefined));
