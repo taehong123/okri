@@ -1,5 +1,12 @@
 # Native parity ledger
 
+## 2026-10-22 · Slack approval assignment repair
+
+- Backend/Slack only: unassigned approvals open the existing assignment modal,
+  retain automatic port selection and require a fresh approval after saving.
+- Validation errors show their specific safe message. No mobile v1 payload,
+  schema, native screen or store release changes.
+
 ## 2026-10-22 · Problem correlation and future-only Slack intake
 
 - Backend/Slack only: cross-thread issue links, burst batching, compact memory,

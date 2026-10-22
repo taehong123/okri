@@ -20,7 +20,7 @@ const one = <T>(sql: string, ...args: unknown[]) => env.DB.prepare(sql).bind(...
 const run = (sql: string, ...args: unknown[]) => env.DB.prepare(sql).bind(...args).run();
 async function updateTicketRevision(sql:string,...args:unknown[]) {const result=await run(sql,...args);if(!result.meta.changes)fail("내용이 변경되었습니다. 다시 확인해 주세요.",409);return result;}
 const text = (v: unknown, max = 4000) => typeof v === "string" ? v.trim().slice(0, max) : "";
-export class TicketAutomationError extends Error { constructor(message: string, public status = 400) { super(message); } }
+export class TicketAutomationError extends Error { constructor(message: string, public status = 400) { super(message); this.name='TicketAutomationError'; } }
 function fail(message: string, status = 400): never { throw new TicketAutomationError(message, status); }
 function config(row: Settings): TicketAutomationConfig { return JSON.parse(row.config_json); }
 function admin(a: RequestAuthorization) { if (a.apiToken || !canManageTeam(a)) fail("관리자 계정에서 설정해 주세요.", 403); }
@@ -507,6 +507,7 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     if(force && (p.acknowledged!==true || overrideReason.length<5 || redactTicketText(overrideReason)!==overrideReason))fail("경고를 확인하고 비밀정보 없이 사유를 5자 이상 남겨 주세요.");
     const s = await settings(a.ownerId); if (!s?.enabled) fail("티켓 자동화를 먼저 켜 주세요.");
     if (!config(s).channels.some(c => c.id === r.source_channel && c.enabled)) fail("고객 채널 연결을 확인해 주세요.");
+    if(!r.member_id)fail('담당자를 먼저 지정해 주세요. 실행 포트는 자동 배정할 수 있습니다.');
     const source = await readSource(a.ownerId, r.source_channel, r.source_ts, r.source_user);
     if (source.hash !== r.source_digest || assessTicketText(source.raw).risk === "blocked"||!await linkedSourcesCurrent(r)) {
       await updateTicketRevision("UPDATE ticket_automation_requests SET state='blocked',risk='blocked',reasons_json=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?", JSON.stringify(["원문 변경 또는 보안 검증 실패: 원문을 확인하고 새 요청으로 검토해 주세요."]), time, r.id, a.ownerId, r.revision);
@@ -584,7 +585,7 @@ async function queueTicketMessage(owner: string, id: string, kind: string, chann
   const r = await one<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?", id, owner);
   if(r)await ticketMessageStatement(r,kind,channel,thread,body).run();
 }
-type MessageTicket=Pick<TicketAutomationRequest,'id'|'owner_id'|'state'|'revision'|'category'>;
+type MessageTicket=Pick<TicketAutomationRequest,'id'|'owner_id'|'state'|'revision'|'category'>&{member_id?:string|null};
 function ticketMessagePayload(r:MessageTicket,kind:string,body:string){
   const id=r.id;
   const action = r?.state === "recommended" ? "create" : r?.state === "created" ? "approve" : r?.state === "review" ? "publish" : null;
@@ -592,7 +593,7 @@ function ticketMessagePayload(r:MessageTicket,kind:string,body:string){
   for(let offset=0;offset<safe.length;offset+=2800)blocks.push({type:'section',text:{type:kind==='source'?'plain_text':'mrkdwn',text:safe.slice(offset,offset+2800)}});
   if(kind!=='source'&&!kind.startsWith('completion:'))blocks.push({type:'context',elements:[{type:'mrkdwn',text:`<${publicUrl()}/?view=tickets&ticketAutomation=1&request=${encodeURIComponent(id)}|OKRI에서 보기>`}]});
   if (r && kind!=='source' && !kind.startsWith("completion:")) blocks.push({ type: "actions", elements: [
-    ...(action ? [{ type: "button", text: { type: "plain_text", text: action === "create" ? "티켓 생성" : action === "approve" ? r.category==='guidance'?'안내문 검토':'개발 승인' : "완료 안내 공유 승인" }, action_id: `ticket_auto_${action}`, value: `${id}:${r.revision}` }] : []),
+    ...(action ? [{ type: "button", text: { type: "plain_text", text: action === "create" ? "티켓 생성" : action === "approve" ? !r.member_id?'담당자 지정 후 승인':r.category==='guidance'?'안내문 검토':'개발 승인' : "완료 안내 공유 승인" }, action_id: `ticket_auto_${action}`, value: `${id}:${r.revision}` }] : []),
     { type: "button", text: { type: "plain_text", text: r.state==='review'?'완료 안내 수정':'내용·담당자·포트 수정' },action_id:'ticket_auto_edit',value:`${id}:${r.revision}` },
     ...(['recommended','created','blocked','failed','security_review'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'원문 다시 분석'},action_id:'ticket_auto_refresh_source',value:`${id}:${r.revision}`}]:[]),
     ...(['queued','running','waiting_answer'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'실행 중지'},action_id:'ticket_auto_stop',value:`${id}:${r.revision}`}]:[]),
