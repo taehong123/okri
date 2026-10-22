@@ -46,11 +46,15 @@ export async function POST(request: Request) {
   }
   const ticketAction = payload.actions?.find(action => action.action_id?.startsWith("ticket_auto_"));
   const queueAction=payload.actions?.find(action=>action.action_id?.startsWith('ticket_queue_'));
+  if(payload.type==='view_submission'&&payload.view?.callback_id==='ticket_queue'){
+    try{return Response.json(await(await import('@/lib/ticket-slack-queue')).submitTicketSlackQueue(payload.team?.id||'',payload.user?.id||'',payload.view.private_metadata||'{}',payload.view.state?.values));}
+    catch{return Response.json({response_action:'errors',errors:{ticket_queue_query:'검색하지 못했습니다. 계정 연결과 최신 상태를 확인해 주세요.'}});}
+  }
   if(payload.type==='block_actions'&&queueAction&&payload.team?.id&&payload.user?.id){
     waitUntil(import('@/lib/ticket-slack-queue').then(async({openTicketSlackQueue,updateTicketSlackQueue})=>{
       if(queueAction.action_id==='ticket_queue_open'&&payload.trigger_id)await openTicketSlackQueue(payload.team!.id!,payload.user!.id!,payload.trigger_id);
       else if(payload.view?.id)await updateTicketSlackQueue(payload.team!.id!,payload.user!.id!,payload.view.id,queueAction.value||payload.view.private_metadata||'{}',queueAction.action_id||'',payload.view.state?.values);
-    }).catch(()=>undefined));return new Response(null,{status:200});
+    }).catch(error=>{const code=error&&typeof error.code==='string'&&/^[a-z_]+$/.test(error.code)?error.code:'unavailable';console.error('Slack ticket queue unavailable',{code});}));return new Response(null,{status:200});
   }
   if((payload.type==='block_suggestion'&&payload.action_id?.startsWith('ta_'))||(payload.type==='view_submission'&&payload.view?.callback_id==='ticket_edit_submit')){
     const {ticketSlackEditorOptions,submitTicketSlackEditor}=await import('@/lib/ticket-slack-editor');

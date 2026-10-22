@@ -55,14 +55,16 @@ export async function ticketSlackEditorOptions(team:string,user:string,value:str
   const state=rawState as State;
   const {a,r}=await actor(team,user,value),q=query.toLocaleLowerCase();
   let options:Option[]=[];
-  const pair=scalar(state,'ta_repository')||`${r.product_id||''}:${r.repository_id||''}`,[product,repository]=pair.split(':');
+  // Slack suggestions may omit the other unsaved inputs. Show labeled workspace
+  // candidates in that case; changeTicketRequest still validates the final tuple.
+  const pair=scalar(state,'ta_repository'),[product='',repository='']=pair.split(':');
   if(action==='ta_member')options=[option('','미지정'),...(await rows<{id:string;display_name:string}>("SELECT id,display_name FROM workspace_members WHERE workspace_id=? AND status='active' AND user_id IS NOT NULL ORDER BY display_name",a.ownerId)).map(v=>option(v.id,v.display_name))];
   if(action==='ta_repository')options=[option('','미지정'),...(await rows<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=? ORDER BY name',a.ownerId)).flatMap(p=>(JSON.parse(p.repositories_json) as TicketRepository[]).map(repo=>option(`${p.id}:${repo.id}`,`${p.name} / ${repo.name}`)))];
   if(action==='ta_port'){
-    const member=state.ta_member?scalar(state,'ta_member'):r.member_id||'';
-    options=[option('','자동 배정'),...(await rows<{id:string;name:string;computer_label:string}>('SELECT id,name,computer_label FROM ticket_execution_ports WHERE owner_id=? AND member_id=? AND product_id=? AND repository_id=? AND enabled=1 ORDER BY name',a.ownerId,member,product,repository)).map(p=>option(p.id,`${p.name} · ${p.computer_label}`))];
+    const member=scalar(state,'ta_member');
+    options=[option('','자동 배정'),...(await rows<{id:string;name:string;computer_label:string;member_name:string;product_name:string}>("SELECT p.id,p.name,p.computer_label,m.display_name AS member_name,d.name AS product_name FROM ticket_execution_ports p JOIN workspace_members m ON m.id=p.member_id AND m.workspace_id=p.owner_id JOIN ticket_development_products d ON d.id=p.product_id AND d.owner_id=p.owner_id WHERE p.owner_id=? AND p.enabled=1 AND m.status='active' AND (?='' OR p.member_id=?) AND (?='' OR (p.product_id=? AND p.repository_id=?)) ORDER BY p.name",a.ownerId,member,member,product,product,repository)).map(p=>option(p.id,`${p.name} · ${p.computer_label} · ${p.member_name} · ${p.product_name}`))];
   }
-  if(action==='ta_dependencies')options=(await rows<{id:string;title:string}>("SELECT id,title FROM ticket_automation_requests WHERE owner_id=? AND product_id=? AND repository_id=? AND id<>? AND state<>'dismissed' ORDER BY created_at DESC",a.ownerId,product,repository,r.id)).map(v=>option(v.id,v.title));
+  if(action==='ta_dependencies')options=(await rows<{id:string;title:string}>("SELECT id,title FROM ticket_automation_requests WHERE owner_id=? AND (?='' OR (product_id=? AND repository_id=?)) AND id<>? AND state<>'dismissed' ORDER BY created_at DESC",a.ownerId,product,product,repository,r.id)).map(v=>option(v.id,v.title));
   return {options:options.filter(v=>v.value==='_'||v.text.text.toLocaleLowerCase().includes(q)).slice(0,100)};
 }
 export async function submitTicketSlackEditor(team:string,user:string,value:string,rawState:Record<string,Record<string,Record<string,unknown>>>){

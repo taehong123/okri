@@ -21,6 +21,9 @@ completion wording and exact-text sharing also remain in Slack. These operations
 write the same workspace-scoped request and revision used by OKRI.
 Set the Slack app's Options Load URL to `/api/slack/interactions` for dynamic
 member, repository, slot and dependency searches. Existing bot/user scopes suffice.
+When Slack omits unsaved modal inputs from a search request, slots are labeled
+with their PC, assignee and product across the current workspace. Saving still
+requires the selected assignee, product, repository and slot to match.
 
 Customer events are committed before Slack is acknowledged. Versioned message
 receipts, expiring processing leases and retries survive failed analysis or
