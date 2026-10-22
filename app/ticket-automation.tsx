@@ -6,31 +6,36 @@ import { TICKET_STATE_LABELS,TICKET_PRIORITIES,TICKET_PRIORITY_LABELS,type Ticke
 import { ticketPortInstructions, ticketPortsInstructions } from "@/lib/ticket-port-setup";
 import type { TicketAutomationConfig, TicketAutomationRequest, TicketChannelRule,TicketDevelopmentProduct,TicketRepository } from "@/lib/ticket-automation";
 import TicketProductSettings from './ticket-product-settings';
+import TicketIntakeStatusView from './ticket-intake-status';
+import type {TicketIntakeStatus} from '@/lib/ticket-intake-queue';
+import {TICKET_CATEGORIES,TICKET_CATEGORY_LABELS,type TicketCategory} from '@/lib/ticket-recommendation';
 import "./ticket-automation.css";
 type Port = { id: string; member_id: string; name: string; device_id: string | null; enabled: number; online?:boolean; last_seen_at: string | null; model?: string; models_json?: string; channel_ids_json?: string;computer_label?:string;product_id?:string|null;repository_id?:string };
-type Data = { products?:TicketDevelopmentProduct[]; settings: TicketAutomationConfig & { enabled: boolean }; requests: TicketAutomationRequest[]; ports: Port[]; members: { id: string; display_name: string; user_id: string }[]; devices: { id: string; name: string }[]; deliveries?: { id: string; request_id: string; state: string }[]; securityLog?:{id:string;request_id:string;actor_user_id:string;action:string;created_at:string}[]; missingScopes?:string[]; canManage: boolean; userId: string };
+type Data = { intake?:TicketIntakeStatus;requestPage?:{total:number;offset:number;hasMore:boolean};products?:TicketDevelopmentProduct[]; settings: TicketAutomationConfig & { enabled: boolean }; requests: TicketAutomationRequest[]; ports: Port[]; members: { id: string; display_name: string; user_id: string }[]; devices: { id: string; name: string }[]; deliveries?: { id: string; request_id: string; state: string }[]; securityLog?:{id:string;request_id:string;actor_user_id:string;action:string;created_at:string}[]; missingScopes?:string[]; canManage: boolean; userId: string };
 const empty: Data = { settings: { enabled: false, destination: "", prefix: "고객-", channels: [], actorUserId: "", notificationsAuthorized: false }, requests: [], ports: [], members: [], devices: [], canManage: false, userId: "" };
 type PairingSlot={name:string;code:string;expiresAt:string;channels?:string[];computerLabel?:string;product?:TicketDevelopmentProduct;repository?:TicketRepository};
 function setupSlot(slot:PairingSlot){return {name:slot.name,code:slot.code,expiresAt:slot.expiresAt,channels:slot.channels,computerLabel:slot.computerLabel,repository:slot.repository,product:slot.product?{name:slot.product.name,revision:slot.product.revision,specification:slot.product.specification,setupInstructions:slot.product.setup_instructions}:undefined};}
-async function request(body?: Record<string, unknown>) {
-  const response = await fetch("/api/ticket-automation", body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
+async function request(body?: Record<string, unknown>,query="") {
+  const response = await fetch("/api/ticket-automation"+query, body ? { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) } : { cache: "no-store" });
   const data = await response.json() as Data & { error?: string }; if (!response.ok) throw new Error(data.error || t("요청을 처리하지 못했습니다.")); return data;
 }
 export default function TicketAutomation({ workspaceId }: { workspaceId: string }) {
   const [data, setData] = useState<Data>(empty), [settings, setSettings] = useState(empty.settings);
-  const [error, setError] = useState(""), [busy, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [section, setSection] = useState<"queue" | "ports" | "settings"|"products"|"releases">("queue");
+  const [error, setError] = useState(""), [busy, setBusy] = useState(false), [loaded, setLoaded] = useState(false), [section, setSection] = useState<"queue" | "ports" | "settings"|"products"|"releases"|"intake">("queue");
+  const [categoryFilter,setCategoryFilter]=useState("all");
   const [filter, setFilter] = useState("all"), [selected, setSelected] = useState<string | null>(()=>typeof window==='undefined'?null:new URLSearchParams(window.location.search).get('request'));
   const [channels, setChannels] = useState<{ id: string; name: string; isMember: boolean }[]>([]);
   const refresh = useCallback(async () => { try { const value = await request(); setData(value); setSettings(value.settings); setError(""); } catch(e) { setError(e instanceof Error ? e.message : t("불러오지 못했습니다.")); } finally { setLoaded(true); } }, []);
   useEffect(() => {
     let current=true;
-    request().then(value=>{if(current){setData(value);setSettings(value.settings);setError("");}}).catch(e=>{if(current)setError(e instanceof Error?e.message:t("불러오지 못했습니다."));}).finally(()=>{if(current)setLoaded(true);});
+    const requestId=new URLSearchParams(window.location.search).get("request");
+    request(undefined,requestId?`?request=${encodeURIComponent(requestId)}`:"").then(value=>{if(current){setData(value);setSettings(value.settings);setError("");}}).catch(e=>{if(current)setError(e instanceof Error?e.message:t("불러오지 못했습니다."));}).finally(()=>{if(current)setLoaded(true);});
     return()=>{current=false;};
   }, [workspaceId]);
   async function mutate(body: Record<string, unknown>) {
     setBusy(true); setError(""); try { const result = await request(body); if (result.requests) { setData(result); setSettings(result.settings); } return result; } catch(e) { setError(e instanceof Error ? e.message : t("요청을 처리하지 못했습니다.")); return null; } finally { setBusy(false); }
   }
-  const visible = data.requests.filter(r => filter === "all" ? !["published", "dismissed"].includes(r.state) : filter === "unassigned" ? !r.member_id && !["published", "dismissed"].includes(r.state) : filter === "approval" ? Boolean(r.member_id) && ["recommended", "created"].includes(r.state) : filter === "sharing" ? r.state === "review" : r.state === filter);
+  const visible = data.requests.filter(r => filter === "all" ? true : filter === "unassigned" ? !r.member_id && !["published", "dismissed"].includes(r.state) : filter === "approval" ? Boolean(r.member_id) && ["recommended", "created"].includes(r.state) : filter === "sharing" ? r.state === "review" : r.state === filter).filter(r=>categoryFilter==="all"||r.category===categoryFilter);
   const active = data.requests.find(r => r.id === selected);
   const availableModels = [...new Set(data.ports.flatMap(p=>JSON.parse(p.models_json || "[]") as string[]))];
   async function loadChannels() {
@@ -38,18 +43,20 @@ export default function TicketAutomation({ workspaceId }: { workspaceId: string 
   }
   return <section className="ticket-automation" aria-label={t("티켓 자동화")} aria-busy={busy}>
     <div className="ticket-automation-toolbar"><div role="group" aria-label={t("자동화 화면")}>
-      {(["queue", "ports", "products","releases","settings"] as const).map(key => <button type="button" className="secondary" key={key} aria-pressed={section===key} onClick={() => setSection(key)}>{t(key === "queue" ? "처리 현황" : key === "ports" ? "실행 포트" : key==='products'?'제품·저장소':key==='releases'?'배포 순서':"채널 설정")}</button>)}
+      {(["queue", "intake", "ports", "products","releases","settings"] as const).map(key => <button type="button" className="secondary" key={key} aria-pressed={section===key} onClick={() => setSection(key)}>{t(key === "queue" ? "처리 현황" : key === "ports" ? "실행 포트" : key==='products'?'제품·저장소':key==='releases'?'배포 순서':key==='intake'?'수집 점검':"채널 설정")}</button>)}
     </div><button type="button" className="secondary" disabled={busy} onClick={() => void refresh()}><RefreshCw size={14}/>{t("새로고침")}</button></div>
     {error && <p role="alert">{error}</p>}
     {Boolean(data.deliveries?.length) && <p role="alert">{t("Slack 전송 결과 확인 필요")}: {data.deliveries!.length}</p>}
-    {!loaded ? <p role="status">{t("불러오는 중입니다.")}</p> : section === "queue" ? <>
+    {!loaded ? <p role="status">{t("불러오는 중입니다.")}</p> : section === "intake" ? <TicketIntakeStatusView value={data.intake} channels={settings.channels} canManage={data.canManage} onRetry={id=>mutate({operation:"reconcile",...(id?{id}:{})})}/> : section === "queue" ? <>
+      <label>{t("티켓 분류")}<select value={categoryFilter} onChange={e=>setCategoryFilter(e.target.value)}><option value="all">{t("전체")}</option>{TICKET_CATEGORIES.map(c=><option key={c} value={c}>{t(TICKET_CATEGORY_LABELS[c])}</option>)}</select></label>
       <div className="ticket-queue-filters" role="group" aria-label={t("대기 상태")}>
         {[["all", "전체"], ["unassigned", "담당자 미지정"], ["approval", "승인 대기"], ["sharing", "완료 공유 대기"], ["waiting_answer", "답변 대기"], ["security_review", "보안 경고 검토"], ["blocked", "보안 차단"]].map(([value,label]) => <button type="button" key={value} className="secondary" aria-pressed={filter===value} onClick={() => setFilter(value)}>{t(label)}</button>)}
       </div>
       {!visible.length ? <p className="ticket-automation-empty">{t("해당 상태의 티켓 요청이 없습니다.")}</p> : <div className="ticket-request-list">{visible.map(r => <button className="ticket-request-row" key={r.id} onClick={() => setSelected(selected===r.id ? null : r.id)} aria-expanded={selected===r.id}>
-        <span><strong>{r.title}</strong><small>{t(TICKET_PRIORITY_LABELS[r.priority]||'보통')} · {data.products?.find(p=>p.id===r.product_id)?.name||t('제품 미지정')} · {settings.channels.find(c=>c.id===r.source_channel)?.name || r.source_channel}</small></span>
+        <span><strong>{r.title}</strong><small>{t(TICKET_CATEGORY_LABELS[r.category]||'분류 검토')} · {t(TICKET_PRIORITY_LABELS[r.priority]||'보통')} · {data.products?.find(p=>p.id===r.product_id)?.name||t('제품 미지정')} · {settings.channels.find(c=>c.id===r.source_channel)?.name || r.source_channel}</small></span>
         <span>{t(TICKET_STATE_LABELS[r.state])}</span><span>{data.members.find(m=>m.id===r.member_id)?.display_name || t("담당자 미지정")}</span><span>{data.ports.find(p=>p.id===r.port_id)?.name || t("포트 미지정")}</span>
       </button>)}</div>}
+      {data.requestPage&&<div className="ticket-fields"><span>{data.requests.length} / {data.requestPage.total}</span>{data.requestPage.hasMore&&<button type="button" className="secondary" disabled={busy} onClick={async()=>{setBusy(true);try{const next=await request(undefined,`?offset=${data.requestPage!.offset+200}`);setData({...next,requests:[...data.requests,...next.requests.filter(r=>!data.requests.some(v=>v.id===r.id))]});}catch{setError(t("다음 티켓을 불러오지 못했습니다."));}finally{setBusy(false);}}}>{t("티켓 더 불러오기")}</button>}</div>}
       {active && <TicketRequestEditor key={`${active.id}:${active.revision}`} value={active} data={data} busy={busy} onAction={async p => { const result = await mutate({ operation: "request", id: active.id, revision: active.revision, ...p }); return Boolean(result); }}/>}
       <details><summary>{t("보안·처리 이력")}</summary><ol>{data.securityLog?.map(log=><li key={log.id}><time>{new Date(log.created_at).toLocaleString()}</time> · {log.action} · {data.members.find(m=>m.user_id===log.actor_user_id)?.display_name||log.actor_user_id}{log.request_id&&<> · {data.requests.find(r=>r.id===log.request_id)?.title||log.request_id}</>}</li>)}</ol></details>
     </> : section === "ports" ? <TicketPorts data={data} busy={busy} onMutate={mutate}/> : section==='products'?<TicketProductSettings products={data.products||[]} busy={busy} canManage={data.canManage} onSave={mutate}/>:section==='releases'?<TicketReleaseQueue data={data} busy={busy} onMutate={mutate}/>:<form onSubmit={async e => {e.preventDefault(); await mutate({operation:"settings",...settings});}}>
@@ -130,17 +137,20 @@ function ReleaseConfirmation({disabled,onConfirm}:{disabled:boolean;onConfirm:(c
 }
 function TicketRequestEditor({value:r,data,busy,onAction}:{value:TicketAutomationRequest;data:Data;busy:boolean;onAction:(p:Record<string,unknown>)=>Promise<boolean>}) {
   const [title,setTitle]=useState(r.title),[description,setDescription]=useState(r.description),[memberId,setMember]=useState(r.member_id??""),[portId,setPort]=useState(r.port_id??""),[notice,setNotice]=useState(r.notice),[answer,setAnswer]=useState("");
+  const [category,setCategory]=useState<TicketCategory>(r.category||"improvement");
   const [priority,setPriority]=useState<TicketPriority>(r.priority||'medium'),[productId,setProduct]=useState(r.product_id||''),[repositoryId,setRepository]=useState(r.repository_id||''),[dependencies,setDependencies]=useState<string[]>(JSON.parse(r.dependencies_json||'[]'));
-  const editable=["recommended","created"].includes(r.state),dirty=title!==r.title||description!==r.description||memberId!==(r.member_id??"")||portId!==(r.port_id??"")||priority!==(r.priority||'medium')||productId!==(r.product_id||'')||repositoryId!==(r.repository_id||'')||JSON.stringify(dependencies)!==JSON.stringify(JSON.parse(r.dependencies_json||'[]'));
+  const editable=["recommended","created"].includes(r.state),dirty=category!==(r.category||"improvement")||title!==r.title||description!==r.description||memberId!==(r.member_id??"")||portId!==(r.port_id??"")||priority!==(r.priority||'medium')||productId!==(r.product_id||'')||repositoryId!==(r.repository_id||'')||JSON.stringify(dependencies)!==JSON.stringify(JSON.parse(r.dependencies_json||'[]'));
   const self=data.members.find(m=>m.user_id===data.userId),allowed=data.canManage||self?.id===r.member_id;
   return <section className="ticket-request-detail" aria-label={t("요청 검토")}><a href={`https://slack.com/archives/${r.source_channel}/p${r.source_ts.replace(".","")}`} target="_blank" rel="noreferrer"><ExternalLink size={14}/>{t("Slack 원문")}</a>
     {(r.risk==="blocked"||r.state==="blocked")&&<p role="alert">{t("보안 검증에서 차단된 요청입니다. 승인으로 우회할 수 없습니다.")}</p>}
+    <p>{t(TICKET_CATEGORY_LABELS[r.category]||"분류 검토")} · {t("추천 모델")}: {JSON.parse(r.analysis_json||"{}").model||t("분석 대기")}</p>
+    <details><summary>{t("고객 원문 대화")}</summary><p className="ticket-original-text">{r.source_text}</p></details>
     <fieldset disabled={busy||!allowed}><RequesterEditor value={r} onAction={onAction}/><label>{t("제목")}<input value={title} readOnly={!editable} onChange={e=>setTitle(e.target.value)}/></label><label>{t("요청 내용")}<textarea value={description} readOnly={!editable} rows={6} onChange={e=>setDescription(e.target.value)}/></label>
-    {editable&&<><div className="ticket-fields"><label>{t('우선순위')}<select value={priority} onChange={e=>setPriority(e.target.value as TicketPriority)}>{TICKET_PRIORITIES.map(p=><option key={p} value={p}>{t(TICKET_PRIORITY_LABELS[p])}</option>)}</select></label>
+    {editable&&<><div className="ticket-fields"><label>{t("분류")}<select value={category} onChange={e=>setCategory(e.target.value as TicketCategory)}>{TICKET_CATEGORIES.map(v=><option key={v} value={v}>{t(TICKET_CATEGORY_LABELS[v])}</option>)}</select></label><label>{t('우선순위')}<select value={priority} onChange={e=>setPriority(e.target.value as TicketPriority)}>{TICKET_PRIORITIES.map(p=><option key={p} value={p}>{t(TICKET_PRIORITY_LABELS[p])}</option>)}</select></label>
       <ProductSelection products={data.products||[]} productId={productId} repositoryId={repositoryId} onChange={(p,repo)=>{setProduct(p);setRepository(repo);setPort('');setDependencies([]);}}/>
       <label>{t("담당자")}<select value={memberId} onChange={e=>{setMember(e.target.value);setPort("");}}><option value="">{t("미지정")}</option>{data.members.map(m=><option key={m.id} value={m.id}>{m.display_name}</option>)}</select></label><label>{t("실행 포트")}<select value={portId} onChange={e=>setPort(e.target.value)}><option value="">{t("자동 배정")}</option>{data.ports.filter(p=>p.member_id===memberId&&p.product_id===productId&&p.repository_id===repositoryId).map(p=><option key={p.id} value={p.id}>{p.name} · {p.computer_label}</option>)}</select></label></div>
       <label>{t('선행 티켓')}<select multiple value={dependencies} onChange={e=>setDependencies(Array.from(e.target.selectedOptions,v=>v.value))}>{data.requests.filter(v=>v.id!==r.id&&v.product_id===productId&&v.repository_id===repositoryId&&v.state!=='dismissed').map(v=><option key={v.id} value={v.id}>{v.title}</option>)}</select></label>
-      <div className="ticket-fields"><button type="button" className="secondary" disabled={!dirty} onClick={()=>void onAction({action:"edit",title,description,memberId,portId,priority,productId,repositoryId,dependencies})}>{t("수정 저장")}</button><button className="primary-action" disabled={dirty||((!memberId||!productId||!repositoryId)&&r.state==="created")||r.risk==="blocked"} onClick={()=>void onAction({action:r.state==="recommended"?"create":"approve"})}><Check size={14}/>{t(r.state==="recommended"?"티켓 생성":"개발 승인")}</button></div></>}
+      <div className="ticket-fields"><button type="button" className="secondary" disabled={!dirty} onClick={()=>void onAction({action:"edit",category,title,description,memberId,portId,priority,productId,repositoryId,dependencies})}>{t("수정 저장")}</button><button className="primary-action" disabled={dirty||((!memberId||(category!=="guidance"&&(!productId||!repositoryId)))&&r.state==="created")||r.risk==="blocked"} onClick={()=>void onAction({action:r.state==="recommended"?"create":"approve"})}><Check size={14}/>{t(r.state==="recommended"?"티켓 생성":category==="guidance"?"안내문 검토":"개발 승인")}</button></div></>}
     {r.state==='queued'&&<button className="secondary" onClick={()=>void onAction({action:'reassign'})}>{t('배정 다시 검토')}</button>}
     {['queued','running','waiting_answer'].includes(r.state)&&<button className="secondary" onClick={()=>void onAction({action:'stop'})}>{t('실행 중지')}</button>}
     {r.state==='publishing'&&<><p>{t('승인한 완료 안내의 전송을 기다리고 있습니다.')}</p><button className="secondary" onClick={()=>void onAction({action:'cancel_publish'})}>{t('전송 전 취소하고 문안 수정')}</button></>}

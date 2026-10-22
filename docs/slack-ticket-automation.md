@@ -3,6 +3,41 @@
 Customer names, channels, assignees, execution slots and models are workspace
 configuration, never application constants.
 
+## Slack operation and intake coverage
+
+Use `/okri ticket [search]` or `!티켓관리` to operate the queue inside Slack.
+Source text is posted first; its thread contains separate proposals classified as
+bug fix, improvement, feature, or guidance. Each proposal states the customer's
+problem, proposed solution, observable acceptance criteria and open questions,
+and asks whether to proceed. Guidance never starts a development runner.
+The workspace default model also drives recommendation analysis; the unset
+recommendation default is `gpt-6.1-sol`. Provider/budget failures remain pending
+instead of silently switching models or discarding the original.
+
+Slack modals edit category, title, scope, priority, product/repository, assignee,
+slot, dependencies and completion requester. Buttons create and approve tickets;
+replies or modals answer questions. Warning acknowledgement, stop, reanalysis,
+completion wording and exact-text sharing also remain in Slack. These operations
+write the same workspace-scoped request and revision used by OKRI.
+Set the Slack app's Options Load URL to `/api/slack/interactions` for dynamic
+member, repository, slot and dependency searches. Existing bot/user scopes suffice.
+
+Customer events are committed before Slack is acknowledged. Versioned message
+receipts, expiring processing leases and retries survive failed analysis or
+process restarts. Full-history and old-thread reply scans paginate fairly across
+enabled channels with saved cursors. Each independent issue in a message is
+committed atomically with its source and recommendation outbox records. Recovery
+never automatically approves old work. Request lists and collection receipts are
+paginated rather than silently hidden behind the first 200 requests.
+
+The collection view reports per-channel history passes, pending replies, errors,
+pending analyses and exclusion reasons, with an operator review/retry action.
+Unapproved bots remain auditable without triggering analysis. Coverage extends to
+enabled channels the app can read and messages Slack still retains; inaccessible
+channels and incomplete reads never count as complete. Ambiguous Slack sends are
+matched by a stable correlation id; absence of confirmation never causes a blind
+resend. Native mobile APIs and existing records remain compatible.
+
 ## Setup
 
 1. Ticket → Ticket automation → Channel settings: load channels, select the

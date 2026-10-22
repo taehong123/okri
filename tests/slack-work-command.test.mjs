@@ -67,7 +67,7 @@ test("channel, private channel, DM and tagged multiline commands reach their for
   const events = await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8");
   for (const [type, channelType, prefix] of [["message", "channel", ""], ["message", "group", ""], ["message", "im", ""], ["message", "mpim", ""], ["message", undefined, ""], ["message", "channel", "<@UBOT> "], ["app_mention", "channel", "<@UBOT> "], ["app_mention", "group", "<@UBOT|OKRI> "]]) {
     const calls = [], pending = [], receipts = new Set();
-    const route = compile(events, {
+    const route = compile(events, {"@/lib/ticket-intake-queue":{captureTicketMessage:async()=>null,processTicketReceipt:async()=>{}},
       "cloudflare:workers": { env: { DB: { prepare: () => ({ bind: (id) => ({ run: async () => {
         const changes = receipts.has(id) ? 0 : 1;
         receipts.add(id);
@@ -296,7 +296,7 @@ test("a failed thread read is retryable without creating an item or caching an e
 test("production-shaped Ticket event reaches a durable button and source-filled modal with duplicate delivery suppressed", async () => {
   const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
   const f = commandFixture("!티켓생성\nCI 실행기 시작 지연 원인 확인\n저장소: https://github.com/example/service\n완료 기준: 필수 CI 성공", { domainSource, reply: true, historyDenied: true });
-  const route = compile(await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"), {
+  const route = compile(await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"), {"@/lib/ticket-intake-queue":{captureTicketMessage:async()=>null,processTicketReceipt:async()=>{}},
     "cloudflare:workers": f.runtime,
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => f.connection },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
@@ -364,7 +364,7 @@ test("Slack channel events, private responses, permissions, and request idempote
   assert.match(events, /const commandMessage = Boolean/);
   assert.match(events, /command: "work_create" as const/);
   assert.match(events, /ts: commandEvent\.ts/);
-  assert.ok(events.indexOf("const commandMessage") < events.indexOf("INSERT OR IGNORE INTO slack_event_receipts"));
+  assert.ok(events.indexOf("const commandMessage") < events.indexOf("INSERT OR IGNORE INTO slack_event_receipts (event_id"));
   assert.match(domain, /chat\.postEphemeral/);
   assert.match(domain, /prepareSlackWorkDraft/);
   assert.match(domain, /검토 후 생성/);

@@ -1,9 +1,15 @@
 import { authorizeRequest } from "@/lib/pace-data";
+import {waitUntil} from 'cloudflare:workers';
+import {requestTicketReconciliation,runTicketIntake,ticketIntakeStatus} from '@/lib/ticket-intake-queue';
 import { bindTicketPort, changeTicketRequest, createTicketPorts, getTicketAutomation, pairTicketPort, pairOwnTicketPorts, saveTicketAutomation, saveTicketProduct, ticketRequesterOptions, TicketAutomationError } from "@/lib/ticket-automation";
 const headers = { "Cache-Control": "private, no-store" };
 export async function GET(request: Request) {
   const a = await authorizeRequest(request, { allowViewerWrite: true }); if (a instanceof Response) return a;
-  try { return Response.json(await getTicketAutomation(a), { headers }); } catch (error) { return failure(error); }
+  try {
+    const p=new URL(request.url).searchParams;
+    if(p.has('intakeOffset'))return Response.json({intake:await ticketIntakeStatus(a.ownerId,{offset:Number(p.get('intakeOffset'))||0,state:p.get('intakeState')||''})},{headers});
+    return Response.json(await getTicketAutomation(a,{offset:Math.max(0,Number(p.get('offset'))||0),requestId:p.get('request')||undefined}), { headers });
+  } catch (error) { return failure(error); }
 }
 export async function POST(request: Request) {
   const a = await authorizeRequest(request); if (a instanceof Response) return a;
@@ -13,6 +19,11 @@ export async function POST(request: Request) {
     const raw = await request.text(); if (raw.length > 100000) throw new TicketAutomationError("요청이 너무 큽니다.", 413);
     const p = JSON.parse(raw) as Record<string, unknown>;
     if (!p || typeof p !== "object" || Array.isArray(p)) throw new TicketAutomationError("요청을 확인해 주세요.");
+    if(p.operation==='reconcile'){
+      await requestTicketReconciliation(a,typeof p.id==='string'?p.id:undefined);
+      waitUntil(runTicketIntake().catch(()=>undefined));
+      return Response.json(await getTicketAutomation(a),{headers});
+    }
     const result = p.operation === "product" ? await saveTicketProduct(a,p) : p.operation === "settings" ? await saveTicketAutomation(a, p) : p.operation === "ports" ? await createTicketPorts(a, p) : p.operation === "pair" ? await pairTicketPort(a, p) : p.operation === "pair_bulk" ? await pairOwnTicketPorts(a,p) : p.operation === "bind" ? await bindTicketPort(a, p) : p.operation === "requester_options" ? await ticketRequesterOptions(a, String(p.id||""),String(p.query||"").slice(0,80)) : p.operation === "request" ? await changeTicketRequest(a, p) : null;
     if (!result) throw new TicketAutomationError("지원하지 않는 작업입니다.");
     return Response.json(result, { headers });

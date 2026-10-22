@@ -12,6 +12,13 @@ const digest = s => createHash("sha256").update(s).digest("hex");
 test("native and store-feedback tables are created after the deployed 0062 migration and a second run preserves them", async t => {
   const db = new DatabaseSync(":memory:"); t.after(() => db.close());
   db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY);
+    CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+    CREATE TABLE workspace_members (id TEXT PRIMARY KEY);
+    CREATE TABLE items (id TEXT PRIMARY KEY);
+    CREATE TABLE local_agent_jobs (id TEXT PRIMARY KEY);
+    CREATE TABLE local_agent_devices (id TEXT PRIMARY KEY);
+    CREATE TABLE local_agent_pairings (id TEXT PRIMARY KEY);
+    CREATE TABLE workspace_backup_state (owner_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0);
     CREATE TABLE slack_connections (id TEXT PRIMARY KEY);
     CREATE TABLE daily_scrums (id TEXT PRIMARY KEY);
     CREATE TABLE daily_submissions (id TEXT PRIMARY KEY);
@@ -19,7 +26,12 @@ test("native and store-feedback tables are created after the deployed 0062 migra
   db.prepare("INSERT INTO __drizzle_migrations (hash,created_at) VALUES (?,?)").run("already-published-0062", 1789012386612);
   const statement = (sql, args = []) => ({
     bind: (...values) => statement(sql, values),
-    run: async () => ({ meta: { changes: Number(db.prepare(sql).run(...args).changes) } }),
+    // The self-host migrator executes historical multi-statement chunks in full.
+    // SQLite.prepare otherwise silently ignores their trailing statements.
+    run: async () => {
+      if(!args.length&&sql.split(';').filter(v=>v.trim()).length>1){db.exec(sql);return {meta:{changes:0}};}
+      return { meta: { changes: Number(db.prepare(sql).run(...args).changes) } };
+    },
     all: async () => ({ results: db.prepare(sql).all(...args) }),
     raw: async () => { const s = db.prepare(sql); s.setReturnArrays(true); return s.all(...args); },
   });

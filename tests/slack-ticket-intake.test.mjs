@@ -12,6 +12,7 @@ const { slackApi } = compile(transportSource);
 const parser = compile(await read("lib/slack-work-command-parser.ts"));
 const intakeSource = await read("lib/slack-work-intake.ts");
 const ticketSource = await read("lib/slack-ticket-intake.ts");
+const recommendation=compile(await read("lib/ticket-recommendation.ts"));
 
 function fixture(t, options = {}) {
   const requests = [], metering = [];
@@ -28,7 +29,7 @@ function fixture(t, options = {}) {
   const intake = compile(intakeSource, { "cloudflare:workers": { env: runtime }, "@/lib/billing": billing,
     "@/lib/language-preferences": language, "@/lib/pace-data": data, "@/lib/slack-daily": { slackApi },
     "@/lib/work-intake": {}, "@/lib/slack-mcp-context": {} });
-  const ticket = compile(ticketSource, { "cloudflare:workers": { env: runtime }, "@/lib/billing": billing,
+  const ticket = compile(ticketSource, { "@/lib/ticket-recommendation":recommendation, "cloudflare:workers": { env: runtime }, "@/lib/billing": billing,
     "@/lib/language-preferences": language, "@/lib/pace-data": data, "@/lib/slack-work-command-parser": parser,
     "@/lib/slack-work-intake": intake });
   const original = globalThis.fetch;

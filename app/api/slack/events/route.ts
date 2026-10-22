@@ -90,12 +90,29 @@ export async function POST(request: Request) {
   if (!eventId || !teamId) return new Response(null, { status: 200 });
   const connection = await getSlackConnectionByTeam(teamId);
   if (!connection) return new Response(null, { status: 200 });
+  if(event&&['message','app_mention'].includes(event.type||'')&&event.user&&event.channel&&!event.bot_id&&!event.subtype&&/^!\s*(?:티켓\s*관리|tickets?\s+manage)\s*$/iu.test(withoutBotMention(event.text||'',connection.botUserId))){
+    const receipt=await env.DB.prepare('INSERT OR IGNORE INTO slack_event_receipts(event_id,team_id,event_type,received_at) VALUES(?,?,?,?)').bind(`ticket_queue:${teamId}:${event.channel}:${event.ts}`,teamId,'ticket_queue',new Date().toISOString()).run();
+    if(receipt.meta.changes)waitUntil(import('@/lib/ticket-slack-queue').then(({postTicketSlackQueueEntry})=>postTicketSlackQueueEntry(teamId,event.user!,event.channel!)).catch(()=>undefined));return new Response(null,{status:200});
+  }
+  // Persist customer intake before acknowledging Slack. A remote/AI failure cannot lose the event.
+  const changed=event?.subtype==='message_changed'?(event as SlackEvent&{message?:SlackEvent}).message:undefined;
+  const intakeMessage=changed||event;
+  if(intakeMessage?.type!=='app_mention'&&intakeMessage?.channel_type!=='im'&&event?.channel_type!=='im'&&event?.channel&&intakeMessage?.ts&&(intakeMessage.user||intakeMessage.bot_id)&&(intakeMessage.text||intakeMessage.files?.length||intakeMessage.attachments?.length)&&(!intakeMessage.subtype||['bot_message','file_share','thread_broadcast'].includes(intakeMessage.subtype))){
+    try{
+      const {captureTicketMessage,processTicketReceipt}=await import('@/lib/ticket-intake-queue');
+      const id=await captureTicketMessage(connection,{channel:event.channel,ts:intakeMessage.ts,user:intakeMessage.user||`bot:${intakeMessage.bot_id}`,text:intakeMessage.text||'',threadTs:intakeMessage.thread_ts,hasAttachments:Boolean(intakeMessage.files?.length||intakeMessage.attachments?.length),isRelay:Boolean(intakeMessage.bot_id||intakeMessage.subtype==='bot_message')});
+      if(id)waitUntil(processTicketReceipt(id));
+    }catch{return new Response('Ticket intake is temporarily unavailable',{status:503});}
+  }
   if (event?.type === "message" && event.channel && event.ts && event.user && event.text && (!event.subtype||event.subtype==='bot_message') && event.user !== connection.botUserId && event.channel_type !== "im") {
     // Durable request uniqueness handles message/app_mention duplicates. Ticket work is isolated from other bot commands.
     waitUntil((async () => {
       const { intakeTicketEvent, handleTicketThreadReply } = await import("@/lib/ticket-automation");
       const message = { channel: event.channel!, ts: event.ts!, user: event.user!, text: event.text!, threadTs: event.thread_ts, hasAttachments:Boolean(event.files?.length||event.attachments?.length),isRelay:Boolean(event.bot_id||event.subtype==='bot_message') };
-      if (message.isRelay||!await handleTicketThreadReply(connection.teamId, message)) await intakeTicketEvent(connection, message);
+      if (!message.isRelay&&!await handleTicketThreadReply(connection.teamId, message)) {
+        // Explicit source-link sharing in the management channel remains supported.
+        if(message.text.includes('.slack.com/archives/'))await intakeTicketEvent(connection,message);
+      }
     })().catch(error => console.error("Ticket intake unavailable", { name: error instanceof Error ? error.name : "unknown" })));
   }
   const commandEvent = isSlackCommandEvent(event) && event.user !== connection.botUserId ? event : null;

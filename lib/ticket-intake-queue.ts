@@ -1,0 +1,117 @@
+import {env} from 'cloudflare:workers';
+import {getSlackConnection,type RequestAuthorization,canManageTeam} from '@/lib/pace-data';
+import {slackApi,slackTokenForConnection} from '@/lib/slack-daily';
+import {analyzeTicketEvent,type TicketIntakeEvent,type TicketAutomationConfig} from '@/lib/ticket-automation';
+import {redactTicketText,assessTicketText} from '@/lib/ticket-policy';
+const now=()=>new Date().toISOString();
+const run=(sql:string,...args:unknown[])=>env.DB.prepare(sql).bind(...args).run();
+const one=<T>(sql:string,...args:unknown[])=>env.DB.prepare(sql).bind(...args).first<T>();
+const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bind(...args).all<T>()).results||[];
+type Connection={ownerId:string;teamId:string;botUserId:string};
+type Receipt={id:string;owner_id:string;event_json:string;attempts:number;channel_id:string;message_ts:string;root_ts:string};
+type Settings={owner_id:string;team_id:string;config_json:string;enabled:number};
+type SlackMessage={ts?:string;thread_ts?:string;user?:string;text?:string;bot_id?:string;subtype?:string;files?:unknown[];attachments?:unknown[];reply_count?:number;latest_reply?:string};
+type Scan={owner_id:string;channel_id:string;cursor:string;root_ts?:string;latest_reply?:string};
+const safe=(value:string)=>redactTicketText(value).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]');
+async function hash(value:string){return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),b=>b.toString(16).padStart(2,'0')).join('');}
+
+/** This write finishes BEFORE Slack receives 200. No AI or remote read is required here. */
+export async function captureTicketMessage(connection:Connection,event:TicketIntakeEvent){
+  const s=await one<Settings>('SELECT * FROM ticket_automation_settings WHERE owner_id=?',connection.ownerId);
+  if(!s?.enabled||s.team_id!==connection.teamId||event.user===connection.botUserId)return null;
+  const c=JSON.parse(s.config_json) as TicketAutomationConfig;
+  const rule=c.channels.find(r=>r.id===event.channel&&r.enabled);
+  if(!rule)return null;
+  const ignoredRelay=event.isRelay&&(!rule.relayUserIds?.includes(event.user)||(rule.relayPrefix&&!event.text.trim().replace(/^\*+/,'').startsWith(rule.relayPrefix)));
+  const digest=await hash(JSON.stringify({channel:event.channel,ts:event.ts,root:event.threadTs||event.ts,user:event.user,text:event.text,attachments:Boolean(event.hasAttachments),relay:Boolean(event.isRelay)}));
+  const id=await hash(`${connection.ownerId}:${event.channel}:${event.ts}:${digest}`),time=now();
+  const stored={...event,text:safe(event.text),securityBlocked:assessTicketText(event.text).risk==='blocked'};
+  await run(`INSERT OR IGNORE INTO ticket_intake_messages(id,owner_id,team_id,channel_id,root_ts,message_ts,user_id,event_json,digest,next_attempt_at,received_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,id,connection.ownerId,connection.teamId,event.channel,event.threadTs||event.ts,event.ts,event.user,JSON.stringify(stored),digest,time,time,time);
+  if(ignoredRelay){await run("UPDATE ticket_intake_messages SET state='ignored',last_error='relay_authorization_required',updated_at=? WHERE id=? AND state='pending'",time,id);return null;}
+  await run("UPDATE ticket_intake_messages SET state='pending',next_attempt_at=?,last_error='' WHERE id=? AND state='ignored'",time,id);
+  if(event.threadTs)await run(`INSERT INTO ticket_intake_threads(owner_id,channel_id,root_ts,latest_reply,next_scan_at) VALUES(?,?,?,?,?) ON CONFLICT(owner_id,channel_id,root_ts) DO UPDATE SET latest_reply=MAX(latest_reply,excluded.latest_reply),next_scan_at=MIN(next_scan_at,excluded.next_scan_at)`,connection.ownerId,event.channel,event.threadTs,event.ts,time);
+  return id;
+}
+
+export async function processTicketReceipt(id:string){
+  const lease=crypto.randomUUID(),time=now();
+  const claimed=await run(`UPDATE ticket_intake_messages SET state='processing',attempts=attempts+1,lease_id=?,lease_until=?,updated_at=? WHERE id=? AND ((state IN ('pending','retry') AND next_attempt_at<=?) OR (state='processing' AND lease_until<?))`,lease,new Date(Date.now()+120000).toISOString(),time,id,time,time);
+  if(!claimed.meta.changes)return;
+  const r=await one<Receipt>('SELECT * FROM ticket_intake_messages WHERE id=? AND lease_id=?',id,lease);if(!r)return;
+  await run('INSERT OR IGNORE INTO ticket_intake_threads(owner_id,channel_id,root_ts,latest_reply,scanned_reply,next_scan_at) VALUES(?,?,?,?,?,?)',r.owner_id,r.channel_id,r.root_ts,r.root_ts,r.root_ts,time);
+  const threadClaim=await run('UPDATE ticket_intake_threads SET analysis_lease_id=?,analysis_lease_until=? WHERE owner_id=? AND channel_id=? AND root_ts=? AND (analysis_lease_until IS NULL OR analysis_lease_until<?)',lease,new Date(Date.now()+120000).toISOString(),r.owner_id,r.channel_id,r.root_ts,time);
+  if(!threadClaim.meta.changes){await run("UPDATE ticket_intake_messages SET state='pending',attempts=MAX(0,attempts-1),next_attempt_at=?,lease_id=NULL,lease_until=NULL WHERE id=? AND lease_id=?",new Date(Date.now()+10000).toISOString(),id,lease);return;}
+  try{
+    const connection=await getSlackConnection(r.owner_id);if(!connection)throw new Error('connection_unavailable');
+    const outcome=await analyzeTicketEvent(connection,JSON.parse(r.event_json));
+    await run(`UPDATE ticket_intake_messages SET state=?,request_ids_json=?,last_error=?,lease_id=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_id=?`,outcome.state,JSON.stringify(outcome.requestIds),safe(outcome.reason||'').slice(0,500),now(),id,lease);
+  }catch{
+    const retry=new Date(Date.now()+Math.min(3600000,30000*2**Math.min(r.attempts,7))).toISOString();
+    await run(`UPDATE ticket_intake_messages SET state='retry',next_attempt_at=?,last_error='analysis_retry_required',lease_id=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_id=?`,retry,now(),id,lease);
+  }finally{await run('UPDATE ticket_intake_threads SET analysis_lease_id=NULL,analysis_lease_until=NULL WHERE owner_id=? AND channel_id=? AND root_ts=? AND analysis_lease_id=?',r.owner_id,r.channel_id,r.root_ts,lease);}
+}
+
+async function captureSlackPage(connection:Connection,channel:string,messages:SlackMessage[],recovery:boolean){
+  for(const m of messages){
+    if(!m.ts)continue;
+    if((m.user||m.bot_id)&&(!m.subtype||['bot_message','file_share','thread_broadcast'].includes(m.subtype))&&(m.text||m.files?.length||m.attachments?.length))await captureTicketMessage(connection,{channel,ts:m.ts,user:m.user||`bot:${m.bot_id}`,text:m.text||'',threadTs:m.thread_ts,hasAttachments:Boolean(m.files?.length||m.attachments?.length),isRelay:Boolean(m.bot_id||m.subtype==='bot_message'),recovery});
+    if(m.reply_count)await run(`INSERT INTO ticket_intake_threads(owner_id,channel_id,root_ts,latest_reply,next_scan_at) VALUES(?,?,?,?,?) ON CONFLICT(owner_id,channel_id,root_ts) DO UPDATE SET latest_reply=MAX(latest_reply,excluded.latest_reply)`,connection.ownerId,channel,m.thread_ts||m.ts,m.latest_reply||m.ts,now());
+  }
+}
+
+/** Fair, resumable full-history passes also discover replies to old roots missed during downtime. */
+export async function reconcileTicketIntake(){
+  const settings=await rows<Settings>('SELECT * FROM ticket_automation_settings WHERE enabled=1');
+  for(const s of settings){
+    const c=JSON.parse(s.config_json) as TicketAutomationConfig;
+    const enabled=c.channels.filter(ch=>ch.enabled);
+    for(const ch of enabled)await run('INSERT OR IGNORE INTO ticket_intake_scans(owner_id,channel_id,next_scan_at) VALUES(?,?,?)',s.owner_id,ch.id,now());
+    const connection=await getSlackConnection(s.owner_id);if(!connection||connection.teamId!==s.team_id)continue;
+    const token=await slackTokenForConnection(connection),channels=JSON.stringify(enabled.map(ch=>ch.id));
+    const scans=await rows<Scan>(`SELECT * FROM ticket_intake_scans WHERE owner_id=? AND channel_id IN (SELECT value FROM json_each(?)) AND next_scan_at<=? ORDER BY COALESCE(last_checked_at,''),channel_id LIMIT 4`,s.owner_id,channels,now());
+    for(const scan of scans){
+      const time=now(),lock=new Date(Date.now()+180000).toISOString();
+      if(!(await run('UPDATE ticket_intake_scans SET next_scan_at=? WHERE owner_id=? AND channel_id=? AND next_scan_at<=?',lock,s.owner_id,scan.channel_id,time)).meta.changes)continue;
+      try{
+        const page=await slackApi<{ok:boolean;messages?:SlackMessage[];response_metadata?:{next_cursor?:string};has_more?:boolean}>(token,'conversations.history',{channel:scan.channel_id,limit:100,...(scan.cursor?{cursor:scan.cursor}:{})});
+        const cursor=page.response_metadata?.next_cursor||'';
+        if(page.has_more&&!cursor)throw new Error('history_cursor_missing');
+        await captureSlackPage(connection,scan.channel_id,page.messages||[],true);
+        await run(`UPDATE ticket_intake_scans SET cursor=?,completed_passes=completed_passes+?,messages_seen=messages_seen+?,last_checked_at=?,last_completed_at=CASE WHEN ?='' THEN ? ELSE last_completed_at END,next_scan_at=?,last_error='' WHERE owner_id=? AND channel_id=?`,cursor,cursor?0:1,page.messages?.length||0,time,cursor,time,new Date(Date.now()+(cursor?0:300000)).toISOString(),s.owner_id,scan.channel_id);
+      }catch{await run("UPDATE ticket_intake_scans SET last_checked_at=?,last_error='history_retry_required',next_scan_at=? WHERE owner_id=? AND channel_id=?",time,lock,s.owner_id,scan.channel_id);}
+    }
+    const threads=await rows<Scan>(`SELECT * FROM ticket_intake_threads WHERE owner_id=? AND channel_id IN (SELECT value FROM json_each(?)) AND (cursor<>'' OR latest_reply>scanned_reply) AND next_scan_at<=? ORDER BY next_scan_at,root_ts LIMIT 4`,s.owner_id,channels,now());
+    for(const scan of threads){
+      const time=now(),lock=new Date(Date.now()+180000).toISOString();
+      if(!(await run('UPDATE ticket_intake_threads SET next_scan_at=? WHERE owner_id=? AND channel_id=? AND root_ts=? AND next_scan_at<=?',lock,s.owner_id,scan.channel_id,scan.root_ts,time)).meta.changes)continue;
+      try{
+        const page=await slackApi<{ok:boolean;messages?:SlackMessage[];response_metadata?:{next_cursor?:string};has_more?:boolean}>(token,'conversations.replies',{channel:scan.channel_id,ts:scan.root_ts,limit:100,...(scan.cursor?{cursor:scan.cursor}:{})});
+        const cursor=page.response_metadata?.next_cursor||'';if(page.has_more&&!cursor)throw new Error('reply_cursor_missing');
+        await captureSlackPage(connection,scan.channel_id,(page.messages||[]).map(m=>({...m,thread_ts:scan.root_ts})),true);
+        await run(`UPDATE ticket_intake_threads SET cursor=?,scanned_reply=CASE WHEN ?='' THEN ? ELSE scanned_reply END,next_scan_at=?,last_error='' WHERE owner_id=? AND channel_id=? AND root_ts=?`,cursor,cursor,scan.latest_reply,time,s.owner_id,scan.channel_id,scan.root_ts);
+      }catch{await run("UPDATE ticket_intake_threads SET last_error='replies_retry_required',next_scan_at=? WHERE owner_id=? AND channel_id=? AND root_ts=?",lock,s.owner_id,scan.channel_id,scan.root_ts);}
+    }
+  }
+}
+export async function runTicketIntake(){
+  await reconcileTicketIntake().catch(()=>undefined);
+  const due=await rows<{id:string}>(`SELECT q.id FROM ticket_intake_messages q JOIN ticket_automation_settings s ON s.owner_id=q.owner_id AND s.enabled=1 WHERE (q.state IN ('pending','retry') AND q.next_attempt_at<=?) OR (q.state='processing' AND q.lease_until<?) ORDER BY json_extract(q.event_json,'$.recovery'),q.received_at LIMIT 6`,now(),now());
+  // Keep live intake responsive without allowing duplicate workers or unbounded model concurrency.
+  for(let i=0;i<due.length;i+=2)await Promise.all(due.slice(i,i+2).map(r=>processTicketReceipt(r.id)));
+}
+export type TicketIntakeStatus={offset:number;total:number;hasMore:boolean;counts:{state:string;count:number}[];channels:{channel_id:string;cursor:string;completed_passes:number;messages_seen:number;last_checked_at:string|null;last_completed_at:string|null;last_error:string;pending_threads:number;thread_errors?:number}[];messages:{id:string;channel_id:string;root_ts:string;message_ts:string;state:string;attempts:number;last_error:string;received_at:string;text:string}[]};
+export async function ticketIntakeStatus(owner:string,page:{offset?:number;state?:string}={}):Promise<TicketIntakeStatus>{
+  const offset=Math.max(0,Math.floor(page.offset||0)),filter=page.state||'';
+  const [counts,channels,messages]=await Promise.all([
+    rows<{state:string;count:number}>('SELECT state,count(*) AS count FROM ticket_intake_messages WHERE owner_id=? GROUP BY state',owner),
+    rows<TicketIntakeStatus['channels'][number]>(`SELECT s.*,(SELECT count(*) FROM ticket_intake_threads t WHERE t.owner_id=s.owner_id AND t.channel_id=s.channel_id AND (t.cursor<>'' OR t.latest_reply>t.scanned_reply)) AS pending_threads,(SELECT count(*) FROM ticket_intake_threads t WHERE t.owner_id=s.owner_id AND t.channel_id=s.channel_id AND t.last_error<>'') AS thread_errors FROM ticket_intake_scans s WHERE s.owner_id=? ORDER BY s.channel_id`,owner),
+    rows<TicketIntakeStatus['messages'][number]>(`SELECT id,channel_id,root_ts,message_ts,state,attempts,last_error,received_at,json_extract(event_json,'$.text') AS text FROM ticket_intake_messages WHERE owner_id=? AND (?='' OR state=?) ORDER BY CASE WHEN state IN ('pending','retry','processing') THEN 0 ELSE 1 END,received_at DESC,id LIMIT 100 OFFSET ?`,owner,filter,filter,offset),
+  ]);const total=counts.filter(v=>!filter||v.state===filter).reduce((n,v)=>n+v.count,0);return {offset,total,hasMore:offset+100<total,counts,channels,messages};
+}
+export async function requestTicketReconciliation(a:RequestAuthorization,id?:string){
+  if(a.apiToken||!canManageTeam(a))throw new Error('workspace_admin_required');
+  await run('UPDATE ticket_intake_scans SET next_scan_at=? WHERE owner_id=?',now(),a.ownerId);
+  if(id)await run("UPDATE ticket_intake_messages SET state='pending',event_json=json_set(event_json,'$.forceReview',json('true')),next_attempt_at=? WHERE owner_id=? AND id=? AND state<>'processing'",now(),a.ownerId,id);
+  else await run("UPDATE ticket_intake_messages SET state='pending',next_attempt_at=? WHERE owner_id=? AND state='retry'",now(),a.ownerId);
+  await run('INSERT INTO ticket_automation_audit(id,owner_id,actor_user_id,action,details_json,created_at) VALUES(?,?,?,?,?,?)',crypto.randomUUID(),a.ownerId,a.userId,id?'intake_review_requested':'intake_reconciliation_requested',JSON.stringify({receiptId:id||null}),now());
+}
