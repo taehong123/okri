@@ -2892,6 +2892,14 @@ const messages = {
   "AI 서비스에 연결하지 못해 다시 시도합니다.": "The AI service could not be reached and will be retried.",
   "수집은 계속되며 AI 분석은 한도 초기화까지 대기합니다.": "Message collection continues while AI analysis waits for the limit to reset.",
   "자동 재시도 예정": "Automatic retry scheduled",
+  "고객사": "Customer",
+  "요구사항": "Request",
+  "개발 시작": "Start development",
+  "회신 내용": "Reply text",
+  "회신 보내기": "Send reply",
+  "상세·수정": "Details and edit",
+  "요청자 변경": "Change requester",
+  "회신 작성": "Write reply",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

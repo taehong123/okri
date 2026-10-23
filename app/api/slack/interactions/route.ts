@@ -59,10 +59,19 @@ export async function POST(request: Request) {
   if((payload.type==='block_suggestion'&&payload.action_id?.startsWith('ta_'))||(payload.type==='view_submission'&&payload.view?.callback_id==='ticket_edit_submit')){
     const {ticketSlackEditorOptions,submitTicketSlackEditor}=await import('@/lib/ticket-slack-editor');
     try{
-      return Response.json(payload.type==='block_suggestion'?await ticketSlackEditorOptions(payload.team?.id||'',payload.user?.id||'',payload.view?.private_metadata||'',payload.action_id||'',payload.value||'',payload.view?.state?.values):await submitTicketSlackEditor(payload.team?.id||'',payload.user?.id||'',payload.view?.private_metadata||'',payload.view?.state?.values||{}));
+      const result=payload.type==='block_suggestion'?await ticketSlackEditorOptions(payload.team?.id||'',payload.user?.id||'',payload.view?.private_metadata||'',payload.action_id||'',payload.value||'',payload.view?.state?.values):await submitTicketSlackEditor(payload.team?.id||'',payload.user?.id||'',payload.view?.private_metadata||'',payload.view?.state?.values||{});
+      if(payload.type==='view_submission'&&!('response_action' in result))waitUntil(import('@/lib/ticket-automation').then(({deliverTicketOutbox})=>deliverTicketOutbox()).catch(()=>undefined));
+      return Response.json(result);
     }catch{return Response.json(payload.type==='block_suggestion'?{options:[]}:{response_action:'errors',errors:{ta_title:'최신 티켓 버튼으로 다시 열어 주세요.'}});}
   }
   if (payload.type === "block_actions" && ticketAction?.value && payload.team?.id && payload.user?.id) {
+    if(['ticket_auto_start','ticket_auto_reply','ticket_auto_security'].includes(ticketAction.action_id||'')&&payload.trigger_id){
+      waitUntil(import('@/lib/ticket-slack-editor').then(async editor=>{
+        if(ticketAction.action_id==='ticket_auto_security')await editor.openTicketSlackEditor(payload.team!.id!,payload.user!.id!,payload.trigger_id!,ticketAction.value!,payload.view?.callback_id==='ticket_queue');
+        else await editor.openTicketSlackAction(payload.team!.id!,payload.user!.id!,payload.trigger_id!,ticketAction.value!,ticketAction.action_id==='ticket_auto_reply'?'reply':'start',payload.view?.callback_id==='ticket_queue');
+      }).catch(async()=>{const connection=await getSlackConnectionByTeam(payload.team!.id!),channel=payload.container?.channel_id||payload.channel?.id;if(connection&&channel)await slackApi(await slackTokenForConnection(connection),'chat.postEphemeral',{channel,user:payload.user!.id!,text:'최신 상태와 담당자 권한을 확인한 뒤 최신 티켓 버튼을 눌러 주세요.'}).catch(()=>undefined);}));
+      return new Response(null,{status:200});
+    }
     if(ticketAction.action_id==='ticket_auto_edit'&&payload.trigger_id){
       waitUntil(import('@/lib/ticket-slack-editor').then(({openTicketSlackEditor})=>openTicketSlackEditor(payload.team!.id!,payload.user!.id!,payload.trigger_id!,ticketAction.value!,payload.view?.callback_id==='ticket_queue')).catch(async()=>{
         const connection=await getSlackConnectionByTeam(payload.team!.id!);if(connection)await slackApi(await slackTokenForConnection(connection),'chat.postEphemeral',{channel:payload.container?.channel_id||payload.channel?.id,user:payload.user!.id!,text:'입력창을 열지 못했습니다. 최신 티켓 버튼과 담당자 권한을 확인해 주세요.'}).catch(()=>undefined);
