@@ -12,8 +12,8 @@ test('four categories, original evidence and paginated intake coverage remain vi
   await page.goto('/?view=tickets&ticketAutomation=1');
   await page.getByRole('combobox',{name:'티켓 분류',exact:true}).selectOption('guidance');await expect(page.getByRole('button',{name:/고객 요청 3/})).toBeVisible();await expect(page.getByRole('button',{name:/고객 요청 0/})).toHaveCount(0);
   await page.getByRole('button',{name:/고객 요청 3/}).click();for(const label of ['고객사','요청자','요구사항','분류'])await expect(page.locator('.ticket-request-summary')).toContainText(label);await page.getByText('고객 원문 대화',{exact:true}).click();await expect(page.locator('.ticket-original-text').first()).toContainText('고객 원문 그대로');
-  await page.getByRole('combobox',{name:'티켓 분류',exact:true}).selectOption('all');await page.getByRole('button',{name:'티켓 더 불러오기',exact:true}).click();await expect(page.getByRole('button',{name:/마지막 페이지의 요청/})).toBeVisible();
-  await page.getByRole('button',{name:'수집 점검',exact:true}).click();await expect(page.getByRole('cell',{name:'이전 대화 대조 중',exact:true})).toBeVisible();await expect(page.getByRole('cell',{name:'4',exact:true})).toBeVisible();await expect(page.getByRole('status').filter({hasText:'수집은 계속되며 AI 분석은 한도 초기화까지 대기합니다.'})).toBeVisible();await page.getByText(/customer-example · 재시도 대기/).click();await expect(page.getByText('오늘의 AI 분석 횟수 한도에 도달했습니다.',{exact:true})).toBeVisible();await expect(page.getByText(/자동 재시도 예정/)).toBeVisible();await expect(page.getByText('원문은 저장되어 있습니다.',{exact:true})).toBeVisible();await page.getByRole('button',{name:'요청으로 다시 검토',exact:true}).click();expect(writes.some(p=>p.operation==='reconcile'&&p.id==='receipt-1')).toBe(true);
+  await page.getByRole('button',{name:'목록으로',exact:true}).click();await page.getByRole('combobox',{name:'티켓 분류',exact:true}).selectOption('all');await page.getByRole('button',{name:'티켓 더 불러오기',exact:true}).click();await expect(page.getByRole('button',{name:/마지막 페이지의 요청/})).toBeVisible();
+  await page.getByText('설정·운영',{exact:true}).click();await page.getByRole('button',{name:'수집 점검',exact:true}).click();await expect(page.getByRole('cell',{name:'이전 대화 대조 중',exact:true})).toBeVisible();await expect(page.getByRole('cell',{name:'4',exact:true})).toBeVisible();await expect(page.getByRole('status').filter({hasText:'수집은 계속되며 AI 분석은 한도 초기화까지 대기합니다.'})).toBeVisible();await page.getByText(/customer-example · 재시도 대기/).click();await expect(page.getByText('오늘의 AI 분석 횟수 한도에 도달했습니다.',{exact:true})).toBeVisible();await expect(page.getByText(/자동 재시도 예정/)).toBeVisible();await expect(page.getByText('원문은 저장되어 있습니다.',{exact:true})).toBeVisible();await page.getByRole('button',{name:'요청으로 다시 검토',exact:true}).click();expect(writes.some(p=>p.operation==='reconcile'&&p.id==='receipt-1')).toBe(true);
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);const axe=await new AxeBuilder({page:page as never}).include('.ticket-automation').analyze();expect(axe.violations).toEqual([]);await page.screenshot({path:info.outputPath('ticket-intake-coverage.png'),fullPage:true});
 });
 
@@ -37,13 +37,13 @@ test("bulk personal slots, assignment defaults and reviewed ticket creation use 
   const panel=page.getByRole("region",{name:"티켓 자동화",exact:true});
   await expect(panel.getByRole("button",{name:/긴 제목 고객/})).toBeVisible();
   await panel.getByRole("button",{name:/긴 제목 고객/}).click();
-  await expect(panel.getByRole("combobox",{name:"실행 포트",exact:true})).toHaveValue("");
+  await panel.getByText("담당자·포트 변경",{exact:true}).click();await expect(panel.getByRole("combobox",{name:"실행 포트",exact:true})).toHaveValue("");
   await expect(panel.getByRole('combobox',{name:'담당자',exact:true})).toHaveValue(member.id);
   await page.screenshot({path:info.outputPath('ticket-compact-start.png'),fullPage:true});
-  await panel.getByRole("button",{name:"개발 시작",exact:true}).click();
-  expect(writes.filter(p=>p.operation==='request')).toEqual([expect.objectContaining({action:'start',memberId:member.id,portId:''})]);await expect(panel.getByRole('button',{name:/긴 제목 고객/})).toContainText('실행 대기');
+  await panel.getByRole("button",{name:"개발 승인",exact:true}).click();
+  expect(writes.filter(p=>p.operation==='request')).toEqual([expect.objectContaining({action:'start',memberId:member.id,portId:''})]);await expect(panel.getByRole('region',{name:'요청 검토',exact:true}).getByRole('status')).toContainText('시작 준비 중');
   expect(writes.filter(p=>p.action==="start")).toHaveLength(1);
-  await panel.getByRole("button",{name:"실행 포트",exact:true}).click();
+  await panel.getByText("설정·운영",{exact:true}).click();await panel.getByRole("button",{name:"실행 포트",exact:true}).click();
   await panel.getByLabel("이름 앞부분").fill("태홍"); await panel.getByLabel("개수",{exact:true}).fill("10");
   await panel.getByLabel('PC 이름',{exact:true}).fill('Office PC');
   await panel.getByRole('combobox',{name:'고객 프로젝트',exact:true}).selectOption('C1');
@@ -61,7 +61,7 @@ test("bulk personal slots, assignment defaults and reviewed ticket creation use 
 test('product setup captures specification, environment and multiple repositories with mocked writes',async({page},info)=>{
   await installApiMocks(page);const writes:Record<string,unknown>[]=[];
   await page.route('**/api/ticket-automation',async route=>{if(route.request().method()==='POST')writes.push(route.request().postDataJSON());return json(route,{products:[],settings:{enabled:false,channels:[],destination:'',notificationsAuthorized:false},requests:[],ports:[],members:[],devices:[],canManage:true,userId:'user-1'});});
-  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByRole('button',{name:'제품·저장소',exact:true}).click();
+  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByText('설정·운영',{exact:true}).click();await page.getByRole('button',{name:'제품·저장소',exact:true}).click();
   await page.getByLabel('제품명',{exact:true}).fill('Example Product');await page.getByLabel('기본 명세',{exact:true}).fill('Review customer requests against the documented workflows.');await page.getByLabel('개발 환경 준비 지침').fill('Install the official runtime and preserve existing changes.');
   await page.getByLabel('저장소 이름',{exact:true}).fill('Web');await page.getByLabel('저장소 HTTPS 주소').fill('https://github.com/example/web.git');await page.getByLabel('의존성 준비 경로').fill('.,frontend');
   await page.getByRole('button',{name:'저장소 추가',exact:true}).click();await page.getByLabel('저장소 이름',{exact:true}).nth(1).fill('Service');await page.getByLabel('저장소 HTTPS 주소').nth(1).fill('https://github.com/example/service.git');await page.getByRole('button',{name:'제품 설정 저장',exact:true}).click();
@@ -69,28 +69,30 @@ test('product setup captures specification, environment and multiple repositorie
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);const axe=await new AxeBuilder({page:page as never}).include('.ticket-automation').analyze();expect(axe.violations).toEqual([]);await page.screenshot({path:info.outputPath('ticket-product-setup.png'),fullPage:true});
 });
 
-test('final security warning requires acknowledgement and a reason, supports keyboard use and renders the shared font',async({page,context},info)=>{
-  test.setTimeout(60_000);
-  await installApiMocks(page);
-  const writes:Record<string,unknown>[]=[];
-  const member={id:'m1',user_id:'user-1',display_name:'담당자'};
-  const r={id:'r1',owner_id:'w1',source_channel:'C1',source_ts:'123.000',source_user:'U1',requester_slack_user:'U1',requester_name:'고객 담당자',title:'고객 요청 Ticket 2026 민감 기능 변경 범위 검토',description:'승인된 변경 범위를 확인합니다.',state:'security_review',risk:'review',member_id:'m1',revision:4,security_json:JSON.stringify({verdict:'warning',codes:['sensitive_change']}),notice:'',answer:''};
-  const data={settings:{enabled:true,channels:[],destination:'C2',notificationsAuthorized:false},requests:[r],ports:[],members:[member],devices:[],canManage:true,userId:'user-1'};
-  await page.route('**/api/ticket-automation',async route=>{
-    if(route.request().method()==='POST'){const p=route.request().postDataJSON();writes.push(p);if(p.action==='force'){r.state='queued';r.revision++;}}
+test('one warning approval shows processing and automatically advances to development with mocked writes',async({page,context},info)=>{
+  test.setTimeout(60_000);await installApiMocks(page);
+  const writes:Record<string,unknown>[]=[],member={id:'m1',user_id:'user-1',display_name:'박담당'};
+  const r={id:'r1',category:'improvement',owner_id:'w1',source_channel:'C1',source_ts:'123.000',source_user:'U1',requester_slack_user:'U1',requester_name:'김고객',title:'주문접수 이후 매출 집계 기준 변경',description:'승인된 변경 범위를 확인합니다.',state:'security_review',risk:'review',member_id:'m1',revision:4,security_json:JSON.stringify({verdict:'warning',codes:['scope_ambiguous','sensitive_change']}),notice:'',answer:''};
+  const data={settings:{enabled:true,channels:[{id:'C1',name:'고객-예시회사'}],destination:'C2',notificationsAuthorized:false},requests:[r],ports:[],members:[member],devices:[],canManage:true,userId:'user-1'};
+  let releaseApproval!:()=>void,queuedReads=0;
+  const approval=new Promise<void>(resolve=>{releaseApproval=resolve;});
+  await page.route('**/api/ticket-automation*',async route=>{
+    if(route.request().method()==='POST'){const p=route.request().postDataJSON();writes.push(p);await approval;if(p.action==='approve_warning'){r.state='queued';r.revision++;}}
+    else if(r.state==='queued'&&++queuedReads>1){r.state='running';r.security_json=JSON.stringify({verdict:'warning',codes:['sensitive_change'],allow:true});}
     return json(route,data);
   });
-  await page.goto('/?view=tickets&ticketAutomation=1');
-  const row=page.getByRole('button',{name:/고객 요청 Ticket 2026/});await row.click();
-  const force=page.getByRole('button',{name:'사유를 남기고 강제 진행'});await expect(force).toBeDisabled();
-  await page.getByLabel('경고 확인 사유').fill('담당자가 제한된 변경 범위를 확인했습니다.');await expect(force).toBeDisabled();
-  await page.getByRole('checkbox',{name:'경고 내용과 요청 범위를 확인했습니다.'}).focus();await page.keyboard.press('Space');await expect(force).toBeEnabled();
+  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByRole('button',{name:/주문접수 이후 매출 집계/}).click();
+  const detail=page.getByRole('region',{name:'요청 검토',exact:true}),approve=detail.getByRole('button',{name:'확인하고 개발 승인',exact:true});
+  await expect(approve).toBeEnabled();await expect(detail.getByRole('textbox',{name:'경고 확인 사유'})).toHaveCount(0);await expect(detail.getByRole('checkbox')).toHaveCount(0);await expect(detail.locator('button.primary-action')).toHaveCount(1);
   await page.evaluate(()=>document.fonts.ready);
-  const cdp=await context.newCDPSession(page);await cdp.send('DOM.enable');await cdp.send('CSS.enable');const doc=await cdp.send('DOM.getDocument');const node=await cdp.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'.ticket-request-row strong'});const{fonts}=await cdp.send('CSS.getPlatformFontsForNode',{nodeId:node.nodeId});expect(fonts.filter(f=>f.glyphCount>0).every(f=>f.isCustomFont&&/Pretendard/.test(f.familyName))).toBe(true);await cdp.detach();
+  const cdp=await context.newCDPSession(page);await cdp.send('DOM.enable');await cdp.send('CSS.enable');const doc=await cdp.send('DOM.getDocument');const node=await cdp.send('DOM.querySelector',{nodeId:doc.root.nodeId,selector:'.ticket-workflow strong'});const{fonts}=await cdp.send('CSS.getPlatformFontsForNode',{nodeId:node.nodeId});expect(fonts.filter(f=>f.glyphCount>0).every(f=>f.isCustomFont&&/Pretendard/.test(f.familyName))).toBe(true);await cdp.detach();
   for(const width of [320,390,768,1440,1920,2560,3840]){await page.setViewportSize({width,height:900});expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);}
-  await page.screenshot({path:info.outputPath('ticket-security-warning.png'),fullPage:true});
+  await page.setViewportSize({width:390,height:900});await page.evaluate(()=>{document.documentElement.style.fontSize='200%';});expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);await page.evaluate(()=>{document.documentElement.style.fontSize='';});
+  await page.setViewportSize({width:info.project.name==='desktop-chromium'?1440:390,height:900});await page.screenshot({path:info.outputPath('ticket-clean-approval.png'),fullPage:true});
   const axe=await new AxeBuilder({page:page as never}).include('.ticket-automation').analyze();expect(axe.violations).toEqual([]);
-  await force.focus();await page.keyboard.press('Enter');await expect(row).toContainText('실행 대기');expect(writes.find(p=>p.action==='force')).toMatchObject({acknowledged:true,reason:'담당자가 제한된 변경 범위를 확인했습니다.'});
+  await approve.focus();await page.keyboard.press('Enter');await expect(detail.getByRole('status')).toContainText('처리 중…');await expect(approve).toBeDisabled();expect(writes).toEqual([expect.objectContaining({action:'approve_warning'})]);
+  releaseApproval();await expect(detail.getByRole('status')).toContainText('시작 준비 중');await expect(detail.getByRole('button',{name:'확인하고 개발 승인',exact:true})).toHaveCount(0);
+  await expect(detail.getByRole('status')).toContainText('개발 중',{timeout:15_000});await expect(detail.getByRole('status')).toContainText('회신');expect(writes).toHaveLength(1);await page.screenshot({path:info.outputPath('ticket-development-progress.png'),fullPage:true});
 });
 
 test('guidance replies from the draft without ticket creation or port selection',async({page},info)=>{
@@ -98,7 +100,7 @@ test('guidance replies from the draft without ticket creation or port selection'
   const r={id:'guide-1',category:'guidance',source_channel:'C1',source_ts:'123.000',source_text:'택배사 선택은 어디서 하나요?',title:'기본 택배사 설정 방법 안내',description:'고객의 문제\n택배사 설정 위치 문의\n\n안내 초안\n설정 화면에서 기본 택배사를 선택해 주세요.\n\n완료 확인 기준\n설정 확인',state:'recommended',risk:'review',member_id:null,port_id:null,requester_slack_user:'UCUSTOMER',requester_name:'김고객',revision:1,notice:'',dependencies_json:'[]'};
   const data={settings:{enabled:true,channels:[{id:'C1',name:'고객-초록청년',enabled:true}],notificationsAuthorized:true},requests:[r],ports:[],members:[],devices:[],products:[],canManage:true,userId:'user-1'};
   await page.route('**/api/ticket-automation*',async route=>{if(route.request().method()==='POST'){writes.push(route.request().postDataJSON());r.state='publishing';r.revision++;}return json(route,data);});
-  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByRole('button',{name:/기본 택배사 설정 방법 안내/}).click();const detail=page.getByRole('region',{name:'요청 검토',exact:true});await expect(detail.getByRole('combobox',{name:'실행 포트',exact:true})).toHaveCount(0);await expect(detail.getByRole('button',{name:'개발 시작',exact:true})).toHaveCount(0);await expect(detail.getByRole('textbox',{name:'회신 내용',exact:true})).toHaveValue('설정 화면에서 기본 택배사를 선택해 주세요.');await detail.getByRole('textbox',{name:'회신 내용',exact:true}).fill('설정 화면에서 기본 택배사를 선택하고 저장해 주세요.');await page.screenshot({path:info.outputPath('ticket-direct-reply.png'),fullPage:true});await detail.getByRole('button',{name:'회신 보내기',exact:true}).click();expect(writes).toEqual([expect.objectContaining({action:'reply',requesterSlackUser:'UCUSTOMER',notice:'설정 화면에서 기본 택배사를 선택하고 저장해 주세요.'})]);await expect(page.getByRole('button',{name:/기본 택배사 설정 방법 안내/})).toContainText('완료 안내 전송 대기');
+  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByRole('button',{name:/기본 택배사 설정 방법 안내/}).click();const detail=page.getByRole('region',{name:'요청 검토',exact:true});await expect(detail.getByRole('combobox',{name:'실행 포트',exact:true})).toHaveCount(0);await expect(detail.getByRole('button',{name:'개발 승인',exact:true})).toHaveCount(0);await expect(detail.getByRole('textbox',{name:'회신 내용',exact:true})).toHaveValue('설정 화면에서 기본 택배사를 선택해 주세요.');await detail.getByRole('textbox',{name:'회신 내용',exact:true}).fill('설정 화면에서 기본 택배사를 선택하고 저장해 주세요.');await page.screenshot({path:info.outputPath('ticket-direct-reply.png'),fullPage:true});await detail.getByRole('button',{name:'승인하고 보내기',exact:true}).click();expect(writes).toEqual([expect.objectContaining({action:'reply',requesterSlackUser:'UCUSTOMER',notice:'설정 화면에서 기본 택배사를 선택하고 저장해 주세요.'})]);await expect(detail.getByRole('status')).toContainText('회신 전송 중');await expect(detail.getByRole('list',{name:'티켓 진행 단계'})).not.toContainText('개발');
 });
 
 test("automation remains readable in dark mode and at 200% text zoom",async({page})=>{
@@ -106,7 +108,7 @@ test("automation remains readable in dark mode and at 200% text zoom",async({pag
   await page.addInitScript(()=>localStorage.setItem("okri.theme","dark"));
   await page.route("**/api/ticket-automation",route=>json(route,{settings:{enabled:false,destination:"",prefix:"customer-",channels:[],notificationsAuthorized:false},requests:[],ports:[],members:[{id:"m1",user_id:"user-1",display_name:"사용자"}],devices:[],canManage:true,userId:"user-1"}));
   await page.goto("/?view=tickets&ticketAutomation=1");
-  await page.getByRole("button",{name:"실행 포트",exact:true}).click();
+  await page.getByText("설정·운영",{exact:true}).click();await page.getByRole("button",{name:"실행 포트",exact:true}).click();
   await page.evaluate(()=>{document.documentElement.style.fontSize="200%";});
   await expect(page.getByLabel("개수",{exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth)).toBeLessThanOrEqual(1);

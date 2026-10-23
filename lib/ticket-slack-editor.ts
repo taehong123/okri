@@ -4,6 +4,7 @@ import {dailyMemberBySlack,slackApi,slackTokenForConnection} from '@/lib/slack-d
 import {changeTicketRequest,ticketRequestFor,queueTicketUpdate,ticketSummary,ticketReplyDraft,type TicketDevelopmentProduct,type TicketRepository} from '@/lib/ticket-automation';
 import {TICKET_CATEGORIES,TICKET_CATEGORY_LABELS} from '@/lib/ticket-recommendation';
 import {TICKET_PRIORITIES,TICKET_PRIORITY_LABELS} from '@/lib/ticket-policy';
+import {ticketWarning,ticketWorkflow} from '@/lib/ticket-workflow';
 type State=Record<string,Record<string,{value?:string;selected_option?:{value:string};selected_options?:{value:string}[];selected_user?:string}>>;
 type Option={text:{type:'plain_text';text:string};value:string};
 const option=(value:string,label:string):Option=>({text:{type:'plain_text',text:label.slice(0,75)},value:value||'_'});
@@ -27,6 +28,11 @@ export async function openMissingTicketAssignment(team:string,user:string,trigge
   if(r.state!=='created'||r.member_id)return false;
   await openTicketSlackEditor(team,user,trigger,value,push,true);return true;
 }
+export async function openMissingTicketStartContext(team:string,user:string,trigger:string,value:string,push=false){
+  const {r}=await actor(team,user,value);
+  if(r.product_id&&r.repository_id)return false;
+  await openTicketSlackAction(team,user,trigger,value,'start',push);return true;
+}
 export async function openTicketSlackAction(team:string,user:string,trigger:string,value:string,mode:'start'|'reply',push=false){
   const {a,r,token}=await actor(team,user,value);
   if(mode==='start'?!['recommended','created'].includes(r.state)||r.category==='guidance':!(r.state==='review'||r.category==='guidance'&&['recommended','created'].includes(r.state)))throw new Error('최신 티켓의 처리 상태를 확인해 주세요.');
@@ -45,11 +51,11 @@ export async function openTicketSlackAction(team:string,user:string,trigger:stri
     if(!r.product_id||!r.repository_id)blocks.push(external('ta_repository','제품·Git 저장소',option('','제품 선택')));
     blocks.push({type:'context',elements:[{type:'mrkdwn',text:'티켓 생성·담당자 지정·개발 승인을 함께 처리합니다. 연결된 포트가 착수 전 보안 검사를 수행합니다.'}]});
   }
-  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}:${mode}`,title:{type:'plain_text',text:mode==='reply'?'고객에게 회신':'개발 시작'},submit:{type:'plain_text',text:mode==='reply'?'회신 보내기':'승인하고 시작'},close:{type:'plain_text',text:'취소'},blocks}});
+  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}:${mode}`,title:{type:'plain_text',text:mode==='reply'?'고객에게 회신':'개발 시작'},submit:{type:'plain_text',text:mode==='reply'?'승인하고 보내기':'개발 승인'},close:{type:'plain_text',text:'취소'},blocks}});
 }
 export async function openTicketSlackEditor(team:string,user:string,trigger:string,value:string,push=false,requireAssignment=false){
   const {a,r,token}=await actor(team,user,value);
-  const blocks:Record<string,unknown>[]=[{type:'context',elements:[{type:'mrkdwn',text:requireAssignment?'담당자를 지정해 저장한 뒤 같은 스레드에서 승인을 누르세요. 개발 티켓의 실행 포트는 자동 배정이 기본입니다.':'내용과 담당자를 확인해 저장한 뒤 같은 스레드에서 다음 단계를 선택하세요. 변경한 내용은 다시 승인이 필요합니다.'}]}];
+  const blocks:Record<string,unknown>[]=[{type:'context',elements:[{type:'mrkdwn',text:r.state==='security_review'?'주의 내용을 확인하고 개발을 승인해 주세요.':requireAssignment?'담당자를 지정해 저장한 뒤 같은 스레드에서 승인을 누르세요. 개발 티켓의 실행 포트는 자동 배정이 기본입니다.':'내용과 담당자를 확인해 저장한 뒤 같은 스레드에서 다음 단계를 선택하세요. 변경한 내용은 다시 승인이 필요합니다.'}]}];
   if(['recommended','created'].includes(r.state)){
     const products=await rows<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=?',a.ownerId);
     const product=products.find(p=>p.id===r.product_id),repo=product?(JSON.parse(product.repositories_json) as TicketRepository[]).find(v=>v.id===r.repository_id):undefined;
@@ -62,21 +68,22 @@ export async function openTicketSlackEditor(team:string,user:string,trigger:stri
     const selected=dependencies.length?await rows<{id:string;title:string}>('SELECT id,title FROM ticket_automation_requests WHERE owner_id=? AND id IN (SELECT value FROM json_each(?))',a.ownerId,JSON.stringify(dependencies)):[];
     blocks.push(field('ta_dependencies','선행 티켓',{type:'multi_external_select',min_query_length:0,placeholder:{type:'plain_text',text:'선행 티켓 검색'},...(selected.length?{initial_options:selected.map(v=>option(v.id,v.title))}:{})},true));
   }else if(r.state==='security_review'){
-    const security=JSON.parse(r.security_json||'{}');if(security.verdict!=='warning')throw new Error('차단된 요청은 강제로 진행할 수 없습니다.');
-    const labels:Record<string,string>={scope_ambiguous:'해결할 범위 확인 필요',sensitive_change:'민감 기능 변경 가능성',dependency_network:'외부 의존성 준비 필요',destructive:'삭제·대량 변경 확인 필요',coordination_conflict:'다른 포트와 수정 파일 중복'};
-    blocks.push({type:'section',text:{type:'plain_text',text:`보안 경고\n${(security.codes||[]).map((c:string)=>`• ${labels[c]||'추가 검증 필요'}`).join('\n')}\n\n허용된 변경 범위를 확인해 주세요. 비밀정보·유출·권한 우회 차단은 해제할 수 없습니다.`}},input('ta_reason','경고 확인 사유','',true,500),field('ta_ack','경고 확인',{type:'checkboxes',options:[option('ack','경고와 작업 범위를 확인했습니다.')]},true));
+    const security=ticketWarning(r.security_json);if(!security.approvable)throw new Error('차단된 요청은 승인할 수 없습니다.');
+    blocks.push({type:'section',text:{type:'plain_text',text:`${r.title}\n\n${security.labels.map(v=>'• '+v).join('\n')}\n\n확인하고 승인하면 자동 검사를 거쳐 개발을 이어갑니다.`}});
   }else if(r.state==='waiting_answer'){
     blocks.push({type:'section',text:{type:'plain_text',text:r.question.slice(0,3000)}},input('ta_answer','담당자 답변','',true));
   }else if(r.state==='review'){
     blocks.push(input('ta_notice','고객에게 보낼 완료 안내',r.notice.slice(0,3000),true));
     if(r.notice.length>3000)blocks.push(input('ta_notice_tail','완료 안내 (계속)',r.notice.slice(3000),true,1000));
   }else{
-    blocks.push({type:'section',text:{type:'plain_text',text:`${r.title}\n\n${r.description}`.slice(0,3000)}});
+    blocks.push({type:'section',text:{type:'plain_text',text:[r.title,ticketWorkflow(r).label,ticketWorkflow(r).next].join('\n\n')}});
+    if(['queued','running'].includes(r.state))blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'실행 중지'},action_id:'ticket_auto_stop',value:`${r.id}:${r.revision}`}]});
     await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',title:{type:'plain_text',text:'티켓 처리 현황'},close:{type:'plain_text',text:'닫기'},blocks}});return;
   }
   if(['recommended','created','review'].includes(r.state))blocks.push(field('ta_requester','완료 안내를 받을 Slack 요청자',{type:'users_select',...(r.requester_slack_user?{initial_user:r.requester_slack_user}:{}),placeholder:{type:'plain_text',text:'원문 고객 채널의 요청자 선택'}},!r.requester_slack_user));
+  if(r.state==='security_review'&&ticketWarning(r.security_json).approvable)blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'보안 검사 다시 실행'},action_id:'ticket_auto_recheck',value:`${r.id}:${r.revision}`}]});
   if(['recommended','created','blocked','failed','security_review'].includes(r.state))blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'원문 다시 분석'},action_id:'ticket_auto_refresh_source',value:`${r.id}:${r.revision}`},{type:'button',text:{type:'plain_text',text:'요청 제외'},action_id:'ticket_auto_dismiss',value:`${r.id}:${r.revision}`,confirm:{title:{type:'plain_text',text:'요청 제외'},text:{type:'plain_text',text:'원문과 처리 이력은 남기고 제외할까요?'},confirm:{type:'plain_text',text:'제외'},deny:{type:'plain_text',text:'취소'}}},{type:'button',text:{type:'plain_text',text:'티켓 목록'},action_id:'ticket_queue_open',value:'{}'}]});
-  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}${requireAssignment?':assignment':''}`,title:{type:'plain_text',text:r.state==='security_review'?'보안 경고 검토':requireAssignment?'담당자 지정 후 승인':'티켓 내용·담당자 수정'},submit:{type:'plain_text',text:r.state==='security_review'?'사유를 남기고 진행':requireAssignment?'담당자 저장':'수정 저장'},close:{type:'plain_text',text:'취소'},blocks}});
+  await slackApi(token,push?'views.push':'views.open',{trigger_id:trigger,view:{type:'modal',callback_id:'ticket_edit_submit',private_metadata:`${r.id}:${r.revision}${requireAssignment?':assignment':''}`,title:{type:'plain_text',text:r.state==='security_review'?'작업 내용 확인':requireAssignment?'담당자 지정 후 승인':'티켓 내용·담당자 수정'},submit:{type:'plain_text',text:r.state==='security_review'?'확인하고 개발 승인':requireAssignment?'담당자 저장':'수정 저장'},close:{type:'plain_text',text:'취소'},blocks}});
 }
 export async function ticketSlackEditorOptions(team:string,user:string,value:string,action:string,query:string,rawState:Record<string,Record<string,Record<string,unknown>>>={}){
   const state=rawState as State;
@@ -103,7 +110,7 @@ export async function submitTicketSlackEditor(team:string,user:string,value:stri
       const [productId,repositoryId]=scalar(state,'ta_repository').split(':');
       await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'start',memberId:scalar(state,'ta_member'),portId:scalar(state,'ta_port'),...(!r.product_id||!r.repository_id?{productId:productId||'',repositoryId:repositoryId||''}:{})});
     }else if(value.endsWith(':reply'))await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'reply',notice:scalar(state,'ta_notice')+scalar(state,'ta_notice_tail'),requesterSlackUser:requester});
-    else if(r.state==='security_review')await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'force',reason:scalar(state,'ta_reason'),acknowledged:Boolean(Object.values(state.ta_ack||{})[0]?.selected_options?.some(o=>o.value==='ack'))});
+    else if(r.state==='security_review')await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'approve_warning'});
     else if(r.state==='waiting_answer'){
       await changeTicketRequest(a,{id:r.id,revision:r.revision,action:'answer',answer:scalar(state,'ta_answer')});
       const latest=await ticketRequestFor(a,r.id);await changeTicketRequest(a,{id:r.id,revision:latest.revision,action:'approve'});
@@ -115,5 +122,9 @@ export async function submitTicketSlackEditor(team:string,user:string,value:stri
     }
     await queueTicketUpdate(a,r.id,'edited');
     return {};
-  }catch(error){return {response_action:'errors',errors:{[value.endsWith(':start')?'ta_member':value.endsWith(':reply')||r.state==='review'?'ta_notice':r.state==='security_review'?'ta_reason':r.state==='waiting_answer'?'ta_answer':'ta_title']:error instanceof Error?error.message:'저장하지 못했습니다. 내용을 확인해 주세요.'}};}
+  }catch(error){
+    const message=error instanceof Error?error.message:'저장하지 못했습니다. 내용을 확인해 주세요.';
+    if(r.state==='security_review')return {response_action:'update',view:{type:'modal',title:{type:'plain_text',text:'진행 확인'},close:{type:'plain_text',text:'닫기'},blocks:[{type:'section',text:{type:'plain_text',text:message}},{type:'context',elements:[{type:'plain_text',text:'원래 티켓의 최신 상태에서 다시 확인해 주세요.'}]}]}};
+    return {response_action:'errors',errors:{[value.endsWith(':start')?'ta_member':value.endsWith(':reply')||r.state==='review'?'ta_notice':r.state==='waiting_answer'?'ta_answer':'ta_title']:message}};
+  }
 }
