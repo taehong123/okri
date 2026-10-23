@@ -4,9 +4,9 @@ import { readLanguagePreferences } from "@/lib/language-preferences";
 import { finalizeAiUsageEvent, getAiUsageSummary, releaseAiUsageReservation, reserveAiUsageEvent, type RequestAuthorization } from "@/lib/pace-data";
 import { slackWorkCommandFormContent } from "@/lib/slack-work-command-parser";
 import { assertSlackWorkRequestRate, estimateCostWonMicros, estimateTokensFromChars, readSlackThread, responseText, responseUsage, SlackWorkIntakeError, type SlackWorkIntakeEvent } from "@/lib/slack-work-intake";
-import {ticketRecommendationSchema,ticketRecommendationInstruction,ticketCorrelationInstruction,validProblemUpdates,validTicketProposal,type TicketProposal,type TicketRecommendationContext,type TicketProblemUpdate} from '@/lib/ticket-recommendation';
+import {ticketRecommendationSchema,ticketRecommendationInstruction,ticketCorrelationInstruction,validProblemUpdates,validFocusDecisions,validTicketProposal,type TicketProposal,type TicketRecommendationContext,type TicketProblemUpdate,type TicketEvidenceMessage,type TicketFocusDecision} from '@/lib/ticket-recommendation';
 
-export type SlackTicketFormContent = { title: string; description: string; messageCount: number; notice?: string;actionable?:boolean;recommendations?:TicketProposal[];existingRequestIds?:string[];analysisModel?:string;noWorkReason?:string;updates?:TicketProblemUpdate[];analysisFailure?:{code:string;retryAt?:string} };
+export type SlackTicketFormContent = { title: string; description: string; messageCount: number; notice?: string;actionable?:boolean;recommendations?:TicketProposal[];existingRequestIds?:string[];analysisModel?:string;noWorkReason?:string;updates?:TicketProblemUpdate[];focusDecisions?:TicketFocusDecision[];analysisFailure?:{code:string;retryAt?:string} };
 type TicketRuntime = typeof env & { OPENAI_API_KEY?: string; OPENAI_MODEL?: string; OKRI_OPENAI_MODEL?: string; OKRPTR_OPENAI_MODEL?: string;OKRI_AI_MAX_REQUESTS_PER_DAY?:string;OKRPTR_AI_MAX_REQUESTS_PER_DAY?:string;OKRI_TICKET_AI_TEST_ACCOUNTS?:string };
 const schema = { type: "object", additionalProperties: false, required: ["title", "description"], properties: {
   title: { type: "string" }, description: { type: "string" },
@@ -17,13 +17,13 @@ export async function prepareSlackTicketForm(input: {
   authorization: RequestAuthorization; token: string; canvasToken?: string | null;
   botUserId: string; event: SlackWorkIntakeEvent; query: string;
   textOnly?: boolean;
-  evidenceMessages?: {user:string;text:string}[];
+  evidenceMessages?: TicketEvidenceMessage[];
   classifyRequest?:boolean;
   recommendation?:TicketRecommendationContext;
 }): Promise<SlackTicketFormContent> {
   const thread = input.evidenceMessages ? {messages:input.evidenceMessages,truncated:false} : await readSlackThread(input.token, input.event, input.canvasToken, { full: true, includeCanvas: !input.textOnly });
   if (thread.truncated) throw new SlackWorkIntakeError("스레드 전체를 읽지 못했습니다. 메시지 수나 길이를 줄인 뒤 다시 시도해 주세요.", "ticket_thread_incomplete");
-  const messages = thread.messages.filter((message) => message.user !== input.botUserId).map((message) => {
+  const messages:TicketEvidenceMessage[] = thread.messages.filter((message) => message.user !== input.botUserId).map((message) => {
     const command = slackWorkCommandFormContent(message.text);
     return { ...message, text: command ? command.description || command.title : message.text };
   }).filter((message) => message.text.trim());
@@ -86,12 +86,14 @@ export async function prepareSlackTicketForm(input: {
     const value = JSON.parse(responseText(result.data)) as Record<string, unknown>;
     if(input.recommendation){
       if(typeof value.actionable!=='boolean'||!Array.isArray(value.recommendations)||!value.recommendations.every(validTicketProposal)||!Array.isArray(value.existingRequestIds)||value.existingRequestIds.some(v=>typeof v!=='string'||!input.recommendation!.knownRequests.some(r=>r.id===v))||typeof value.noWorkReason!=='string')return fallback;
+      if(!validFocusDecisions(value.focusDecisions,input.recommendation,messages,value.recommendations))return fallback;
+      if(input.recommendation.focusMessages&&!value.actionable&&(value.focusDecisions as TicketFocusDecision[]).some(d=>d.intent==='new_request'))return fallback;
       if(input.recommendation.sourceRoots&&(!validProblemUpdates(value.updates,input.recommendation,transcript)||value.recommendations.some(p=>!Array.isArray(p.sourceRoots)||!p.sourceRoots.length||p.sourceRoots.some((r:string)=>!input.recommendation!.sourceRoots!.includes(r)))))return fallback;
       if(input.recommendation.sourceRoots&&(value.existingRequestIds as string[]).some(id=>!(value.updates as TicketProblemUpdate[]).some(u=>u.requestId===id)))return fallback;
       if(value.actionable===false&&Array.isArray(value.updates)&&value.updates.some((u:TicketProblemUpdate)=>u.kind!=='clarification'||!(value.existingRequestIds as string[]).includes(u.requestId)))return fallback;
       if(value.actionable&&!value.recommendations.length&&!value.existingRequestIds.length)return fallback;
       if(!value.actionable&&(value.recommendations.length||!value.noWorkReason.trim()))return fallback;
-      return {title:typeof value.title==='string'?value.title:'',description:typeof value.description==='string'?value.description:'',messageCount:messages.length,actionable:value.actionable,recommendations:value.recommendations,existingRequestIds:value.existingRequestIds as string[],analysisModel:model,noWorkReason:value.noWorkReason,updates:value.updates as TicketProblemUpdate[]|undefined};
+      return {title:typeof value.title==='string'?value.title:'',description:typeof value.description==='string'?value.description:'',messageCount:messages.length,actionable:value.actionable,recommendations:value.recommendations,existingRequestIds:value.existingRequestIds as string[],analysisModel:model,noWorkReason:value.noWorkReason,updates:value.updates as TicketProblemUpdate[]|undefined,focusDecisions:value.focusDecisions as TicketFocusDecision[]|undefined};
     }
     if(input.classifyRequest&&value.actionable===false)return {title:'',description:'',messageCount:messages.length,actionable:false};
     if (typeof value.title !== "string" || !value.title.trim() || typeof value.description !== "string" || !value.description.trim()) return fallback;

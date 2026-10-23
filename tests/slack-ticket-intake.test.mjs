@@ -186,3 +186,32 @@ test('status-only replies can update an evidenced existing issue without authori
     assert.equal(Boolean(result.analysisModel),accepted);if(accepted){assert.equal(result.actionable,false);assert.deepEqual(result.existingRequestIds,['r1']);assert.equal(result.updates[0].kind,'clarification');}else assert.equal(result.analysisFailure.code,'analysis_invalid_response');
   });
 });
+
+test('speaker-aware intake requires an evidenced decision for every focus and no new ticket from coordination',async t=>{
+  const staff={user:'USTAFF',ts:'1.0',sourceRoot:'1.0',speakerRole:'internal',text:'메일 연동 준비를 위해 사용 중인 서비스와 담당자를 알려주세요.'};
+  const customer={user:'UCUSTOMER',ts:'2.0',sourceRoot:'2.0',speakerRole:'unverified',text:'상품 저장 버튼을 누르면 오류가 발생합니다.'};
+  const decision=(m,intent)=>({sourceRoot:m.sourceRoot,messageTs:m.ts,intent,reason:intent==='coordination'?'Team member collecting setup information':'New product problem',evidenceQuotes:[m.text]});
+  const proposal={category:'bug_fix',title:'상품 저장 실패',problem:customer.text,solution:'저장 실패를 재현하고 수정합니다.',acceptanceCriteria:['상품 저장 성공'],questions:[],sourceRoots:['2.0']};
+  const focusMetadata=m=>({user:m.user,ts:m.ts,sourceRoot:m.sourceRoot,speakerRole:m.speakerRole});
+  const context={model:'gpt-6.1-sol',productSpecification:'Reviewed specification',focusMessage:staff.text,knownRequests:[],sourceRoots:['1.0','2.0'],focusMessages:[staff,customer].map(focusMetadata)};
+  const value={title:'',description:'',actionable:true,recommendations:[proposal],existingRequestIds:[],updates:[],noWorkReason:'',focusDecisions:[decision(staff,'coordination'),decision(customer,'new_request')]};
+  for(const [name,changes,accepted] of [
+    ['mixed customer request survives staff coordination',{},true],
+    ['missing decision',{focusDecisions:[decision(customer,'new_request')]},false],
+    ['duplicate decision',{focusDecisions:[decision(staff,'coordination'),decision(staff,'coordination')]},false],
+    ['forged quote',{focusDecisions:[{...decision(staff,'coordination'),evidenceQuotes:[customer.text]},decision(customer,'new_request')]},false],
+    ['coordination cannot support a new ticket',{recommendations:[{...proposal,sourceRoots:['1.0']}]},false],
+    ['customer request cannot be silently discarded',{actionable:false,recommendations:[],noWorkReason:'No work'},false],
+  ])await t.test(name,async child=>{
+    const f=fixture(child,{modelOutput:JSON.stringify({...value,...changes})}),result=await f.prepareSlackTicketForm({...f.input,evidenceMessages:[staff,customer],recommendation:context});
+    assert.equal(Boolean(result.analysisModel),accepted);if(!accepted)assert.equal(result.analysisFailure.code,'analysis_invalid_response');
+    const request=f.requests.find(r=>r.method==='model').body,payload=JSON.parse(request.input[1].content);
+    assert.deepEqual(payload.context.focusMessages,context.focusMessages);assert.equal(payload.messages[0].speakerRole,'internal');assert.match(request.input[0].content,/collecting setup information/);assert.match(request.input[0].content,/Do not exclude all internal speakers/);
+    assert.ok(request.text.format.schema.required.includes('focusDecisions'));
+  });
+  for(const [message,intent,newWork] of [[staff,'coordination',false],[{...staff,text:'개발 진행중입니다. 완료되면 말씀드릴게요!'},'support_reply',false],[{...staff,text:'제가 확인해 보니 상품 저장 시 오류가 재현됩니다.'},'new_request',true],[{...customer,text:'이 양식은 어떻게 설정하나요?'},'new_request',true]])await t.test(intent+message.text,async child=>{
+    const output={...value,actionable:newWork,recommendations:newWork?[{...proposal,sourceRoots:[message.sourceRoot]}]:[],noWorkReason:newWork?'':'담당자의 안내 또는 준비 요청이며 신규 고객 요구가 아닙니다.',focusDecisions:[decision(message,intent)]};
+    const f=fixture(child,{modelOutput:JSON.stringify(output)}),result=await f.prepareSlackTicketForm({...f.input,evidenceMessages:[message],recommendation:{...context,focusMessages:[focusMetadata(message)]}});
+    assert.equal(result.actionable,newWork);assert.equal(result.analysisModel,'gpt-6.1-sol');assert.equal(result.focusDecisions[0].intent,intent);
+  });
+});
