@@ -5,7 +5,7 @@ import { createLocalAgentPairing } from "@/lib/local-agent";
 import { prepareSlackTicketForm } from "@/lib/slack-ticket-intake";
 import { readSlackThread } from "@/lib/slack-work-intake";
 import { assessTicketText, canAutoApproveTicket, escapeSlackText, redactTicketText, TICKET_PRIORITIES, ticketPriorityRank, type TicketPriority, type TicketRisk, type TicketState } from "@/lib/ticket-policy";
-import {ticketProposalDescription,TICKET_CATEGORIES,TICKET_CATEGORY_LABELS,type TicketCategory,type TicketProposal,type TicketProblemUpdate} from '@/lib/ticket-recommendation';
+import {ticketProposalDescription,TICKET_CATEGORIES,TICKET_CATEGORY_LABELS,type TicketCategory,type TicketProposal,type TicketProblemUpdate,type TicketEvidenceMessage,type TicketFocusDecision} from '@/lib/ticket-recommendation';
 
 export type TicketChannelRule = { id: string; name: string; enabled: boolean; autoApprove: "manual" | "low_risk"; memberId: string; portId: string; productId?:string; repositoryId?:string;relayUserIds?:string[];relayPrefix?:string;relayContentStart?:string;relayContentEnd?:string };
 export type TicketRepository={id:string;name:string;remote:string;installRoots?:string[]};
@@ -237,19 +237,20 @@ async function readSource(owner: string, channel: string, ts: string, user: stri
   const thread = await readSlackThread(token, { channel, channelType: "channel", user, text: "", ts, threadTs: ts }, undefined, { full: true, includeCanvas:false });
   if (thread.truncated) fail("전체 스레드를 읽지 못해 승인을 중지했습니다.");
   const s=await settings(owner),rule=s?config(s).channels.find(c=>c.id===channel):undefined;
+  const internalUsers=new Set((await rows<{slack_user_id:string}>("SELECT l.slack_user_id FROM slack_member_links l JOIN workspace_members m ON m.id=l.member_id AND m.workspace_id=l.owner_id AND m.status='active' WHERE l.owner_id=? AND l.team_id=?",owner,connection.teamId)).map(v=>v.slack_user_id));
   const messages = thread.messages.filter(m => m.user !== connection.botUserId);
-  const evidenceMessages=messages.flatMap(m=>{
-    if(!m.botId)return [{ts:m.ts,user:m.user,text:m.text}];
+  const evidenceMessages:TicketEvidenceMessage[]=messages.flatMap<TicketEvidenceMessage>(m=>{
+    if(!m.botId)return [{ts:m.ts,sourceRoot:ts,user:m.user,text:m.text,speakerRole:internalUsers.has(m.user)?'internal':'unverified'}];
     if(!rule?.relayUserIds?.includes(m.user))return [];
     let body=m.text;if(rule.relayPrefix&&!body.trim().replace(/^\*+/,'').startsWith(rule.relayPrefix))return [];
     if(rule.relayContentStart){const start=body.indexOf(rule.relayContentStart);if(start<0)return [];body=body.slice(start+rule.relayContentStart.length).replace(/^[\s*_：:]+/u,'');}
     if(rule.relayContentEnd){const end=body.indexOf(rule.relayContentEnd);if(end<0)return [];body=body.slice(0,end).trim();}
-    return body?[{ts:m.ts,user:m.user,text:body}]:[];
+    return body?[{ts:m.ts,sourceRoot:ts,user:m.user,text:body,speakerRole:'customer_relay'}]:[];
   });
   const evidence=evidenceMessages.map(m=>m.text);
   const raw = evidence.join("\n\n---\n\n"),safe=redactTicketText(raw).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]');
   const hasAttachments=Boolean(thread.attachmentsPresent||thread.imageFiles?.length||thread.canvasCandidateCount);
-  return { connection, token, raw,safe,evidenceMessages:evidenceMessages.map(m=>({...m,text:redactTicketText(m.text).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]')})), requester: messages[0]?.user || user, hasAttachments, hash: await digest(JSON.stringify({messages:messages.map(m => ({ user: m.user, ts: m.ts, text: m.text })),hasAttachments,evidence})) };
+  return { connection, token, raw,safe,evidenceMessages:evidenceMessages.map(m=>({...m,text:redactTicketText(m.text).replace(/(?<!\d)(?:\+82[- ]?1[016789]|01[016789])[- ]?\d{3,4}[- ]?\d{4}(?!\d)/g,'[연락처 삭제]')})), requester: evidenceMessages.find(m=>m.speakerRole==='unverified')?.user || evidenceMessages[0]?.user || user, hasAttachments, hash: await digest(JSON.stringify({messages:messages.map(m => ({ user: m.user, ts: m.ts, text: m.text })),hasAttachments,evidence})) };
 }
 export type TicketIntakeEvent={channel:string;ts:string;user:string;text:string;threadTs?:string;hasAttachments?:boolean;isRelay?:boolean;recovery?:boolean;forceReview?:boolean;batchEvents?:TicketIntakeEvent[]};
 export type TicketIntakeOutcome={state:'analyzed'|'no_work'|'existing'|'ignored';requestIds:string[];reason?:string};
@@ -292,11 +293,12 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
     const focusTs=new Set(batch.filter(e=>(e.threadTs||e.ts)===root).map(e=>e.ts));
     // Known problems carry compact memory. Only new evidence and nearby/latest context re-enter the model.
     const selected=knownRecords.some(r=>r.source_ts===root)||linkedRoots.some(r=>r.root_ts===root)?v.evidenceMessages.filter((m,i,all)=>focusTs.has(m.ts||'')||i>=all.length-8||all.slice(Math.max(0,i-1),i+2).some(n=>focusTs.has(n.ts||''))):v.evidenceMessages;
-    return selected.map(m=>({...m,text:`[sourceRoot=${root}; ts=${m.ts}; user=${m.user}]\n${m.text}`}));
+    return selected;
   });
   if(evidenceMessages.reduce((n,m)=>n+m.text.length,0)>48000)throw new TicketAutomationError('대화가 길어 자동 병합을 중지했습니다. 수집 내역에서 범위를 확인해 주세요.',409);
   const product=rule.productId?await one<TicketDevelopmentProduct>('SELECT * FROM ticket_development_products WHERE owner_id=? AND id=?',s.owner_id,rule.productId):null;
   const focus=batch.map(e=>sources.get(e.threadTs||e.ts)?.evidenceMessages.find(m=>m.ts===e.ts)).filter(Boolean).map(m=>m!.text).join('\n\n')||redactTicketText(event.text);
+  const focusMessages=batch.flatMap(e=>{const m=sources.get(e.threadTs||e.ts)?.evidenceMessages.find(m=>m.ts===e.ts&&m.user===e.user);return m?[{user:m.user,ts:m.ts,sourceRoot:m.sourceRoot,speakerRole:m.speakerRole}]:[];});
   // A one-word confirmation is not enough evidence for an AI-generated claim of resolution.
   // Preserve the exact reply only on problems already linked to its real source thread.
   const confirmations=batch.map(e=>({root:e.threadTs||e.ts,message:sources.get(e.threadTs||e.ts)?.evidenceMessages.find(m=>m.ts===e.ts),attachments:e.hasAttachments}));
@@ -307,14 +309,17 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
     await applyProblemUpdates(updates,s,c,event,sources);
     return {state:'existing',requestIds:confirmedRequests.map(r=>r.id)};
   }
-  let proposals:TicketProposal[]=[{category:'improvement',title:'보안 검토가 필요한 고객 요청',problem:focus,solution:'요청의 비밀정보·권한·데이터 접근 범위를 담당자가 먼저 확인합니다. 차단된 내용은 개발 실행에 전달하지 않습니다.',acceptanceCriteria:['보안 경계를 위반하는 명령과 정보 전송을 실행하지 않음'],questions:[]}],classified=false,model='';
+  let proposals:TicketProposal[]=[{category:'improvement',title:'보안 검토가 필요한 고객 요청',problem:focus,solution:'요청의 비밀정보·권한·데이터 접근 범위를 담당자가 먼저 확인합니다. 차단된 내용은 개발 실행에 전달하지 않습니다.',acceptanceCriteria:['보안 경계를 위반하는 명령과 정보 전송을 실행하지 않음'],questions:[]}],classified=false,model='',focusDecisions:TicketFocusDecision[]=[];
   if (assessment.risk !== "blocked"&&source.safe.trim()) {
     const form = await prepareSlackTicketForm({ authorization: { ownerId: s.owner_id, userId: c.actorUserId, email: actor.email, displayName: actor.display_name, role: actor.role, apiToken: false }, token: source.token, botUserId: connection.botUserId,
-      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages,classifyRequest:true,recommendation:{model:c.defaultModel||'gpt-6.1-sol',productSpecification:product?.specification||'',focusMessage:focus,knownRequests,sourceRoots,temporaryAllowance:c.temporaryAllowance} });
+      event: { ...event, channelType: "channel", threadTs: rootTs }, query: "", textOnly:true,evidenceMessages,classifyRequest:true,recommendation:{model:c.defaultModel||'gpt-6.1-sol',productSpecification:product?.specification||'',focusMessage:focus,focusMessages,knownRequests,sourceRoots,temporaryAllowance:c.temporaryAllowance} });
     if(!form.analysisModel||!form.recommendations)throw Object.assign(new TicketAutomationError('원문은 수집됐으며 추천 분석을 다시 시도합니다.',503),form.analysisFailure);
+    focusDecisions=form.focusDecisions||[];
+    await audit(s.owner_id,null,c.actorUserId,'intake_context_classified',null,{model:form.analysisModel,channel:event.channel,focusDecisions,actionable:form.actionable,noWorkReason:form.noWorkReason||''});
     await applyProblemUpdates(form.updates||[],s,c,event,sources,form.analysisModel);
     if(form.actionable===false&&(form.existingRequestIds||[]).length)return {state:'existing',requestIds:form.existingRequestIds!};
-    if(form.actionable===false&&(manualImport||!event.forceReview&&!event.hasAttachments))return {state:'no_work',requestIds:[],reason:form.noWorkReason};
+    const staffContextOnly=focusMessages.length>0&&focusMessages.every(m=>m.speakerRole==='internal')&&focusDecisions.length===focusMessages.length&&focusDecisions.every(d=>['support_reply','coordination','acknowledgement','other'].includes(d.intent));
+    if(form.actionable===false&&(manualImport||!event.forceReview&&(!event.hasAttachments||staffContextOnly)))return {state:'no_work',requestIds:[],reason:form.noWorkReason};
     if(!form.recommendations.length&&((form.existingRequestIds||[]).length||!event.forceReview&&!event.hasAttachments))return {state:'existing',requestIds:form.existingRequestIds||[]};
     classified=form.actionable===true;
     proposals=form.recommendations.length?form.recommendations:[{...proposals[0],title:'담당자 확인이 필요한 고객 요청',problem:focus||'첨부 파일에 있는 요청',solution:'원문과 첨부 내용을 요청자와 확인한 다음 해결 범위를 정합니다.',acceptanceCriteria:['요청자와 담당자가 문제와 기대 동작을 확인함'],questions:['어떤 동작을 기대하셨나요?']}];model=form.analysisModel;
@@ -335,7 +340,7 @@ export async function analyzeTicketEvent(connection: { ownerId: string; teamId: 
   const requesterName = requesterId?(requester?.user?.profile?.display_name || requester?.user?.real_name || proposalSource.requester):'';
   const issueKey=await digest(`${proposal.category}\n${title}\n${proposal.problem}`);
   plans.push({id,index:statements.length,auto:proposal.category!=='guidance'&&!event.recovery&&!event.forceReview&&classified&&canAutoApproveTicket({mode:rule.autoApprove,risk,memberId:rule.memberId,portId:eligibilityPortId,hasAttachments:event.hasAttachments||source.hasAttachments})});
-  statements.push(env.DB.prepare(`INSERT OR IGNORE INTO ticket_automation_requests(id,owner_id,team_id,source_channel,source_ts,source_event_ts,issue_key,category,analysis_json,source_user,requester_slack_user,requester_name,source_digest,source_text,title,description,risk,reasons_json,state,member_id,port_id,created_at,updated_at,product_id,repository_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, s.owner_id, s.team_id, event.channel, proposalRoot,proposalEvent.ts,issueKey,proposal.category,JSON.stringify({model,proposal:JSON.parse(redactTicketText(JSON.stringify(proposal))),original:focus}), proposalEvent.user, requesterId, requesterName, proposalSource.hash, proposalSource.safe, title, description, risk, JSON.stringify([...assessment.reasons, ...derived.reasons]), risk === "blocked" ? "blocked" : "recommended", rule.memberId || null, selectedPortId, time, time,rule.productId||null,rule.repositoryId||''));
+  statements.push(env.DB.prepare(`INSERT OR IGNORE INTO ticket_automation_requests(id,owner_id,team_id,source_channel,source_ts,source_event_ts,issue_key,category,analysis_json,source_user,requester_slack_user,requester_name,source_digest,source_text,title,description,risk,reasons_json,state,member_id,port_id,created_at,updated_at,product_id,repository_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(id, s.owner_id, s.team_id, event.channel, proposalRoot,proposalEvent.ts,issueKey,proposal.category,JSON.stringify({model,proposal:JSON.parse(redactTicketText(JSON.stringify(proposal))),original:focus,focusDecisions}), proposalEvent.user, requesterId, requesterName, proposalSource.hash, proposalSource.safe, title, description, risk, JSON.stringify([...assessment.reasons, ...derived.reasons]), risk === "blocked" ? "blocked" : "recommended", rule.memberId || null, selectedPortId, time, time,rule.productId||null,rule.repositoryId||''));
   statements.push(env.DB.prepare("INSERT INTO ticket_automation_audit(id,owner_id,request_id,actor_user_id,action,revision,details_json,created_at) SELECT ?,owner_id,id,'slack','intake_validated',1,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=?").bind(crypto.randomUUID(),JSON.stringify({risk,sourceDigest:source.hash}),time,id,s.owner_id));
   const r={id,owner_id:s.owner_id,state:risk==='blocked'?'blocked' as const:'recommended' as const,revision:1,category:proposal.category};
   for(const root of proposal.sourceRoots||[proposalRoot]){const linked=sources.get(root);if(linked)statements.push(env.DB.prepare('INSERT OR IGNORE INTO ticket_problem_sources SELECT ?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ticket_automation_requests WHERE id=? AND owner_id=?)').bind(s.owner_id,id,event.channel,root,linked.hash,time,id,s.owner_id));}
@@ -635,7 +640,7 @@ function ticketMessagePayload(r:MessageTicket,kind:string,body:string,customer?:
   const id=r.id;
   const action = ['recommended','created'].includes(r.state) ? r.category==='guidance'?'reply':'start' : r.state==='review'?'reply':r.state==='security_review'?'security':r.state==='waiting_answer'?'edit':null;
   const summary=r.title&&r.description!==undefined&&kind!=='source'&&!kind.startsWith('completion:')?ticketSummary(r as TicketAutomationRequest,customer||r.source_channel||'확인 필요'):null;
-  const status=r.state==='queued'?`실행 대기 · ${portName||'포트 배정됨'} · 착수 전 보안 검사 예정`:r.state==='running'?`개발 진행 중 · ${portName||'포트 배정됨'}`:r.state==='security_review'?'보안 경고 확인 필요 · 경고 검토 버튼에서 사유를 남겨 주세요.':r.state==='publishing'?'승인한 회신 전송 대기':r.state==='published'?'회신 완료':r.state==='review'?'완료 회신 검토':r.state==='blocked'?'보안 검증 차단':r.state==='failed'?'실행 중지·실패 · 상세 내용 확인':r.category==='guidance'?'회신 내용을 확인한 뒤 원문 스레드에 전송합니다.':'담당자 확인 후 포트를 자동 배정합니다.';
+  const status=r.state==='queued'?`실행 대기 · ${portName||'포트 배정됨'} · 착수 전 보안 검사 예정`:r.state==='running'?`개발 진행 중 · ${portName||'포트 배정됨'}`:r.state==='security_review'?'보안 경고 확인 필요 · 경고 검토 버튼에서 사유를 남겨 주세요.':r.state==='publishing'?'승인한 회신 전송 대기':r.state==='published'?'회신 완료':r.state==='dismissed'?'티켓 추천 제외':r.state==='review'?'완료 회신 검토':r.state==='blocked'?'보안 검증 차단':r.state==='failed'?'실행 중지·실패 · 상세 내용 확인':r.category==='guidance'?'회신 내용을 확인한 뒤 원문 스레드에 전송합니다.':'담당자 확인 후 포트를 자동 배정합니다.';
   const eventBody=!/^(?:recommendation$|updated:|layout:|state:)/.test(kind);
   const safe=redactTicketText(summary?`${summary}\n\n${status}${eventBody?`\n${body.slice(0,2800)}`:''}`:body),blocks: Record<string, unknown>[] = [];
   for(let offset=0;offset<safe.length;offset+=2800)blocks.push({type:'section',text:{type:kind==='source'?'plain_text':'mrkdwn',text:safe.slice(offset,offset+2800)}});

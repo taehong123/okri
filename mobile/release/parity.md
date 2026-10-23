@@ -337,3 +337,7 @@ Web-only: workspace-scoped customer intake, product specifications and multiple 
 ## 2026-10-23 Streamlined Slack ticket actions
 
 Web/server and Slack only: compact customer/requester/requirement/category summaries, one reviewed development-start action with atomic ticket/assignee/job creation, direct approved guidance replies without execution ports, and in-place recommendation updates. Existing v1 endpoints and native ticket/task fields retain their semantics. Native UI parity remains deferred; no native binary, OTA or device verification is claimed.
+
+## 2026-10-23 Slack speaker and request intent
+
+Server and Slack only: trusted active workspace/Slack member links distinguish team replies and coordination from new product requests. Per-message intent and verbatim evidence are validated and audited before recommendations; genuine staff reports, unlinked speakers and customer requests in mixed conversations remain eligible. Customer authors take requester precedence in staff-rooted threads. Existing native v1 fields and semantics are unchanged; native UI parity remains deferred, with no binary or OTA release claimed.

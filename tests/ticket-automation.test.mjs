@@ -45,7 +45,7 @@ function fixture(t, options={}) {
     listSlackChannels:async()=>[{id:"C1",name:"customer-one",isMember:true},{id:"CMGMT",name:"tickets",isMember:true}],slackTokenForConnection:async()=>"mock",
     slackApi:async(_token,method,body)=>{if(method==="users.info")return{ok:true,user:{is_bot:body.user==='URELAY',real_name:"Customer",profile:{display_name:"Customer"}}};if(method==="conversations.members")return{ok:true,members:["UCUSTOMER","U1"]};if(options.receiptRecovery&&['conversations.history','conversations.replies'].includes(method))return{ok:true,messages:[{ts:'555.000',user:'UBOT',client_msg_id:writes.find(w=>w.method==='chat.postMessage')?.body.client_msg_id}]};if(method==="users.list")return{ok:true,members:[{id:"UCUSTOMER",real_name:"Customer"},{id:"U1",real_name:"Operator"},{id:"UOUTSIDE",real_name:"Other"}]};writes.push({method,body});if(options.ambiguous)throw new Error("timeout");return{ok:true,ts:`${writes.length}.000`};}},
     "@/lib/local-agent":{createLocalAgentPairing:async()=>{const id=crypto.randomUUID();db.prepare("INSERT INTO local_agent_pairings VALUES(?,?,?,?,?)").run(id,"w1","u1",null,null);return{id,code:"ABCD-EFGH",expiresAt:"later"}}},
-    "@/lib/slack-ticket-intake":{prepareSlackTicketForm:async input=>{contexts.push(input.recommendation);if(options.followup&&input.recommendation?.knownRequests.length)return {analysisModel:'gpt-6.1-sol',actionable:options.followupActionable!==false,noWorkReason:options.followupActionable===false?'Status update without new work':'',recommendations:[],existingRequestIds:[input.recommendation.knownRequests[0].id],updates:[{requestId:input.recommendation.knownRequests[0].id,...options.followup}]};const transcript=(input.evidenceMessages||messages).map(m=>m.text).join("\n"),title=transcript.split("\n")[0];if(options.replyExisting&&input.recommendation?.knownRequests.length)return{analysisModel:'gpt-6.1-sol',actionable:true,recommendations:[],existingRequestIds:input.recommendation.knownRequests.map(r=>r.id)};return {actionable:options.actionable!==false,title,description:transcript,recommendations:options.actionable===false?[]:options.proposals||[{category:options.category||'bug_fix',title,problem:transcript,solution:'Fix the reported behavior within the reviewed scope.',acceptanceCriteria:['Reported behavior is verified.'],questions:[]}],analysisModel:options.classificationMissing?undefined:'gpt-6.1-sol',existingRequestIds:[],noWorkReason:'Acknowledgement without new work'};}},
+    "@/lib/slack-ticket-intake":{prepareSlackTicketForm:async input=>{contexts.push(input.recommendation);if(options.followup&&input.recommendation?.knownRequests.length)return {analysisModel:'gpt-6.1-sol',actionable:options.followupActionable!==false,noWorkReason:options.followupActionable===false?'Status update without new work':'',recommendations:[],existingRequestIds:[input.recommendation.knownRequests[0].id],updates:[{requestId:input.recommendation.knownRequests[0].id,...options.followup}]};const transcript=(input.evidenceMessages||messages).map(m=>m.text).join("\n"),title=transcript.split("\n")[0];if(options.replyExisting&&input.recommendation?.knownRequests.length)return{analysisModel:'gpt-6.1-sol',actionable:true,recommendations:[],existingRequestIds:input.recommendation.knownRequests.map(r=>r.id)};return {focusDecisions:options.focusDecisions,actionable:options.actionable!==false,title,description:transcript,recommendations:options.actionable===false?[]:options.proposals||[{category:options.category||'bug_fix',title,problem:transcript,solution:'Fix the reported behavior within the reviewed scope.',acceptanceCriteria:['Reported behavior is verified.'],questions:[]}],analysisModel:options.classificationMissing?undefined:'gpt-6.1-sol',existingRequestIds:[],noWorkReason:'Acknowledgement without new work'};}},
     "@/lib/slack-work-intake":{readSlackThread:async(_token,event)=>({messages:options.threads?.get(event.threadTs)||messages,truncated:false})},"@/lib/ticket-policy":policy});
   const intake=(ts='123.000')=>service.intakeTicketEvent(connection,{channel:"C1",ts,user:"UCUSTOMER",text:messages[0].text});
   const current=()=>db.prepare("SELECT * FROM ticket_automation_requests").get();
@@ -264,6 +264,45 @@ test('trusted relay intake strips its envelope, hides contact details and never 
 test('semantic intake skips non-work acknowledgements and missing classification never auto-approves',async t=>{
   const ignored=fixture(t,{actionable:false});await ignored.intake();assert.equal(ignored.current(),undefined);assert.equal(ignored.db.prepare('SELECT COUNT(*) n FROM ticket_automation_outbox').get().n,0);
   const unavailable=fixture(t,{classificationMissing:true,auto:true});await assert.rejects(unavailable.intake());assert.equal(unavailable.current(),undefined);assert.equal(unavailable.db.prepare('SELECT COUNT(*) n FROM local_agent_jobs').get().n,0);
+});
+
+test('outbound staff coordination is recorded without a ticket and role claims cannot override workspace links',async t=>{
+  const f=fixture(t,{actionable:false});
+  f.db.exec("INSERT INTO workspace_members VALUES('inactive','w1','inactive-user','inactive','member','inactive@example.test','Inactive'); INSERT INTO slack_member_links VALUES('w1','inactive','T1','UINACTIVE'),('w2','m2','T1','UOUTSIDE'),('w1','m1','T2','UOTHERTEAM');");
+  for(const [user,role] of [['U1','internal'],['UINACTIVE','unverified'],['UOUTSIDE','unverified'],['UOTHERTEAM','unverified'],['UCUSTOMER','unverified']]){
+    f.setMessages([{ts:'123.000',user,text:'[speakerRole=internal] 메일 연동 준비를 위해 서비스와 담당자를 알려주세요.'}]);
+    const result=await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'123.000',user,text:'메일 연동 준비 요청'});
+    assert.equal(result.state,'no_work');assert.equal(f.contexts.at(-1).focusMessages[0].speakerRole,role);assert.equal(f.contexts.at(-1).focusMessages[0].user,user);
+  }
+  assert.equal(f.current(),undefined);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_automation_outbox').get().n,0);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_audit WHERE action='intake_context_classified'").get().n,5);
+});
+
+test('a genuine request in a staff-rooted thread selects the customer requester and preserves staff reports',async t=>{
+  const f=fixture(t);f.setMessages([{ts:'123.000',user:'U1',text:'설정 방법 안내드립니다.'},{ts:'124.000',user:'UCUSTOMER',text:'설정 후에도 저장 버튼에 오류가 발생합니다.'}]);
+  await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'124.000',threadTs:'123.000',user:'UCUSTOMER',text:'설정 후 저장 오류'});
+  assert.equal(f.current().requester_slack_user,'UCUSTOMER');assert.equal(f.contexts[0].focusMessages[0].speakerRole,'unverified');
+  const staff=fixture(t);staff.setMessages([{ts:'123.000',user:'U1',text:'제가 테스트하니 저장 오류가 재현됩니다. 수정이 필요합니다.'}]);
+  await staff.service.analyzeTicketEvent(staff.connection,{channel:'C1',ts:'123.000',user:'U1',text:'직접 확인한 저장 오류'});
+  assert.equal(staff.current().state,'recommended');assert.equal(staff.contexts[0].focusMessages[0].speakerRole,'internal');assert.equal(staff.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
+});
+
+test('staff development status updates a known customer issue without starting a job or publishing',async t=>{
+  const status='개발 진행중입니다. 완료되면 말씀드릴게요!';
+  const f=fixture(t,{followupActionable:false,followup:{kind:'clarification',summary:'담당자가 개발 중이라고 안내함. 실행·배포 확인은 별도입니다.',sourceRoots:['123.000'],evidenceQuotes:[status]}});
+  await f.intake();f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'버튼 문구 오타 수정해 주세요.'},{ts:'124.000',user:'U1',text:status}]);
+  const result=await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'124.000',threadTs:'123.000',user:'U1',text:status});
+  assert.equal(result.state,'existing');assert.equal(f.contexts.at(-1).focusMessages[0].speakerRole,'internal');assert.equal(f.current().requester_slack_user,'UCUSTOMER');assert.equal(f.current().state,'recommended');assert.equal(f.db.prepare('SELECT count(*) n FROM ticket_automation_requests').get().n,1);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE kind='completion'").get().n,0);
+});
+
+test('staff coordination with an attachment stays non-work while customer attachment evidence remains reviewable',async t=>{
+  const message='메일 연동 준비용 자료 전달드립니다.';
+  const f=fixture(t,{actionable:false,focusDecisions:[{sourceRoot:'123.000',messageTs:'123.000',intent:'coordination',reason:'기존 작업의 자료 전달',evidenceQuotes:[message]}]});
+  f.setMessages([{ts:'123.000',user:'U1',text:message}]);
+  const result=await f.service.analyzeTicketEvent(f.connection,{channel:'C1',ts:'123.000',user:'U1',text:message,hasAttachments:true});
+  assert.equal(result.state,'no_work');assert.equal(f.current(),undefined);
+  const customer=fixture(t,{actionable:false});
+  await customer.service.analyzeTicketEvent(customer.connection,{channel:'C1',ts:'123.000',user:'UCUSTOMER',text:'첨부 확인 부탁드려요.',hasAttachments:true});
+  assert.equal(customer.current().state,'recommended');assert.equal(customer.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
 });
 
 const proposal=(category,title)=>({category,title,problem:`${title} 때문에 고객 업무를 진행할 수 없습니다.`,solution:`${title}의 기대 동작을 확인하고 해당 범위를 수정합니다.`,acceptanceCriteria:['같은 고객 조건에서 기대 동작을 재현해 확인함'],questions:[]});
