@@ -690,6 +690,7 @@ export async function deliverTicketOutbox() {
   const oldCards=await rows<{id:string;owner_id:string;request_id:string}>("SELECT o.id,o.owner_id,o.request_id FROM ticket_automation_outbox o JOIN ticket_automation_settings s ON s.owner_id=o.owner_id AND s.enabled=1 WHERE o.kind='recommendation' AND o.state='sent' AND o.channel_id=json_extract(s.config_json,'$.destination') AND json_extract(s.config_json,'$.notificationsAuthorized')=1 AND COALESCE(json_extract(o.body_json,'$.cardVersion'),0)<2 LIMIT 6");
   for(const card of oldCards){const r=await one<TicketAutomationRequest>('SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?',card.request_id,card.owner_id),s=await settings(card.owner_id);if(r&&s)await queueTicketMessage(r.owner_id,r.id,`layout:${r.revision}`,config(s).destination,await managementThread(r.id),'');}
   // A crash/timeout after Slack accepted a message is ambiguous. Never blindly resend it.
+  await run("UPDATE ticket_automation_outbox SET state='pending',last_error='card_update_retry' WHERE state='sending' AND updated_at<? AND (kind LIKE 'updated:%' OR kind LIKE 'layout:%')",new Date(Date.now()-120000).toISOString());
   await run("UPDATE ticket_automation_outbox SET state='uncertain',last_error='delivery_confirmation_required' WHERE state='sending' AND updated_at<?", new Date(Date.now()-120000).toISOString());
   const pending = await rows<{ id: string; owner_id: string; request_id: string; kind: string; channel_id: string; thread_ts: string | null; body_json: string }>("SELECT * FROM ticket_automation_outbox WHERE state='pending' ORDER BY CASE WHEN kind='source' THEN 0 ELSE 1 END,created_at LIMIT 30");
   for (const message of pending) {
@@ -714,7 +715,7 @@ export async function deliverTicketOutbox() {
       const portName=r.port_id?(await one<{name:string}>('SELECT name FROM ticket_execution_ports WHERE id=? AND owner_id=?',r.port_id,r.owner_id))?.name:undefined;
       const stored=JSON.parse(message.body_json),payload=!completion&&message.kind!=='source'?ticketMessagePayload(r,message.kind,stored.text,c.channels.find(ch=>ch.id===r.source_channel)?.name,portName):stored;
       const cardUpdate=!completion&&/^(?:updated:|layout:)/.test(message.kind)?await one<{id:string;message_ts:string}>("SELECT id,message_ts FROM ticket_automation_outbox WHERE request_id=? AND owner_id=? AND channel_id=? AND kind='recommendation' AND state='sent'",r.id,r.owner_id,message.channel_id):null;
-      if(message.kind.startsWith('layout:')&&!cardUpdate){await run("UPDATE ticket_automation_outbox SET state='cancelled',updated_at=? WHERE id=?",now(),message.id);continue;}
+      if(/^(?:updated:|layout:)/.test(message.kind)&&!cardUpdate){await run("UPDATE ticket_automation_outbox SET state=?,updated_at=? WHERE id=?",message.kind.startsWith('layout:')?'cancelled':'pending',now(),message.id);continue;}
       const result = await slackApi<{ ok: boolean; ts?: string }>(token, cardUpdate?'chat.update':"chat.postMessage", { channel: message.channel_id,...(cardUpdate?{ts:cardUpdate.message_ts}:{client_msg_id:await ticketDeliveryId(message.id), ...(threadTs ? { thread_ts: threadTs } : {})}), ...payload });
       if (!result.ts) throw new Error("missing_message_ts");
       if(cardUpdate)await run('UPDATE ticket_automation_outbox SET body_json=?,updated_at=? WHERE id=? AND owner_id=?',JSON.stringify({...payload,cardVersion:2}),now(),cardUpdate.id,r.owner_id);
@@ -731,7 +732,7 @@ export async function deliverTicketOutbox() {
       }else await run("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,thread_ts=?,body_json=?,updated_at=? WHERE id=? AND state='sending'",result.ts,threadTs,JSON.stringify({...payload,...(message.kind==='recommendation'?{cardVersion:2}:{})}),now(),message.id);
       if (message.kind.startsWith("progress:")) await slackApi(token, "reactions.add", { channel: r.source_channel, timestamp: r.source_ts, name: "hourglass_flowing_sand" }).catch(() => undefined);
       if(message.kind.startsWith('stopped:')||message.kind.startsWith('failed:'))await slackApi(token,'reactions.remove',{channel:r.source_channel,timestamp:r.source_ts,name:'hourglass_flowing_sand'}).catch(()=>undefined);
-    } catch { const updating=/^(?:updated:|layout:)/.test(message.kind)&&await one("SELECT id FROM ticket_automation_outbox WHERE request_id=? AND owner_id=? AND kind='recommendation' AND state='sent'",r.id,r.owner_id);await run("UPDATE ticket_automation_outbox SET state=?,last_error=?,updated_at=? WHERE id=?",updating?'pending':'uncertain',updating?'card_update_retry':'delivery_confirmation_required',now(),message.id); }
+    } catch { const updating=/^(?:updated:|layout:)/.test(message.kind);await run("UPDATE ticket_automation_outbox SET state=?,last_error=?,updated_at=? WHERE id=?",updating?'pending':'uncertain',updating?'card_update_retry':'delivery_confirmation_required',now(),message.id); }
   }
 }
 async function ticketDeliveryId(id:string){const h=await digest(id);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`;}
