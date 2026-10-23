@@ -36,6 +36,6 @@ export const TICKET_STATES = ["recommended", "created", "queued", "running", "wa
 export type TicketState = typeof TICKET_STATES[number];
 export const TICKET_STATE_LABELS: Record<TicketState, string> = {
   recommended: "추천 검토", created: "개발 승인 대기", queued: "실행 대기", running: "진행 중", waiting_answer: "답변 대기",
-  security_review: "보안 경고 검토", review: "완료 공유 대기",publishing:'완료 안내 전송 대기', published: "공유 완료", blocked: "보안 차단", failed: "확인 필요", dismissed: "제외",
+  security_review: "작업 내용 확인", review: "완료 공유 대기",publishing:'완료 안내 전송 대기', published: "공유 완료", blocked: "보안 차단", failed: "확인 필요", dismissed: "제외",
 };
 export function escapeSlackText(text: string) { return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;"); }

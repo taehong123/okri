@@ -6,6 +6,7 @@ import { prepareSlackTicketForm } from "@/lib/slack-ticket-intake";
 import { readSlackThread } from "@/lib/slack-work-intake";
 import { assessTicketText, canAutoApproveTicket, escapeSlackText, redactTicketText, TICKET_PRIORITIES, ticketPriorityRank, type TicketPriority, type TicketRisk, type TicketState } from "@/lib/ticket-policy";
 import {ticketProposalDescription,TICKET_CATEGORIES,TICKET_CATEGORY_LABELS,type TicketCategory,type TicketProposal,type TicketProblemUpdate,type TicketEvidenceMessage,type TicketFocusDecision} from '@/lib/ticket-recommendation';
+import {ticketWorkflow,ticketWarning,ticketSolutionPreview} from '@/lib/ticket-workflow';
 
 export type TicketChannelRule = { id: string; name: string; enabled: boolean; autoApprove: "manual" | "low_risk"; memberId: string; portId: string; productId?:string; repositoryId?:string;relayUserIds?:string[];relayPrefix?:string;relayContentStart?:string;relayContentEnd?:string };
 export type TicketRepository={id:string;name:string;remote:string;installRoots?:string[]};
@@ -434,7 +435,7 @@ export async function ticketRequesterOptions(a:RequestAuthorization,id:string,qu
 }
 export async function changeTicketRequest(a: RequestAuthorization, p: Record<string, unknown>) {
   let r = await requestFor(a, text(p.id, 80));
-  const action = text(p.action, 30), time = now();
+  const action = p.action==='approve_warning'?'force':text(p.action, 30), time = now();
   if (Number(p.revision) !== r.revision) fail("내용이 변경되었습니다. 새로고침 후 확인해 주세요.", 409);
   // One reviewed start commits assignment, ticket creation and execution together.
   if(action==='start') {
@@ -529,9 +530,12 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     if (!results[2].meta.changes) fail("이미 생성되었거나 변경되었습니다.", 409);
   } else if (action === "approve" || action === "force" || action==='start'||action==='recheck') {
     const force = action === "force", previousSecurity = JSON.parse(r.security_json || "{}");
-    const overrideReason = force ? text(p.reason,500) : "";
+    const displayedWarning=ticketWarning(r.security_json);
+    const simpleApproval=p.action==='approve_warning';
+    const overrideReason = force ? simpleApproval?`표시된 주의 내용을 확인하고 개발 진행을 승인했습니다: ${displayedWarning.labels.join(', ')}`:text(p.reason,500) : "";
     if ((force||action==='recheck' ? r.state !== "security_review" || previousSecurity.verdict !== "warning" : action==='start'?!['recommended','created'].includes(r.state):r.state !== "created") || r.risk === "blocked") fail("검토 후 생성된 티켓만 승인할 수 있습니다.", 409);
-    if(force && (p.acknowledged!==true || overrideReason.length<5 || redactTicketText(overrideReason)!==overrideReason))fail("경고를 확인하고 비밀정보 없이 사유를 5자 이상 남겨 주세요.");
+    if(simpleApproval&&!displayedWarning.approvable)fail('승인할 수 없는 차단 항목입니다.',403);
+    if(force && (!simpleApproval&&p.acknowledged!==true || overrideReason.length<5 || redactTicketText(overrideReason)!==overrideReason))fail("경고를 확인하고 비밀정보 없이 사유를 5자 이상 남겨 주세요.");
     const s = await settings(a.ownerId); if (!s?.enabled) fail("티켓 자동화를 먼저 켜 주세요.");
     if (!config(s).channels.some(c => c.id === r.source_channel && c.enabled)) fail("고객 채널 연결을 확인해 주세요.");
     if(!r.member_id&&r.category!=='guidance')fail('담당자를 먼저 지정해 주세요. 실행 포트는 자동 배정할 수 있습니다.');
@@ -611,7 +615,7 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     if (!["recommended", "created", "security_review", "blocked", "failed"].includes(r.state)) fail("진행 중인 요청은 제외할 수 없습니다.");
     await updateTicketRevision("UPDATE ticket_automation_requests SET state='dismissed',revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?", time, r.id, a.ownerId, r.revision);
   } else fail("지원하지 않는 작업입니다.");
-  await audit(a.ownerId, r.id, a.userId, action, r.revision,action==='force'?{reason:text(p.reason,500)}:{});
+  await audit(a.ownerId, r.id, a.userId, p.action==='approve_warning'?'warning_approved':action, r.revision,action==='force'?{reason:p.action==='approve_warning'?'표시된 주의 내용을 확인하고 개발 진행을 승인했습니다.':text(p.reason,500),codes:ticketWarning(r.security_json).codes}:{});
   if(['edit','create','approve','start','reply','force','recheck','answer','requester','notice','review_notice','refresh_source','reassign'].includes(action))await queueTicketUpdate(a,r.id,'updated');
   return getTicketAutomation(a,{requestId:r.id});
 }
@@ -631,29 +635,28 @@ async function queueTicketMessage(owner: string, id: string, kind: string, chann
 }
 export function ticketReplyDraft(r:Pick<TicketAutomationRequest,'notice'|'description'>){return r.notice||(r.description.split('안내 초안\n')[1]?.split('\n\n완료 확인 기준')[0]||'').trim();}
 export function ticketSummary(r:TicketAutomationRequest,customer:string){
-  const solution=r.description.split('해결 제안\n')[1]?.split('\n\n')[0]?.replace(/\s+/g,' ').slice(0,240);
+  const solution=r.category!=='guidance'?ticketSolutionPreview(r.description):'';
   const client=/^<#[A-Z0-9]+>$/.test(customer)?customer:escapeSlackText(customer.replace(/^#?고객\s*-\s*/,''));
   return `• *고객사*: ${client}\n• *요청자*: ${/^[UW][A-Z0-9]+$/.test(r.requester_slack_user)?`<@${r.requester_slack_user}>`:escapeSlackText(r.requester_name||'확인 필요')}\n• *요구사항*: ${escapeSlackText(r.title)}\n• *분류*: ${TICKET_CATEGORY_LABELS[r.category]}${solution?`\n\n*해결 제안*\n${escapeSlackText(solution)}`:''}`;
 }
 type MessageTicket=Pick<TicketAutomationRequest,'id'|'owner_id'|'state'|'revision'|'category'>&Partial<TicketAutomationRequest>;
-function ticketMessagePayload(r:MessageTicket,kind:string,body:string,customer?:string,portName?:string){
-  const id=r.id;
-  const action = ['recommended','created'].includes(r.state) ? r.category==='guidance'?'reply':'start' : r.state==='review'?'reply':r.state==='security_review'?'security':r.state==='waiting_answer'?'edit':null;
-  const summary=r.title&&r.description!==undefined&&kind!=='source'&&!kind.startsWith('completion:')?ticketSummary(r as TicketAutomationRequest,customer||r.source_channel||'확인 필요'):null;
-  const status=r.state==='queued'?`실행 대기 · ${portName||'포트 배정됨'} · 착수 전 보안 검사 예정`:r.state==='running'?`개발 진행 중 · ${portName||'포트 배정됨'}`:r.state==='security_review'?'보안 경고 확인 필요 · 경고 검토 버튼에서 사유를 남겨 주세요.':r.state==='publishing'?'승인한 회신 전송 대기':r.state==='published'?'회신 완료':r.state==='dismissed'?'티켓 추천 제외':r.state==='review'?'완료 회신 검토':r.state==='blocked'?'보안 검증 차단':r.state==='failed'?'실행 중지·실패 · 상세 내용 확인':r.category==='guidance'?'회신 내용을 확인한 뒤 원문 스레드에 전송합니다.':'담당자 확인 후 포트를 자동 배정합니다.';
-  const eventBody=!/^(?:recommendation$|updated:|layout:|state:)/.test(kind);
-  const safe=redactTicketText(summary?`${summary}\n\n${status}${eventBody?`\n${body.slice(0,2800)}`:''}`:body),blocks: Record<string, unknown>[] = [];
+function ticketMessagePayload(r:MessageTicket,kind:string,body:string,customer?:string,portName?:string,processing?:string){
+  const interactive=/^(?:recommendation$|updated:|layout:)/.test(kind)&&!processing;
+  const flow=ticketWorkflow(r),warning=ticketWarning(r.security_json||'{}');
+  const action=['recommended','created'].includes(r.state)?r.category==='guidance'?'reply':'start':r.state==='review'?'reply':r.state==='security_review'&&warning.approvable?'approve_warning':r.state==='waiting_answer'?'edit':null;
+  const summary=(interactive||processing)&&r.title&&r.description!==undefined?ticketSummary(r as TicketAutomationRequest,customer||r.source_channel||'확인 필요'):null;
+  const status=processing||[flow.label,portName&&['queued','running'].includes(r.state)?portName:'',flow.next].filter(Boolean).join(' · ');
+  const caution=r.state==='security_review'?warning.labels.map(v=>'• '+v).join('\n'):'';
+  const safe=redactTicketText(summary?[summary,status,!processing?caution:''].filter(Boolean).join('\n\n'):body),blocks:Record<string,unknown>[]=[];
   for(let offset=0;offset<safe.length;offset+=2800)blocks.push({type:'section',text:{type:kind==='source'?'plain_text':'mrkdwn',text:safe.slice(offset,offset+2800)}});
-  if(kind!=='source'&&!kind.startsWith('completion:'))blocks.push({type:'context',elements:[{type:'mrkdwn',text:`<${publicUrl()}/?view=tickets&ticketAutomation=1&request=${encodeURIComponent(id)}|OKRI에서 보기>`}]});
-  if (r && kind!=='source' && !kind.startsWith("completion:")) blocks.push({ type: "actions", elements: [
-    ...(action ? [{ type: "button",style:'primary', text: { type: "plain_text", text: action==='start'?'개발 시작':action==='security'?'보안 경고 검토':action==='edit'?'답변하기':'회신 작성' }, action_id: `ticket_auto_${action}`, value: `${id}:${r.revision}` }] : []),
-    { type: "button", text: { type: "plain_text", text:'상세·수정' },action_id:'ticket_auto_edit',value:`${id}:${r.revision}` },
-    ...(r.state==='security_review'?[{type:'button',text:{type:'plain_text',text:'보안 검사 다시 실행'},action_id:'ticket_auto_recheck',value:`${id}:${r.revision}`}]:[]),
-    ...(['blocked','failed','security_review'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'새로 검토'},action_id:'ticket_auto_refresh_source',value:`${id}:${r.revision}`}]:[]),
-    ...(['queued','running','waiting_answer'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'실행 중지'},action_id:'ticket_auto_stop',value:`${id}:${r.revision}`}]:[]),
-  ] });
+  if(kind!=='source'&&!kind.startsWith('completion:'))blocks.push({type:'context',elements:[{type:'mrkdwn',text:`<${publicUrl()}/?view=tickets&ticketAutomation=1&request=${encodeURIComponent(r.id)}|OKRI에서 보기>`}]});
+  if(interactive)blocks.push({type:'actions',elements:[
+    ...(action?[{type:'button',style:'primary',text:{type:'plain_text',text:action==='start'?'개발 승인':action==='approve_warning'?'확인하고 개발 승인':action==='edit'?'답변하기':'회신 확인'},action_id:`ticket_auto_${action}`,value:`${r.id}:${r.revision}`}]:[]),
+    {type:'button',text:{type:'plain_text',text:'상세·수정'},action_id:'ticket_auto_edit',value:`${r.id}:${r.revision}`},
+  ]});
   return {text:(kind==='source'?escapeSlackText(safe):safe).slice(0,39000),blocks,unfurl_links:false,unfurl_media:false};
 }
+
 function ticketMessageStatement(r:MessageTicket,kind:string,channel:string,thread:string|null,body:string){
   const time=now();return env.DB.prepare('INSERT OR IGNORE INTO ticket_automation_outbox(id,owner_id,request_id,kind,channel_id,thread_ts,body_json,created_at,updated_at) SELECT ?,?,?,?,?,?,?,?,? WHERE EXISTS(SELECT 1 FROM ticket_automation_requests WHERE id=? AND owner_id=?)').bind(`${r.id}:${kind}`,r.owner_id,r.id,kind,channel,thread,JSON.stringify(ticketMessagePayload(r,kind,body)),time,time,r.id,r.owner_id);
 }
@@ -692,8 +695,8 @@ export async function syncTicketJobs() {
 async function managementThread(id: string) { return (await one<{ message_ts: string }>("SELECT COALESCE(thread_ts,message_ts) AS message_ts FROM ticket_automation_outbox WHERE request_id=? AND kind IN ('source','recommendation') AND state='sent' ORDER BY CASE kind WHEN 'source' THEN 0 ELSE 1 END LIMIT 1", id))?.message_ts ?? null; }
 export async function deliverTicketOutbox() {
   // Refresh old recommendation cards in place, without new channel messages.
-  const oldCards=await rows<{id:string;owner_id:string;request_id:string}>("SELECT o.id,o.owner_id,o.request_id FROM ticket_automation_outbox o JOIN ticket_automation_settings s ON s.owner_id=o.owner_id AND s.enabled=1 WHERE o.kind='recommendation' AND o.state='sent' AND o.channel_id=json_extract(s.config_json,'$.destination') AND json_extract(s.config_json,'$.notificationsAuthorized')=1 AND COALESCE(json_extract(o.body_json,'$.cardVersion'),0)<2 LIMIT 6");
-  for(const card of oldCards){const r=await one<TicketAutomationRequest>('SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?',card.request_id,card.owner_id),s=await settings(card.owner_id);if(r&&s)await queueTicketMessage(r.owner_id,r.id,`layout:${r.revision}`,config(s).destination,await managementThread(r.id),'');}
+  const oldCards=await rows<{id:string;owner_id:string;request_id:string}>("SELECT o.id,o.owner_id,o.request_id FROM ticket_automation_outbox o JOIN ticket_automation_settings s ON s.owner_id=o.owner_id AND s.enabled=1 WHERE o.kind='recommendation' AND o.state='sent' AND o.channel_id=json_extract(s.config_json,'$.destination') AND json_extract(s.config_json,'$.notificationsAuthorized')=1 AND COALESCE(json_extract(o.body_json,'$.cardVersion'),0)<3 LIMIT 6");
+  for(const card of oldCards){const r=await one<TicketAutomationRequest>('SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?',card.request_id,card.owner_id),s=await settings(card.owner_id);if(r&&s)await queueTicketMessage(r.owner_id,r.id,`layout:${r.revision}:v3`,config(s).destination,await managementThread(r.id),'');}
   // A crash/timeout after Slack accepted a message is ambiguous. Never blindly resend it.
   await run("UPDATE ticket_automation_outbox SET state='pending',last_error='card_update_retry' WHERE state='sending' AND updated_at<? AND (kind LIKE 'updated:%' OR kind LIKE 'layout:%')",new Date(Date.now()-120000).toISOString());
   await run("UPDATE ticket_automation_outbox SET state='uncertain',last_error='delivery_confirmation_required' WHERE state='sending' AND updated_at<?", new Date(Date.now()-120000).toISOString());
@@ -723,7 +726,7 @@ export async function deliverTicketOutbox() {
       if(/^(?:updated:|layout:)/.test(message.kind)&&!cardUpdate){await run("UPDATE ticket_automation_outbox SET state=?,updated_at=? WHERE id=?",message.kind.startsWith('layout:')?'cancelled':'pending',now(),message.id);continue;}
       const result = await slackApi<{ ok: boolean; ts?: string }>(token, cardUpdate?'chat.update':"chat.postMessage", { channel: message.channel_id,...(cardUpdate?{ts:cardUpdate.message_ts}:{client_msg_id:await ticketDeliveryId(message.id), ...(threadTs ? { thread_ts: threadTs } : {})}), ...payload });
       if (!result.ts) throw new Error("missing_message_ts");
-      if(cardUpdate)await run('UPDATE ticket_automation_outbox SET body_json=?,updated_at=? WHERE id=? AND owner_id=?',JSON.stringify({...payload,cardVersion:2}),now(),cardUpdate.id,r.owner_id);
+      if(cardUpdate)await run('UPDATE ticket_automation_outbox SET body_json=?,updated_at=? WHERE id=? AND owner_id=?',JSON.stringify({...payload,cardVersion:3}),now(),cardUpdate.id,r.owner_id);
       if (completion) {
         await env.DB.batch([
           env.DB.prepare("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,updated_at=? WHERE id=? AND state='sending'").bind(result.ts,now(),message.id),
@@ -734,7 +737,7 @@ export async function deliverTicketOutbox() {
         await slackApi(token,'reactions.remove',{channel:r.source_channel,timestamp:r.source_ts,name:'hourglass_flowing_sand'}).catch(()=>undefined);
         await slackApi(token, "reactions.add", { channel: r.source_channel, timestamp: r.source_ts, name: "white_check_mark" }).catch(() => undefined);
         const published=await one<TicketAutomationRequest>('SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?',r.id,r.owner_id);if(published)await ticketMessageStatement(published,`updated:${published.revision}:published`,c.destination,await managementThread(r.id),'').run();
-      }else await run("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,thread_ts=?,body_json=?,updated_at=? WHERE id=? AND state='sending'",result.ts,threadTs,JSON.stringify({...payload,...(message.kind==='recommendation'?{cardVersion:2}:{})}),now(),message.id);
+      }else await run("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,thread_ts=?,body_json=?,updated_at=? WHERE id=? AND state='sending'",result.ts,threadTs,JSON.stringify({...payload,...(message.kind==='recommendation'?{cardVersion:3}:{})}),now(),message.id);
       if (message.kind.startsWith("progress:")) await slackApi(token, "reactions.add", { channel: r.source_channel, timestamp: r.source_ts, name: "hourglass_flowing_sand" }).catch(() => undefined);
       if(message.kind.startsWith('stopped:')||message.kind.startsWith('failed:'))await slackApi(token,'reactions.remove',{channel:r.source_channel,timestamp:r.source_ts,name:'hourglass_flowing_sand'}).catch(()=>undefined);
     } catch { const updating=/^(?:updated:|layout:)/.test(message.kind);await run("UPDATE ticket_automation_outbox SET state=?,last_error=?,updated_at=? WHERE id=?",updating?'pending':'uncertain',updating?'card_update_retry':'delivery_confirmation_required',now(),message.id); }
@@ -777,7 +780,18 @@ export async function runTicketAutomation() {
 export async function ticketSlackAction(teamId: string, userId: string, action: string, value: string) {
   const linked = await dailyMemberBySlack(teamId, userId); if (!linked) fail("OKRI 계정을 먼저 연결해 주세요.", 403);
   const [id, revision] = value.split(":");
-  await changeTicketRequest(linked.authorization, { id, revision: Number(revision), action });
+  const r=await requestFor(linked.authorization,id);
+  if(r.team_id!==teamId||r.revision!==Number(revision))fail('내용이 변경되었습니다. 최신 티켓 버튼으로 확인해 주세요.',409);
+  if(['start','approve_warning'].includes(action))await updateTicketSlackCard(linked.authorization,id,'승인 처리 중… 다음: 시작 준비').catch(()=>undefined);
+  try{await changeTicketRequest(linked.authorization, { id, revision: Number(revision), action });}
+  finally{if(['start','approve_warning'].includes(action))await updateTicketSlackCard(linked.authorization,id).catch(()=>undefined);}
+}
+async function updateTicketSlackCard(a:RequestAuthorization,id:string,processing?:string){
+  const r=await requestFor(a,id),s=await settings(a.ownerId);if(!s?.enabled||!config(s).notificationsAuthorized)return;
+  const c=config(s),card=await one<{message_ts:string}>("SELECT message_ts FROM ticket_automation_outbox WHERE request_id=? AND owner_id=? AND channel_id=? AND kind='recommendation' AND state='sent'",id,a.ownerId,c.destination);
+  const connection=await getSlackConnection(a.ownerId);if(!card||!connection||connection.teamId!==r.team_id)return;
+  const portName=r.port_id?(await one<{name:string}>('SELECT name FROM ticket_execution_ports WHERE id=? AND owner_id=?',r.port_id,r.owner_id))?.name:undefined;
+  await slackApi(await slackTokenForConnection(connection),'chat.update',{channel:c.destination,ts:card.message_ts,...ticketMessagePayload(r,'recommendation','',c.channels.find(v=>v.id===r.source_channel)?.name,portName,processing)});
 }
 export async function queueTicketUpdate(a:RequestAuthorization,id:string,kind:string){
   const r=await requestFor(a,id),s=await settings(a.ownerId);if(!s)return;
@@ -855,16 +869,18 @@ export async function validateTicketPreflight(device:{id:string;workspaceId:stri
   const override=context.securityOverride;
   const overrideValid=verdict==="warning"&&override?.basisDigest===context.basisDigest&&override.snapshotDigest===p.snapshotDigest&&codes.every(code=>override.codes?.includes(code))&&typeof override.reason==="string";
   const allow=verdict==="pass"||overrideValid;
-  const security={verdict,codes,basisDigest:context.basisDigest,snapshotDigest:p.snapshotDigest,jobId:job.id,leaseDigest:await digest(job.lease_id),allow,checkedAt:now(),...(overrideValid?{override:{actor:override.actor,reason:override.reason}}:{})};
+  const recheckReason=override&&!overrideValid?(override.snapshotDigest!==p.snapshotDigest?'snapshot_changed':'additional_warning'):undefined;
+  const security={verdict,codes,...(recheckReason?{recheckReason}:{}),basisDigest:context.basisDigest,snapshotDigest:p.snapshotDigest,jobId:job.id,leaseDigest:await digest(job.lease_id),allow,checkedAt:now(),...(overrideValid?{override:{actor:override.actor,reason:override.reason}}:{})};
   if(allow) {
     const result=await run(`UPDATE ticket_automation_requests SET security_json=?,coordination_json=?,state='running',updated_at=? WHERE id=? AND owner_id=? AND job_id=? AND revision=? AND state IN ('queued','running') AND (?=1 OR NOT EXISTS(SELECT 1 FROM ticket_automation_requests other JOIN local_agent_jobs oj ON oj.id=other.job_id AND oj.workspace_id=other.owner_id WHERE other.owner_id=? AND other.id<>? AND other.state='running' AND json_extract(oj.context_json,'$.repository.remote')=? AND (?='[]' OR COALESCE(json_array_length(other.coordination_json,'$.paths'),0)=0 OR EXISTS(SELECT 1 FROM json_each(?) p JOIN json_each(other.coordination_json,'$.paths') q ON lower(p.value)=lower(q.value) OR instr(lower(p.value),lower(q.value)||'/')=1 OR instr(lower(q.value),lower(p.value)||'/')=1))))`,JSON.stringify(security),JSON.stringify(coordination),now(),r.id,r.owner_id,job.id,r.revision,overrideValid?1:0,r.owner_id,r.id,context.repository?.remote||'',JSON.stringify(paths),JSON.stringify(paths));
     if(!result.meta.changes)return validateTicketPreflight(device,{...p,verdict:'warning',codes:[...codes,'coordination_conflict']});
+    if(s)await queueTicketMessage(r.owner_id,r.id,`updated:${r.revision}:running:${job.id}`,config(s).destination,await managementThread(r.id),'');
   } else {
     await env.DB.batch([
       env.DB.prepare("UPDATE local_agent_jobs SET status='cancelled',error_text=?,updated_at=? WHERE id=? AND lease_id=? AND status='running'").bind(verdict==="warning"?"security_review_required":"security_preflight_blocked",now(),job.id,job.lease_id),
       env.DB.prepare("UPDATE ticket_automation_requests SET security_json=?,state=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND job_id=? AND revision=? AND state IN ('queued','running')").bind(JSON.stringify(security),verdict==="warning"?"security_review":"blocked",now(),r.id,r.owner_id,job.id,r.revision),
     ]);
-    if(s)await queueTicketMessage(r.owner_id,r.id,`security:${job.id}`,config(s).destination,await managementThread(r.id),`보안 검토 필요 · ${escapeSlackText(r.title)}\n${verdict==="warning"?"포트 검증에서 경고가 발견되었습니다. OKRI에서 확인 사유를 남긴 뒤 진행할 수 있습니다.":"비밀정보 또는 실행 경계 검증에 실패하여 중지했습니다."}`);
+    if(s)await queueTicketMessage(r.owner_id,r.id,`security:${job.id}`,config(s).destination,await managementThread(r.id),`작업 내용 확인 · ${escapeSlackText(r.title)}\n${verdict==="warning"?"주의 항목이 있습니다. 원래 추천 카드의 내용을 확인하고 개발을 승인해 주세요.":"비밀정보 또는 실행 경계 검증에 실패하여 중지했습니다."}`);
   }
   await audit(r.owner_id,r.id,device.userId,allow?(overrideValid?"preflight_warning_override_used":"preflight_passed"):verdict==="warning"?"preflight_warning":"preflight_blocked",r.revision,{jobId:job.id,basisDigest:context.basisDigest,snapshotDigest:p.snapshotDigest,codes,...(overrideValid?{reason:override.reason}:{})});
   return {allow,verdict,coordination:await coordinationContext(r)};

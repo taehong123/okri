@@ -341,3 +341,7 @@ Web/server and Slack only: compact customer/requester/requirement/category summa
 ## 2026-10-23 Slack speaker and request intent
 
 Server and Slack only: trusted active workspace/Slack member links distinguish team replies and coordination from new product requests. Per-message intent and verbatim evidence are validated and audited before recommendations; genuine staff reports, unlinked speakers and customer requests in mixed conversations remain eligible. Customer authors take requester precedence in staff-rooted threads. Existing native v1 fields and semantics are unchanged; native UI parity remains deferred, with no binary or OTA release claimed.
+
+## 2026-10-24 Clear ticket approvals
+
+Web/server and Slack only: direct reviewed development and caution approvals, recorded actor and exact validation scope, immediate processing feedback, current/next-step presentation and automatic web progress updates. Assignee/port changes and advanced controls remain available through disclosures. Customer replies still require exact-text approval; hard security blocks and snapshot/source/device/model boundaries remain enforced. Native v1 schemas and enum meanings are unchanged; native UI parity remains deferred, with no binary or OTA release claimed.

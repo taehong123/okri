@@ -8,6 +8,7 @@ const editorSource=await readFile(new URL("../lib/ticket-slack-editor.ts",import
 const queueSource=await readFile(new URL("../lib/ticket-slack-queue.ts",import.meta.url),"utf8");
 const source = await readFile(new URL("../lib/ticket-automation.ts", import.meta.url), "utf8");
 const policy = compile(await readFile(new URL("../lib/ticket-policy.ts", import.meta.url), "utf8"));
+const workflow=compile(await readFile(new URL('../lib/ticket-workflow.ts',import.meta.url),'utf8'));
 const recommendation=compile(await readFile(new URL("../lib/ticket-recommendation.ts",import.meta.url),"utf8"));
 const coverageMigration=await readFile(new URL("../drizzle/0074_ticket_intake_coverage.sql",import.meta.url),"utf8");
 const problemMigration=await readFile(new URL('../drizzle/0075_ticket_problem_followups.sql',import.meta.url),'utf8');
@@ -40,7 +41,7 @@ function fixture(t, options={}) {
   let messages=[{ts:"123.000",user:"UCUSTOMER",text:options.message??"버튼 문구 오타 수정해 주세요."}];
   const writes=[],contexts=[];
   const connection={ownerId:"w1",teamId:"T1",botUserId:"UBOT"};
-  const service=compile(source,{"@/lib/ticket-recommendation":recommendation,"@/lib/ticket-intake-queue":{ticketIntakeStatus:async()=>({counts:[],channels:[],messages:[]})},"cloudflare:workers":{env:{DB:d1,OKRI_PUBLIC_URL:"https://okri.example.test"}},"@/lib/pace-data":{canManageTeam:v=>["owner","admin"].includes(v.role),getSlackConnection:async owner=>owner==="w1"?connection:null},"@/lib/slack-daily":{
+  const service=compile(source,{'@/lib/ticket-workflow':workflow,"@/lib/ticket-recommendation":recommendation,"@/lib/ticket-intake-queue":{ticketIntakeStatus:async()=>({counts:[],channels:[],messages:[]})},"cloudflare:workers":{env:{DB:d1,OKRI_PUBLIC_URL:"https://okri.example.test"}},"@/lib/pace-data":{canManageTeam:v=>["owner","admin"].includes(v.role),getSlackConnection:async owner=>owner==="w1"?connection:null},"@/lib/slack-daily":{
     dailyMemberBySlack:async(team,user)=>team==="T1"&&user==="U1"?{authorization:a,memberId:"m1"}:null,
     listSlackChannels:async()=>[{id:"C1",name:"customer-one",isMember:true},{id:"CMGMT",name:"tickets",isMember:true}],slackTokenForConnection:async()=>"mock",
     slackApi:async(_token,method,body)=>{if(method==="users.info")return{ok:true,user:{is_bot:body.user==='URELAY',real_name:"Customer",profile:{display_name:"Customer"}}};if(method==="conversations.members")return{ok:true,members:["UCUSTOMER","U1"]};if(options.receiptRecovery&&['conversations.history','conversations.replies'].includes(method))return{ok:true,messages:[{ts:'555.000',user:'UBOT',client_msg_id:writes.find(w=>w.method==='chat.postMessage')?.body.client_msg_id}]};if(method==="users.list")return{ok:true,members:[{id:"UCUSTOMER",real_name:"Customer"},{id:"U1",real_name:"Operator"},{id:"UOUTSIDE",real_name:"Other"}]};writes.push({method,body});if(options.ambiguous)throw new Error("timeout");return{ok:true,ts:`${writes.length}.000`};}},
@@ -50,7 +51,7 @@ function fixture(t, options={}) {
   const intake=(ts='123.000')=>service.intakeTicketEvent(connection,{channel:"C1",ts,user:"UCUSTOMER",text:messages[0].text});
   const current=()=>db.prepare("SELECT * FROM ticket_automation_requests").get();
   const change=async(action,extra={})=>{const r=current();return service.changeTicketRequest(a,{id:r.id,revision:r.revision,action,...extra});};
-  const editor=compile(editorSource,{"cloudflare:workers":{env:{DB:d1}},"@/lib/pace-data":{getSlackConnection:async owner=>owner==='w1'?connection:null},"@/lib/slack-daily":{dailyMemberBySlack:async(team,user)=>team==='T1'&&user==='U1'?{authorization:a,memberId:'m1'}:null,slackTokenForConnection:async()=>'mock',slackApi:async(_token,method,body)=>{writes.push({method,body});return{ok:true};}},"@/lib/ticket-automation":service,"@/lib/ticket-recommendation":recommendation,"@/lib/ticket-policy":policy});
+  const editor=compile(editorSource,{'@/lib/ticket-workflow':workflow,"cloudflare:workers":{env:{DB:d1}},"@/lib/pace-data":{getSlackConnection:async owner=>owner==='w1'?connection:null},"@/lib/slack-daily":{dailyMemberBySlack:async(team,user)=>team==='T1'&&user==='U1'?{authorization:a,memberId:'m1'}:null,slackTokenForConnection:async()=>'mock',slackApi:async(_token,method,body)=>{writes.push({method,body});return{ok:true};}},"@/lib/ticket-automation":service,"@/lib/ticket-recommendation":recommendation,"@/lib/ticket-policy":policy});
   return{db,d1,service,editor,intake,current,change,writes,config,connection,contexts,setMessages:value=>{messages=value;}};
 }
 test("normalization and policy block injected commands, credentials and private-network access even for auto mode",()=>{
@@ -356,7 +357,7 @@ test('Slack port suggestions work without unsaved form state and retain workspac
 });
 test('Slack ticket queue supplies the required submit control and search updates the same modal without writes',async t=>{
   const f=fixture(t);await f.intake();let view;
-  const queue=compile(queueSource,{'cloudflare:workers':{env:{DB:f.d1}},'@/lib/pace-data':{canManageTeam:()=>true,getSlackConnection:async()=>f.connection},'@/lib/slack-daily':{dailyMemberBySlack:async(team,user)=>team==='T1'&&user==='U1'?{authorization:a}:null,slackTokenForConnection:async()=>'mock',slackApi:async(_token,method,body)=>{assert.equal(method,'views.open');view=body.view;return{ok:true};}},'@/lib/ticket-automation':f.service,'@/lib/ticket-policy':policy,'@/lib/ticket-recommendation':recommendation,'@/lib/ticket-intake-queue':{ticketIntakeStatus:async()=>({counts:[],channels:[],messages:[]}),requestTicketReconciliation:async()=>{throw new Error('No reconciliation expected');}}});
+  const queue=compile(queueSource,{'@/lib/ticket-workflow':workflow,'cloudflare:workers':{env:{DB:f.d1}},'@/lib/pace-data':{canManageTeam:()=>true,getSlackConnection:async()=>f.connection},'@/lib/slack-daily':{dailyMemberBySlack:async(team,user)=>team==='T1'&&user==='U1'?{authorization:a}:null,slackTokenForConnection:async()=>'mock',slackApi:async(_token,method,body)=>{assert.equal(method,'views.open');view=body.view;return{ok:true};}},'@/lib/ticket-automation':f.service,'@/lib/ticket-policy':policy,'@/lib/ticket-recommendation':recommendation,'@/lib/ticket-intake-queue':{ticketIntakeStatus:async()=>({counts:[],channels:[],messages:[]}),requestTicketReconciliation:async()=>{throw new Error('No reconciliation expected');}}});
   await queue.openTicketSlackQueue('T1','U1','trigger');assert.equal(view.submit.type,'plain_text');assert.ok(view.blocks.filter(b=>b.type==='input').every(b=>b.dispatch_action));
   const result=await queue.submitTicketSlackQueue('T1','U1','{}',{ticket_queue_query:{ticket_queue_query:{value:'no matching request'}}});assert.equal(result.response_action,'update');assert.ok(result.view.blocks.some(b=>b.text?.text==='이 상태의 티켓이 없습니다.'));assert.equal(f.current().revision,1);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
   await assert.rejects(queue.openTicketSlackQueue('T2','U1','trigger'));
@@ -373,16 +374,16 @@ test('offline ports and interrupted starts leave no half-created tickets, assign
   f.db.prepare('UPDATE local_agent_devices SET last_seen_at=?').run(new Date().toISOString());options.failAfter=2;await assert.rejects(f.change('start'),/interruption/);assert.equal(f.current().state,'recommended');assert.equal(f.current().member_id,null);assert.equal(f.db.prepare('SELECT count(*) n FROM items').get().n,0);assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
 });
 test('the compact start modal defaults the acting member and automatic port and submits once',async t=>{
-  const f=fixture(t);await f.intake();f.db.exec('UPDATE ticket_automation_requests SET member_id=NULL,port_id=NULL');const r=f.current();await f.editor.openTicketSlackAction('T1','U1','trigger',`${r.id}:${r.revision}`,'start');const v=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(v.submit.text,'승인하고 시작');assert.equal(v.blocks.find(b=>b.block_id==='ta_member').element.initial_option.value,'m1');assert.equal(v.blocks.find(b=>b.block_id==='ta_port').element.initial_option.value,'_');assert.equal(v.blocks.filter(b=>b.type==='input').length,2);const result=await f.editor.submitTicketSlackEditor('T1','U1',v.private_metadata,editorState(r,{ta_member:{selected_option:{value:'m1'}}}));assert.deepEqual(result,{});assert.equal(f.current().state,'queued');
+  const f=fixture(t);await f.intake();f.db.exec('UPDATE ticket_automation_requests SET member_id=NULL,port_id=NULL');const r=f.current();await f.editor.openTicketSlackAction('T1','U1','trigger',`${r.id}:${r.revision}`,'start');const v=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(v.submit.text,'개발 승인');assert.equal(v.blocks.find(b=>b.block_id==='ta_member').element.initial_option.value,'m1');assert.equal(v.blocks.find(b=>b.block_id==='ta_port').element.initial_option.value,'_');assert.equal(v.blocks.filter(b=>b.type==='input').length,2);const result=await f.editor.submitTicketSlackEditor('T1','U1',v.private_metadata,editorState(r,{ta_member:{selected_option:{value:'m1'}}}));assert.deepEqual(result,{});assert.equal(f.current().state,'queued');
 });
 test('guidance opens a direct reply and publishes only the exact approved text to the original requester without a port',async t=>{
-  const f=fixture(t,{category:'guidance',notifications:true});await f.intake();f.db.exec('UPDATE ticket_automation_requests SET member_id=NULL,port_id=NULL; UPDATE ticket_execution_ports SET enabled=0');const r=f.current();await f.editor.openTicketSlackAction('T1','U1','trigger',`${r.id}:${r.revision}`,'reply');const v=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(v.submit.text,'회신 보내기');assert.ok(!v.blocks.some(b=>['ta_member','ta_port','ta_repository'].includes(b.block_id)));assert.equal(f.db.prepare('SELECT count(*) n FROM items').get().n,0);const notice='설정 화면에서 택배사를 선택해 저장해 주세요.';await f.editor.submitTicketSlackEditor('T1','U1',v.private_metadata,editorState(r,{ta_notice:{value:notice}}));assert.equal(f.current().state,'publishing');assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);await f.service.deliverTicketOutbox();const sent=f.writes.find(w=>w.method==='chat.postMessage'&&w.body.channel==='C1');assert.equal(sent.body.thread_ts,'123.000');assert.equal(sent.body.text,`<@UCUSTOMER>\n${notice}`);assert.equal(f.current().state,'published');
+  const f=fixture(t,{category:'guidance',notifications:true});await f.intake();f.db.exec('UPDATE ticket_automation_requests SET member_id=NULL,port_id=NULL; UPDATE ticket_execution_ports SET enabled=0');const r=f.current();await f.editor.openTicketSlackAction('T1','U1','trigger',`${r.id}:${r.revision}`,'reply');const v=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(v.submit.text,'승인하고 보내기');assert.ok(!v.blocks.some(b=>['ta_member','ta_port','ta_repository'].includes(b.block_id)));assert.equal(f.db.prepare('SELECT count(*) n FROM items').get().n,0);const notice='설정 화면에서 택배사를 선택해 저장해 주세요.';await f.editor.submitTicketSlackEditor('T1','U1',v.private_metadata,editorState(r,{ta_notice:{value:notice}}));assert.equal(f.current().state,'publishing');assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);await f.service.deliverTicketOutbox();const sent=f.writes.find(w=>w.method==='chat.postMessage'&&w.body.channel==='C1');assert.equal(sent.body.thread_ts,'123.000');assert.equal(sent.body.text,`<@UCUSTOMER>\n${notice}`);assert.equal(f.current().state,'published');
 });
 test('direct replies preserve requester, source freshness, security and stale submission guards',async t=>{
   const f=fixture(t,{category:'guidance',notifications:true});await f.intake();const r=f.current();await assert.rejects(f.change('reply',{notice:'안내합니다.',requesterSlackUser:'UOUTSIDE'}),/요청자/);await assert.rejects(f.change('reply',{notice:'API_KEY=sk-proj-abcdefghijklmnop123456789'}),/회신 문안/);f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'추가 질문으로 원문이 변경되었습니다.'}]);await assert.rejects(f.change('reply',{notice:'안내합니다.'}),/대화가 변경/);assert.equal(f.current().revision,r.revision);assert.equal(f.db.prepare('SELECT count(*) n FROM items').get().n,0);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE kind LIKE 'completion:%'").get().n,0);
 });
 test('existing Slack recommendations upgrade in place and timed-out card updates safely retry without new posts',async t=>{
-  const options={notifications:true},f=fixture(t,options);await f.intake();await f.service.deliverTicketOutbox();const posts=f.writes.filter(w=>w.method==='chat.postMessage').length;f.db.exec("UPDATE ticket_automation_outbox SET body_json='{}' WHERE kind='recommendation'");options.ambiguous=true;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT state FROM ticket_automation_outbox WHERE kind LIKE 'layout:%'").get().state,'pending');assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE state='uncertain'").get().n,0);options.ambiguous=false;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT json_extract(body_json,'$.cardVersion') v FROM ticket_automation_outbox WHERE kind='recommendation'").get().v,2);assert.equal(f.writes.filter(w=>w.method==='chat.postMessage').length,posts);assert.ok(f.writes.filter(w=>w.method==='chat.update').every(w=>w.body.text.includes('• *요구사항*:')));
+  const options={notifications:true},f=fixture(t,options);await f.intake();await f.service.deliverTicketOutbox();const posts=f.writes.filter(w=>w.method==='chat.postMessage').length;f.db.exec("UPDATE ticket_automation_outbox SET body_json='{}' WHERE kind='recommendation'");options.ambiguous=true;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT state FROM ticket_automation_outbox WHERE kind LIKE 'layout:%'").get().state,'pending');assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE state='uncertain'").get().n,0);options.ambiguous=false;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT json_extract(body_json,'$.cardVersion') v FROM ticket_automation_outbox WHERE kind='recommendation'").get().v,3);assert.equal(f.writes.filter(w=>w.method==='chat.postMessage').length,posts);assert.ok(f.writes.filter(w=>w.method==='chat.update').every(w=>w.body.text.includes('• *요구사항*:')));
 });
 test('reconnected ports rerun security with fresh evidence and never reuse the previous warning override',async t=>{
   const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['scope_ambiguous']);assert.equal(f.current().state,'security_review');f.db.prepare("INSERT INTO local_agent_devices VALUES('reconnected','w1','u1',NULL,?,'Computer')").run(new Date().toISOString());f.db.exec("UPDATE ticket_execution_ports SET device_id='reconnected'");await f.change('recheck');const next=f.db.prepare("SELECT context_json,device_id FROM local_agent_jobs WHERE status='queued'").get();assert.equal(next.device_id,'reconnected');assert.ok(!JSON.parse(next.context_json).securityOverride);assert.equal(f.current().state,'queued');assert.equal(JSON.parse(f.current().security_json).allow,false);await assert.rejects(f.service.requireTicketPreflightForCompletion(f.current().job_id));
@@ -393,4 +394,58 @@ test('accepted-but-timed-out Slack sends recover from the exact correlation rece
 test('automatic approval of a multi-issue request chooses each port using the updated pending load',async t=>{
   const f=fixture(t,{auto:true,proposals:[{...proposal('bug_fix','첫 버튼 문구'),solution:'버튼 문구를 수정합니다.'},{...proposal('bug_fix','둘째 버튼 문구'),solution:'버튼 문구를 수정합니다.'}]});f.config.channels[0].portId='';f.db.prepare('UPDATE ticket_automation_settings SET config_json=?').run(JSON.stringify(f.config));
   f.db.prepare("INSERT INTO local_agent_devices VALUES('d2','w1','u1',NULL,?,'Second runner')").run(new Date().toISOString());f.db.exec("INSERT INTO ticket_execution_ports(id,owner_id,member_id,device_id,name,channel_ids_json,product_id,repository_id,verified_remote) VALUES('p2','w1','m1','d2','Operator 02','[\"C1\"]','prod1','repo1','https://github.com/example/product')");await f.intake();const assigned=f.db.prepare('SELECT state,port_id FROM ticket_automation_requests').all();assert.equal(assigned.length,2);assert.ok(assigned.every(r=>r.state==='queued'));assert.equal(new Set(assigned.map(r=>r.port_id)).size,2);
+});
+
+test('Slack development approval immediately shows processing, starts once, and exposes the next step without a modal',async t=>{
+  const f=fixture(t,{notifications:true});await f.intake();await f.service.deliverTicketOutbox();const r=f.current();
+  f.db.exec('UPDATE ticket_automation_requests SET member_id=NULL,port_id=NULL');
+  await f.service.ticketSlackAction('T1','U1','start',`${r.id}:${r.revision}`);
+  assert.equal(f.current().state,'queued');assert.equal(f.current().member_id,'m1');assert.equal(f.current().port_id,'p1');assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,1);
+  const updates=f.writes.filter(w=>w.method==='chat.update');assert.ok(updates.some(w=>w.body.text.includes('승인 처리 중')));assert.ok(!updates.find(w=>w.body.text.includes('승인 처리 중')).body.blocks.some(b=>b.type==='actions'));
+  assert.match(updates.at(-1).body.text,/시작 준비 중/);assert.match(updates.at(-1).body.text,/자동 검사/);assert.equal(f.writes.filter(w=>w.method==='views.open').length,0);
+  await assert.rejects(f.service.ticketSlackAction('T1','U1','start',`${r.id}:${r.revision}`));assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,1);assert.equal(f.writes.filter(w=>w.method==='chat.postMessage'&&w.body.channel==='C1').length,0);
+});
+
+test('a displayed warning is approved once, audited and reused only for the same source and snapshot',async t=>{
+  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['scope_ambiguous','sensitive_change']);await f.service.deliverTicketOutbox();
+  const warned=f.current(),card=f.writes.filter(w=>w.method==='chat.update').at(-1).body;
+  assert.match(card.text,/구현할 범위 확인/);assert.equal(card.blocks.flatMap(b=>b.elements||[]).filter(b=>b.style==='primary')[0].action_id,'ticket_auto_approve_warning');
+  await f.service.ticketSlackAction('T1','U1','approve_warning',`${warned.id}:${warned.revision}`);
+  assert.equal(f.current().state,'queued');const job=f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id);assert.match(JSON.parse(job.context_json).securityOverride.reason,/주의 내용을 확인/);
+  const gate=await startSecurityReview(f,'warning',['scope_ambiguous','sensitive_change']);assert.equal(gate.allow,true);assert.equal(f.current().state,'running');
+  assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_audit WHERE action='warning_approved'").get().n,1);
+  const audit=f.db.prepare("SELECT details_json FROM ticket_automation_audit WHERE action='warning_approved'").get();assert.deepEqual(JSON.parse(audit.details_json).codes,['scope_ambiguous','sensitive_change']);
+  await assert.rejects(f.service.ticketSlackAction('T1','U1','approve_warning',`${warned.id}:${warned.revision}`));
+  assert.equal(f.writes.filter(w=>w.method==='views.open').length,0);
+});
+
+test('changed source code explains another review and hard security blocks cannot use the simple approval',async t=>{
+  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);await f.change('approve_warning');
+  const result=await startSecurityReview(f,'warning',['sensitive_change'],'b'.repeat(64));assert.equal(result.allow,false);assert.equal(JSON.parse(f.current().security_json).recheckReason,'snapshot_changed');assert.match(workflow.ticketWorkflow(f.current()).next,/코드가 변경/);
+  for(const code of ['secrets','exfiltration','security_boundary']){
+    f.db.prepare("UPDATE ticket_automation_requests SET state='security_review',risk='review',security_json=?").run(JSON.stringify({verdict:'warning',codes:[code]}));await assert.rejects(f.change('approve_warning'),/차단/);
+  }
+});
+
+test('historical review buttons open a short confirmation and progress comments carry no stale action buttons',async t=>{
+  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);await f.service.deliverTicketOutbox();
+  const r=f.current();await f.editor.openTicketSlackEditor('T1','U1','trigger',`${r.id}:${r.revision}`);
+  const view=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(view.title.text,'작업 내용 확인');assert.equal(view.submit.text,'확인하고 개발 승인');assert.ok(!view.blocks.some(b=>b.block_id==='ta_reason'||b.block_id==='ta_ack'));
+  await f.editor.submitTicketSlackEditor('T1','U1',view.private_metadata,{});assert.equal(f.current().state,'queued');
+  const securityComments=f.writes.filter(w=>w.method==='chat.postMessage'&&w.body.text.includes('주의 항목이 있습니다'));assert.equal(securityComments.length,1);assert.ok(!securityComments[0].body.blocks.some(b=>b.type==='actions'));
+});
+
+test('offline starts restore an actionable card and preserve all hard security boundaries',async t=>{
+  const f=fixture(t,{notifications:true});await f.intake();await f.service.deliverTicketOutbox();f.db.exec("UPDATE local_agent_devices SET last_seen_at='2000-01-01'");const r=f.current();
+  await assert.rejects(f.service.ticketSlackAction('T1','U1','start',`${r.id}:${r.revision}`),/배정 가능한 포트/);
+  const card=f.writes.filter(w=>w.method==='chat.update').at(-1).body;assert.match(card.text,/개발 승인 대기/);assert.ok(card.blocks.flatMap(b=>b.elements||[]).some(b=>b.action_id==='ticket_auto_start'));
+  assert.equal(f.current().state,'recommended');assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,0);
+});
+
+test('a failed legacy warning confirmation shows a visible error rather than referencing removed fields',async t=>{
+  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);const r=f.current();
+  f.db.exec("UPDATE local_agent_devices SET last_seen_at='2000-01-01'");
+  const result=await f.editor.submitTicketSlackEditor('T1','U1',`${r.id}:${r.revision}`,{});
+  assert.equal(result.response_action,'update');assert.match(result.view.blocks[0].text.text,/배정 가능한 포트/);assert.equal(result.errors,undefined);assert.equal(f.current().state,'security_review');
+  assert.equal(workflow.ticketSolutionPreview('고객의 문제\n저장 실패\n\n해결 제안\n저장 오류를 수정합니다. 다른 동작은 범위를 확인합니다.\n\n완료 확인 기준\n저장 성공'),'저장 오류를 수정합니다.');
 });
