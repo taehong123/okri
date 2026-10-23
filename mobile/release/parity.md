@@ -333,3 +333,7 @@ not evidence that a web feature magically exists in React Native.
 ## 2026-10-22 Slack ticket automation
 
 Web-only: workspace-scoped customer intake, product specifications and multiple repositories, PC-grouped personal execution ports, priority/prerequisite coordination, isolated local development and completion-message approval. Priority is mirrored to existing Ticket/Task fields. Deployment confirmation records an operator-verified Git commit; no automatic deployment is claimed. Mobile v1 endpoints, fixtures and native business semantics are unchanged. Native UI parity is deferred; installed clients retain their existing Ticket and Task views. The additive 0073 tables remain on code rollback. No store release or physical-device validation is claimed.
+
+## 2026-10-23 Streamlined Slack ticket actions
+
+Web/server and Slack only: compact customer/requester/requirement/category summaries, one reviewed development-start action with atomic ticket/assignee/job creation, direct approved guidance replies without execution ports, and in-place recommendation updates. Existing v1 endpoints and native ticket/task fields retain their semantics. Native UI parity remains deferred; no native binary, OTA or device verification is claimed.

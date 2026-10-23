@@ -2893,5 +2893,13 @@ const messages = {
   "AI 서비스에 연결하지 못해 다시 시도합니다.": "No se pudo conectar al servicio de IA y se reintentará.",
   "수집은 계속되며 AI 분석은 한도 초기화까지 대기합니다.": "La recopilación continúa mientras el análisis de IA espera el restablecimiento del límite.",
   "자동 재시도 예정": "Reintento automático programado",
+  "고객사": "Cliente",
+  "요구사항": "Solicitud",
+  "개발 시작": "Iniciar desarrollo",
+  "회신 내용": "Texto de respuesta",
+  "회신 보내기": "Enviar respuesta",
+  "상세·수정": "Detalles y edición",
+  "요청자 변경": "Cambiar solicitante",
+  "회신 작성": "Redactar respuesta",
 } satisfies Catalog;
 export default messages;

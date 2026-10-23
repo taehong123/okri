@@ -428,8 +428,17 @@ export async function ticketRequesterOptions(a:RequestAuthorization,id:string,qu
   return {users:users.slice(0,40)};
 }
 export async function changeTicketRequest(a: RequestAuthorization, p: Record<string, unknown>) {
-  const r = await requestFor(a, text(p.id, 80)), action = text(p.action, 30), time = now();
+  let r = await requestFor(a, text(p.id, 80));
+  const action = text(p.action, 30), time = now();
   if (Number(p.revision) !== r.revision) fail("내용이 변경되었습니다. 새로고침 후 확인해 주세요.", 409);
+  // One reviewed start commits assignment, ticket creation and execution together.
+  if(action==='start') {
+    if(!['recommended','created'].includes(r.state)||r.category==='guidance'||r.risk==='blocked')fail('개발 전 요청을 확인해 주세요.',409);
+    const self=await one<{id:string}>("SELECT id FROM workspace_members WHERE workspace_id=? AND user_id=? AND status='active'",a.ownerId,a.userId);
+    const memberId=p.memberId===undefined?r.member_id||self?.id||'':text(p.memberId,80);
+    if(!memberId||!await one("SELECT id FROM workspace_members WHERE id=? AND workspace_id=? AND status='active' AND user_id IS NOT NULL",memberId,a.ownerId))fail('개발을 담당할 활성 담당자를 선택해 주세요.');
+    r={...r,member_id:memberId,port_id:p.portId===undefined?r.port_id:text(p.portId,80)||null,product_id:p.productId===undefined?r.product_id:text(p.productId,80)||null,repository_id:p.repositoryId===undefined?r.repository_id:text(p.repositoryId,80)};
+  }
   if(action==='stop') {
     if(!['queued','running','waiting_answer'].includes(r.state))fail("진행 중인 요청만 중지할 수 있습니다.",409);
     const result=await env.DB.batch([
@@ -513,14 +522,14 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
       env.DB.prepare(`INSERT INTO item_assignments(id,owner_id,item_id,member_id,role,created_at,updated_at) SELECT ?,owner_id,task_id,member_id,'task_assignee',?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND ticket_id=? AND task_id=? AND member_id IS NOT NULL AND revision=?`).bind(crypto.randomUUID(),time,time,r.id,a.ownerId,ticketId,taskId,r.revision+1),
     ]);
     if (!results[2].meta.changes) fail("이미 생성되었거나 변경되었습니다.", 409);
-  } else if (action === "approve" || action === "force") {
+  } else if (action === "approve" || action === "force" || action==='start'||action==='recheck') {
     const force = action === "force", previousSecurity = JSON.parse(r.security_json || "{}");
     const overrideReason = force ? text(p.reason,500) : "";
-    if ((force ? r.state !== "security_review" || previousSecurity.verdict !== "warning" : r.state !== "created") || r.risk === "blocked") fail("검토 후 생성된 티켓만 승인할 수 있습니다.", 409);
+    if ((force||action==='recheck' ? r.state !== "security_review" || previousSecurity.verdict !== "warning" : action==='start'?!['recommended','created'].includes(r.state):r.state !== "created") || r.risk === "blocked") fail("검토 후 생성된 티켓만 승인할 수 있습니다.", 409);
     if(force && (p.acknowledged!==true || overrideReason.length<5 || redactTicketText(overrideReason)!==overrideReason))fail("경고를 확인하고 비밀정보 없이 사유를 5자 이상 남겨 주세요.");
     const s = await settings(a.ownerId); if (!s?.enabled) fail("티켓 자동화를 먼저 켜 주세요.");
     if (!config(s).channels.some(c => c.id === r.source_channel && c.enabled)) fail("고객 채널 연결을 확인해 주세요.");
-    if(!r.member_id)fail('담당자를 먼저 지정해 주세요. 실행 포트는 자동 배정할 수 있습니다.');
+    if(!r.member_id&&r.category!=='guidance')fail('담당자를 먼저 지정해 주세요. 실행 포트는 자동 배정할 수 있습니다.');
     const source = await readSource(a.ownerId, r.source_channel, r.source_ts, r.source_user);
     if (source.hash !== r.source_digest || assessTicketText(source.raw).risk === "blocked"||!await linkedSourcesCurrent(r)) {
       await updateTicketRevision("UPDATE ticket_automation_requests SET state='blocked',risk='blocked',reasons_json=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?", JSON.stringify(["원문 변경 또는 보안 검증 실패: 원문을 확인하고 새 요청으로 검토해 주세요."]), time, r.id, a.ownerId, r.revision);
@@ -528,7 +537,6 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     }
     if (assessTicketText(`${r.source_text}\n${r.title}\n${r.description}\n${r.answer}`).risk === "blocked") fail("보안 검증을 통과하지 못했습니다.", 403);
     if(r.category==='guidance'){
-      if(!r.member_id)fail('안내문을 검토할 담당자를 먼저 지정해 주세요.');
       const notice=(r.description.split('안내 초안\n')[1]?.split('\n\n완료 확인 기준')[0]||r.description).trim();
       await updateTicketRevision("UPDATE ticket_automation_requests SET state='review',notice=?,revision=revision+1,approved_by=?,approved_at=?,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state='created'",redactTicketText(notice).slice(0,4000),a.userId,time,time,r.id,a.ownerId,r.revision);
       await audit(a.ownerId,r.id,a.userId,'guidance_prepared',r.revision);
@@ -537,18 +545,23 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     }
     const product=await productContext(a.ownerId,r.product_id,r.repository_id);
     const port = await chooseTicketPort(a.ownerId, r.member_id, r.port_id, r.source_channel,r.product_id,r.repository_id);
-    if (!port) fail("담당자의 포트를 연결하고 실행 상태를 확인해 주세요.");
+    if (!port) fail("배정 가능한 포트가 없습니다. 선택한 담당자 PC의 실행기를 켜고 고객 채널·제품·모델 연결을 확인해 주세요. 개발은 시작되지 않았습니다.");
     const id = crypto.randomUUID(), model = port.model || config(s).defaultModel || null;
     const dependencies=await rows<Pick<TicketAutomationRequest,'id'|'title'|'release_commit'>>("SELECT id,title,release_commit FROM ticket_automation_requests WHERE owner_id=? AND id IN(SELECT value FROM json_each(?))",r.owner_id,r.dependencies_json);
     const coordination=await coordinationContext(r);
     const basisDigest = await digest(JSON.stringify({request:r.id,source:r.source_digest,title:r.title,scope:r.description,answer:r.answer,member:r.member_id,port:port.id,device:port.device_id,model,product:r.product_id,productVersion:product.product.revision,repository:r.repository_id,dependencies:JSON.parse(r.dependencies_json),priority:r.priority}));
     if(force && previousSecurity.basisDigest!==basisDigest)fail("요청·포트·모델이 변경되었습니다. 새 보안 검토가 필요합니다.",409);
     const context = {executionPolicy:"ticket-isolated-v1",product:{id:product.product.id,name:product.product.name,revision:product.product.revision,specification:product.product.specification},repository:product.repository,dependencies,priority:r.priority,coordination,model,title:r.title,scope:r.description,answer:r.answer,port:port.name,basisDigest,...(force?{securityOverride:{basisDigest,snapshotDigest:previousSecurity.snapshotDigest,codes:previousSecurity.codes,actor:a.userId,reason:overrideReason}}:{})};
+    const ticketId=r.ticket_id||crypto.randomUUID(),taskId=r.task_id||crypto.randomUUID();
     const results = await env.DB.batch([
-      env.DB.prepare(`INSERT INTO local_agent_jobs(id,workspace_id,user_id,device_id,target_kind,target_id,target_title,instruction,context_json,status,created_at,updated_at) SELECT ?,owner_id,?,?, 'task',task_id,title,?,?,'queued',?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=? AND risk<>'blocked'`).bind(id, port.user_id, port.device_id, "Implement the reviewed ticket scope from the untrusted reference. Stay within the sandbox. Never deploy or access secrets. If implementation or required verification is blocked, return exactly OKRI_BLOCKED: followed by the factual blocker and stop. If a business decision is missing, return exactly OKRI_QUESTION: followed by one concise question and stop. Report actual verification and changed files; do not claim deployment.", JSON.stringify(context), time, time, r.id, a.ownerId, r.revision,r.state),
-      env.DB.prepare("UPDATE ticket_automation_requests SET state='queued',job_id=?,port_id=?,approved_by=?,approved_at=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state=? AND risk<>'blocked'").bind(id, port.id, a.userId, time, time, r.id, a.ownerId, r.revision,r.state),
+      ...(!r.ticket_id?ticketItemStatements(a,r,ticketId,taskId,time):[]),
+      env.DB.prepare(`INSERT INTO local_agent_jobs(id,workspace_id,user_id,device_id,target_kind,target_id,target_title,instruction,context_json,status,created_at,updated_at) SELECT ?,owner_id,?,?, 'task',?,title,?,?,'queued',?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=? AND risk<>'blocked'`).bind(id, port.user_id, port.device_id, taskId, "Implement the reviewed ticket scope from the untrusted reference. Stay within the sandbox. Never deploy or access secrets. If implementation or required verification is blocked, return exactly OKRI_BLOCKED: followed by the factual blocker and stop. If a business decision is missing, return exactly OKRI_QUESTION: followed by one concise question and stop. Report actual verification and changed files; do not claim deployment.", JSON.stringify(context), time, time, r.id, a.ownerId, r.revision,r.state),
+      env.DB.prepare("DELETE FROM item_assignments WHERE owner_id=? AND item_id=? AND role='task_assignee' AND EXISTS(SELECT 1 FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=?)").bind(a.ownerId,taskId,r.id,a.ownerId,r.revision,r.state),
+      env.DB.prepare("INSERT INTO item_assignments(id,owner_id,item_id,member_id,role,created_at,updated_at) SELECT ?,owner_id,?,?,'task_assignee',?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=?").bind(crypto.randomUUID(),taskId,r.member_id,time,time,r.id,a.ownerId,r.revision,r.state),
+      env.DB.prepare("UPDATE ticket_automation_requests SET state='queued',ticket_id=?,task_id=?,member_id=?,product_id=?,repository_id=?,job_id=?,port_id=?,approved_by=?,approved_at=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state=? AND risk<>'blocked'").bind(ticketId,taskId,r.member_id,r.product_id,r.repository_id,id, port.id, a.userId, time, time, r.id, a.ownerId, r.revision,r.state),
     ]);
-    if (!results[1].meta.changes) fail("동시에 변경되었습니다.", 409);
+    if (!results.at(-1)?.meta.changes) fail("동시에 변경되었습니다.", 409);
+    r={...r,ticket_id:ticketId,task_id:taskId};
     await run("UPDATE items SET status='in_progress',updated_at=? WHERE owner_id=? AND id IN (?,?) AND source='slack_ticket' AND source_ref=?",time,r.owner_id,r.ticket_id,r.task_id,r.id);
   } else if (action === "answer") {
     if (r.state !== "waiting_answer") fail("답변 대기 중인 요청만 답변할 수 있습니다.");
@@ -560,19 +573,28 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     if (r.state !== "review") fail("완료 공유 대기 상태에서만 문안을 수정할 수 있습니다.");
     const notice = text(p.notice, 3000); if (!notice || redactTicketText(notice) !== notice || assessTicketText(notice).risk === "blocked") fail("안내 문안을 확인해 주세요.");
     await updateTicketRevision("UPDATE ticket_automation_requests SET notice=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state='review'", notice, time, r.id, a.ownerId, r.revision);
-  } else if (action === "publish") {
-    if (r.state !== "review" || !r.notice) fail("완료 안내 문안을 먼저 확인해 주세요.");
+  } else if (action === "publish" || action==='reply') {
+    const direct=action==='reply',guidance=r.category==='guidance'&&['recommended','created'].includes(r.state);
+    if ((r.state !== "review" && !(direct&&guidance)) || (!direct&&!r.notice)||r.risk==='blocked') fail("회신할 요청과 안내 문안을 먼저 확인해 주세요.");
+    if(direct){
+      const notice=text(p.notice,4000);if(typeof p.notice!=='string'||p.notice.trim().length>4000||!notice||redactTicketText(notice)!==notice||assessTicketText(notice).risk==='blocked')fail('고객에게 보낼 회신 문안을 4,000자 이내로 확인해 주세요.');
+      const requester=await verifiedTicketRequester(a.ownerId,r.team_id,r.source_channel,text(p.requesterSlackUser===undefined?r.requester_slack_user:p.requesterSlackUser,80));
+      if(guidance){const source=await readSource(a.ownerId,r.source_channel,r.source_ts,r.source_user);if(source.hash!==r.source_digest||assessTicketText(source.raw).risk==='blocked'||!await linkedSourcesCurrent(r))fail('고객 대화가 변경되었습니다. 최신 내용을 확인한 뒤 다시 회신해 주세요.',409);}
+      r={...r,notice,requester_slack_user:requester.id,requester_name:requester.name};
+    }
     const s = await settings(a.ownerId); if (!s?.enabled || !config(s).notificationsAuthorized) fail("Slack 발신 설정과 문안 승인을 먼저 확인해 주세요.");
     if(s.team_id!==r.team_id||!config(s).channels.some(c=>c.id===r.source_channel&&c.enabled)||(await getSlackConnection(a.ownerId))?.teamId!==r.team_id)fail("원문 Slack 워크스페이스와 고객 채널 연결을 확인해 주세요.");
     if (!/^[UW][A-Z0-9]+$/.test(r.requester_slack_user)) fail("완료 안내를 받을 Slack 요청자를 먼저 지정해 주세요.");
     const connection=await getSlackConnection(a.ownerId),token=await slackTokenForConnection(connection!);
-    const recipient=await slackApi<{ok:boolean;user?:{is_bot?:boolean;deleted?:boolean}}>(token,'users.info',{user:r.requester_slack_user});
-    if(!recipient.user||recipient.user.is_bot||recipient.user.deleted||!(await requesterChannelMembers(token,r.source_channel)).has(r.requester_slack_user))fail("원문 채널의 활성 Slack 요청자를 다시 지정해 주세요.");
+    if(!direct){const recipient=await slackApi<{ok:boolean;user?:{is_bot?:boolean;deleted?:boolean}}>(token,'users.info',{user:r.requester_slack_user});
+    if(!recipient.user||recipient.user.is_bot||recipient.user.deleted||!(await requesterChannelMembers(token,r.source_channel)).has(r.requester_slack_user))fail("원문 채널의 활성 Slack 요청자를 다시 지정해 주세요.");}
     const body=`<@${r.requester_slack_user}>\n${escapeSlackText(r.notice)}`,outboxId=`${r.id}:completion:${r.revision}`;
+    const ticketId=r.ticket_id||crypto.randomUUID(),taskId=r.task_id||crypto.randomUUID();
     const result=await env.DB.batch([
-      env.DB.prepare("INSERT OR IGNORE INTO ticket_automation_outbox(id,owner_id,request_id,kind,channel_id,thread_ts,body_json,created_at,updated_at) SELECT ?,owner_id,id,?,source_channel,source_ts,?,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state='review'").bind(outboxId,`completion:${r.revision}`,JSON.stringify({text:body,unfurl_links:false,unfurl_media:false}),time,time,r.id,a.ownerId,r.revision),
-      env.DB.prepare("UPDATE ticket_automation_requests SET state='publishing',revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state='review' AND EXISTS(SELECT 1 FROM ticket_automation_outbox WHERE id=? AND state='pending')").bind(time,r.id,a.ownerId,r.revision,outboxId),
-    ]);if(!result[1].meta.changes)fail("동시에 변경되었습니다.",409);
+      ...(!r.ticket_id?ticketItemStatements(a,r,ticketId,taskId,time):[]),
+      env.DB.prepare("INSERT OR IGNORE INTO ticket_automation_outbox(id,owner_id,request_id,kind,channel_id,thread_ts,body_json,created_at,updated_at) SELECT ?,owner_id,id,?,source_channel,source_ts,?,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=?").bind(outboxId,`completion:${r.revision}`,JSON.stringify({text:body,unfurl_links:false,unfurl_media:false}),time,time,r.id,a.ownerId,r.revision,r.state),
+      env.DB.prepare("UPDATE ticket_automation_requests SET state='publishing',ticket_id=?,task_id=?,notice=?,requester_slack_user=?,requester_name=?,approved_by=?,approved_at=?,revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=? AND state=? AND EXISTS(SELECT 1 FROM ticket_automation_outbox WHERE id=? AND state='pending')").bind(ticketId,taskId,r.notice,r.requester_slack_user,r.requester_name,a.userId,time,time,r.id,a.ownerId,r.revision,r.state,outboxId),
+    ]);if(!result.at(-1)?.meta.changes)fail("동시에 변경되었습니다.",409);
   } else if(action==='cancel_publish') {
     if(r.state!=='publishing')fail("전송 대기 중인 안내만 취소할 수 있습니다.",409);
     const id=`${r.id}:completion:${r.revision-1}`;
@@ -584,34 +606,46 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     if (!["recommended", "created", "security_review", "blocked", "failed"].includes(r.state)) fail("진행 중인 요청은 제외할 수 없습니다.");
     await updateTicketRevision("UPDATE ticket_automation_requests SET state='dismissed',revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?", time, r.id, a.ownerId, r.revision);
   } else fail("지원하지 않는 작업입니다.");
-  if (["edit", "create", "approve", "force", "answer", "notice", "refresh_source"].includes(action)) {
-    const updated = await one<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?", r.id, a.ownerId);
-    const s = await settings(a.ownerId);
-    if (updated && s) await queueTicketMessage(a.ownerId, r.id, `state:${updated.revision}`, config(s).destination, await managementThread(r.id), `${escapeSlackText(updated.title)} · ${updated.state === "created" ? "담당자 검토 후 개발을 승인해 주세요." : updated.state === "queued" ? "승인됨 · 실행 대기" : "내용이 변경되었습니다."}`);
-  }
   await audit(a.ownerId, r.id, a.userId, action, r.revision,action==='force'?{reason:text(p.reason,500)}:{});
-  if(['edit','create','approve','force','answer','requester','notice','review_notice','refresh_source','reassign'].includes(action))await queueTicketUpdate(a,r.id,'updated');
+  if(['edit','create','approve','start','reply','force','recheck','answer','requester','notice','review_notice','refresh_source','reassign'].includes(action))await queueTicketUpdate(a,r.id,'updated');
   return getTicketAutomation(a,{requestId:r.id});
+}
+
+function ticketItemStatements(a:RequestAuthorization,r:TicketAutomationRequest,ticketId:string,taskId:string,time:string){
+  return [
+    env.DB.prepare("INSERT INTO items(id,owner_id,kind,title,description,priority,status,source,source_ref,created_by_user_id,created_at,updated_at) SELECT ?,owner_id,'ticket',title,description,priority,'todo','slack_ticket',id,?,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=? AND ticket_id IS NULL AND risk<>'blocked'").bind(ticketId,a.userId,time,time,r.id,a.ownerId,r.revision,r.state),
+    env.DB.prepare("INSERT INTO items(id,owner_id,parent_id,kind,title,description,priority,status,source,source_ref,created_by_user_id,created_at,updated_at) SELECT ?,owner_id,?,'task',title,description,priority,'todo','slack_ticket',id,?,?,? FROM ticket_automation_requests WHERE id=? AND owner_id=? AND revision=? AND state=? AND ticket_id IS NULL AND risk<>'blocked'").bind(taskId,ticketId,a.userId,time,time,r.id,a.ownerId,r.revision,r.state),
+  ];
 }
 
 async function queueTicketMessage(owner: string, id: string, kind: string, channel: string, thread: string | null, body: string) {
   const r = await one<TicketAutomationRequest>("SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?", id, owner);
-  if(r)await ticketMessageStatement(r,kind,channel,thread,body).run();
+  if(r){await ticketMessageStatement(r,kind,channel,thread,body).run();
+    if(/^(?:progress:|result:|security:|failed:|conversation:|stopped:)/.test(kind))await ticketMessageStatement(r,`updated:${r.revision}:${r.state}`,channel,thread,'').run();
+  }
 }
-type MessageTicket=Pick<TicketAutomationRequest,'id'|'owner_id'|'state'|'revision'|'category'>&{member_id?:string|null};
-function ticketMessagePayload(r:MessageTicket,kind:string,body:string){
+export function ticketReplyDraft(r:Pick<TicketAutomationRequest,'notice'|'description'>){return r.notice||(r.description.split('안내 초안\n')[1]?.split('\n\n완료 확인 기준')[0]||'').trim();}
+export function ticketSummary(r:TicketAutomationRequest,customer:string){
+  const solution=r.description.split('해결 제안\n')[1]?.split('\n\n')[0]?.replace(/\s+/g,' ').slice(0,240);
+  const client=/^<#[A-Z0-9]+>$/.test(customer)?customer:escapeSlackText(customer.replace(/^#?고객\s*-\s*/,''));
+  return `• *고객사*: ${client}\n• *요청자*: ${/^[UW][A-Z0-9]+$/.test(r.requester_slack_user)?`<@${r.requester_slack_user}>`:escapeSlackText(r.requester_name||'확인 필요')}\n• *요구사항*: ${escapeSlackText(r.title)}\n• *분류*: ${TICKET_CATEGORY_LABELS[r.category]}${solution?`\n\n*해결 제안*\n${escapeSlackText(solution)}`:''}`;
+}
+type MessageTicket=Pick<TicketAutomationRequest,'id'|'owner_id'|'state'|'revision'|'category'>&Partial<TicketAutomationRequest>;
+function ticketMessagePayload(r:MessageTicket,kind:string,body:string,customer?:string,portName?:string){
   const id=r.id;
-  const action = r?.state === "recommended" ? "create" : r?.state === "created" ? "approve" : r?.state === "review" ? "publish" : null;
-  const safe=redactTicketText(body),blocks: Record<string, unknown>[] = [];
+  const action = ['recommended','created'].includes(r.state) ? r.category==='guidance'?'reply':'start' : r.state==='review'?'reply':r.state==='security_review'?'security':r.state==='waiting_answer'?'edit':null;
+  const summary=r.title&&r.description!==undefined&&kind!=='source'&&!kind.startsWith('completion:')?ticketSummary(r as TicketAutomationRequest,customer||r.source_channel||'확인 필요'):null;
+  const status=r.state==='queued'?`실행 대기 · ${portName||'포트 배정됨'} · 착수 전 보안 검사 예정`:r.state==='running'?`개발 진행 중 · ${portName||'포트 배정됨'}`:r.state==='security_review'?'보안 경고 확인 필요 · 경고 검토 버튼에서 사유를 남겨 주세요.':r.state==='publishing'?'승인한 회신 전송 대기':r.state==='published'?'회신 완료':r.state==='review'?'완료 회신 검토':r.state==='blocked'?'보안 검증 차단':r.state==='failed'?'실행 중지·실패 · 상세 내용 확인':r.category==='guidance'?'회신 내용을 확인한 뒤 원문 스레드에 전송합니다.':'담당자 확인 후 포트를 자동 배정합니다.';
+  const eventBody=!/^(?:recommendation$|updated:|layout:|state:)/.test(kind);
+  const safe=redactTicketText(summary?`${summary}\n\n${status}${eventBody?`\n${body.slice(0,2800)}`:''}`:body),blocks: Record<string, unknown>[] = [];
   for(let offset=0;offset<safe.length;offset+=2800)blocks.push({type:'section',text:{type:kind==='source'?'plain_text':'mrkdwn',text:safe.slice(offset,offset+2800)}});
   if(kind!=='source'&&!kind.startsWith('completion:'))blocks.push({type:'context',elements:[{type:'mrkdwn',text:`<${publicUrl()}/?view=tickets&ticketAutomation=1&request=${encodeURIComponent(id)}|OKRI에서 보기>`}]});
   if (r && kind!=='source' && !kind.startsWith("completion:")) blocks.push({ type: "actions", elements: [
-    ...(action ? [{ type: "button", text: { type: "plain_text", text: action === "create" ? "티켓 생성" : action === "approve" ? !r.member_id?'담당자 지정 후 승인':r.category==='guidance'?'안내문 검토':'개발 승인' : "완료 안내 공유 승인" }, action_id: `ticket_auto_${action}`, value: `${id}:${r.revision}` }] : []),
-    { type: "button", text: { type: "plain_text", text: r.state==='review'?'완료 안내 수정':'내용·담당자·포트 수정' },action_id:'ticket_auto_edit',value:`${id}:${r.revision}` },
-    ...(['recommended','created','blocked','failed','security_review'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'원문 다시 분석'},action_id:'ticket_auto_refresh_source',value:`${id}:${r.revision}`}]:[]),
+    ...(action ? [{ type: "button",style:'primary', text: { type: "plain_text", text: action==='start'?'개발 시작':action==='security'?'보안 경고 검토':action==='edit'?'답변하기':'회신 작성' }, action_id: `ticket_auto_${action}`, value: `${id}:${r.revision}` }] : []),
+    { type: "button", text: { type: "plain_text", text:'상세·수정' },action_id:'ticket_auto_edit',value:`${id}:${r.revision}` },
+    ...(r.state==='security_review'?[{type:'button',text:{type:'plain_text',text:'보안 검사 다시 실행'},action_id:'ticket_auto_recheck',value:`${id}:${r.revision}`}]:[]),
+    ...(['blocked','failed','security_review'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'새로 검토'},action_id:'ticket_auto_refresh_source',value:`${id}:${r.revision}`}]:[]),
     ...(['queued','running','waiting_answer'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'실행 중지'},action_id:'ticket_auto_stop',value:`${id}:${r.revision}`}]:[]),
-    ...(['recommended','created','blocked','failed'].includes(r.state)?[{type:'button',text:{type:'plain_text',text:'요청 제외'},action_id:'ticket_auto_dismiss',value:`${id}:${r.revision}`,confirm:{title:{type:'plain_text',text:'요청 제외'},text:{type:'plain_text',text:'원문과 처리 이력은 남기고 처리 대상에서 제외할까요?'},confirm:{type:'plain_text',text:'제외'},deny:{type:'plain_text',text:'취소'}}}]:[]),
-    { type:'button',text:{type:'plain_text',text:'티켓 운영 열기'},action_id:'ticket_queue_open',value:'{}'},
   ] });
   return {text:(kind==='source'?escapeSlackText(safe):safe).slice(0,39000),blocks,unfurl_links:false,unfurl_media:false};
 }
@@ -652,7 +686,11 @@ export async function syncTicketJobs() {
 }
 async function managementThread(id: string) { return (await one<{ message_ts: string }>("SELECT COALESCE(thread_ts,message_ts) AS message_ts FROM ticket_automation_outbox WHERE request_id=? AND kind IN ('source','recommendation') AND state='sent' ORDER BY CASE kind WHEN 'source' THEN 0 ELSE 1 END LIMIT 1", id))?.message_ts ?? null; }
 export async function deliverTicketOutbox() {
+  // Refresh old recommendation cards in place, without new channel messages.
+  const oldCards=await rows<{id:string;owner_id:string;request_id:string}>("SELECT o.id,o.owner_id,o.request_id FROM ticket_automation_outbox o JOIN ticket_automation_settings s ON s.owner_id=o.owner_id AND s.enabled=1 WHERE o.kind='recommendation' AND o.state='sent' AND o.channel_id=json_extract(s.config_json,'$.destination') AND json_extract(s.config_json,'$.notificationsAuthorized')=1 AND COALESCE(json_extract(o.body_json,'$.cardVersion'),0)<2 LIMIT 6");
+  for(const card of oldCards){const r=await one<TicketAutomationRequest>('SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?',card.request_id,card.owner_id),s=await settings(card.owner_id);if(r&&s)await queueTicketMessage(r.owner_id,r.id,`layout:${r.revision}`,config(s).destination,await managementThread(r.id),'');}
   // A crash/timeout after Slack accepted a message is ambiguous. Never blindly resend it.
+  await run("UPDATE ticket_automation_outbox SET state='pending',last_error='card_update_retry' WHERE state='sending' AND updated_at<? AND (kind LIKE 'updated:%' OR kind LIKE 'layout:%')",new Date(Date.now()-120000).toISOString());
   await run("UPDATE ticket_automation_outbox SET state='uncertain',last_error='delivery_confirmation_required' WHERE state='sending' AND updated_at<?", new Date(Date.now()-120000).toISOString());
   const pending = await rows<{ id: string; owner_id: string; request_id: string; kind: string; channel_id: string; thread_ts: string | null; body_json: string }>("SELECT * FROM ticket_automation_outbox WHERE state='pending' ORDER BY CASE WHEN kind='source' THEN 0 ELSE 1 END,created_at LIMIT 30");
   for (const message of pending) {
@@ -674,9 +712,13 @@ export async function deliverTicketOutbox() {
     const claimed = await run("UPDATE ticket_automation_outbox SET state='sending',thread_ts=?,updated_at=? WHERE id=? AND state='pending'",threadTs, now(), message.id); if (!claimed.meta.changes) continue;
     try {
       const token = await slackTokenForConnection(connection);
-      const stored=JSON.parse(message.body_json),payload=!completion&&message.kind!=='source'?ticketMessagePayload(r,message.kind,stored.text):stored;
-      const result = await slackApi<{ ok: boolean; ts?: string }>(token, "chat.postMessage", { channel: message.channel_id,client_msg_id:await ticketDeliveryId(message.id), ...(threadTs ? { thread_ts: threadTs } : {}), ...payload });
+      const portName=r.port_id?(await one<{name:string}>('SELECT name FROM ticket_execution_ports WHERE id=? AND owner_id=?',r.port_id,r.owner_id))?.name:undefined;
+      const stored=JSON.parse(message.body_json),payload=!completion&&message.kind!=='source'?ticketMessagePayload(r,message.kind,stored.text,c.channels.find(ch=>ch.id===r.source_channel)?.name,portName):stored;
+      const cardUpdate=!completion&&/^(?:updated:|layout:)/.test(message.kind)?await one<{id:string;message_ts:string}>("SELECT id,message_ts FROM ticket_automation_outbox WHERE request_id=? AND owner_id=? AND channel_id=? AND kind='recommendation' AND state='sent'",r.id,r.owner_id,message.channel_id):null;
+      if(/^(?:updated:|layout:)/.test(message.kind)&&!cardUpdate){await run("UPDATE ticket_automation_outbox SET state=?,updated_at=? WHERE id=?",message.kind.startsWith('layout:')?'cancelled':'pending',now(),message.id);continue;}
+      const result = await slackApi<{ ok: boolean; ts?: string }>(token, cardUpdate?'chat.update':"chat.postMessage", { channel: message.channel_id,...(cardUpdate?{ts:cardUpdate.message_ts}:{client_msg_id:await ticketDeliveryId(message.id), ...(threadTs ? { thread_ts: threadTs } : {})}), ...payload });
       if (!result.ts) throw new Error("missing_message_ts");
+      if(cardUpdate)await run('UPDATE ticket_automation_outbox SET body_json=?,updated_at=? WHERE id=? AND owner_id=?',JSON.stringify({...payload,cardVersion:2}),now(),cardUpdate.id,r.owner_id);
       if (completion) {
         await env.DB.batch([
           env.DB.prepare("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,updated_at=? WHERE id=? AND state='sending'").bind(result.ts,now(),message.id),
@@ -686,10 +728,11 @@ export async function deliverTicketOutbox() {
         await audit(r.owner_id,r.id,"slack","completion_shared",r.revision,{channel:r.source_channel,messageTs:result.ts});
         await slackApi(token,'reactions.remove',{channel:r.source_channel,timestamp:r.source_ts,name:'hourglass_flowing_sand'}).catch(()=>undefined);
         await slackApi(token, "reactions.add", { channel: r.source_channel, timestamp: r.source_ts, name: "white_check_mark" }).catch(() => undefined);
-      }else await run("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,thread_ts=?,updated_at=? WHERE id=? AND state='sending'",result.ts,threadTs,now(),message.id);
+        const published=await one<TicketAutomationRequest>('SELECT * FROM ticket_automation_requests WHERE id=? AND owner_id=?',r.id,r.owner_id);if(published)await ticketMessageStatement(published,`updated:${published.revision}:published`,c.destination,await managementThread(r.id),'').run();
+      }else await run("UPDATE ticket_automation_outbox SET state='sent',message_ts=?,thread_ts=?,body_json=?,updated_at=? WHERE id=? AND state='sending'",result.ts,threadTs,JSON.stringify({...payload,...(message.kind==='recommendation'?{cardVersion:2}:{})}),now(),message.id);
       if (message.kind.startsWith("progress:")) await slackApi(token, "reactions.add", { channel: r.source_channel, timestamp: r.source_ts, name: "hourglass_flowing_sand" }).catch(() => undefined);
       if(message.kind.startsWith('stopped:')||message.kind.startsWith('failed:'))await slackApi(token,'reactions.remove',{channel:r.source_channel,timestamp:r.source_ts,name:'hourglass_flowing_sand'}).catch(()=>undefined);
-    } catch { await run("UPDATE ticket_automation_outbox SET state='uncertain',last_error='delivery_confirmation_required',updated_at=? WHERE id=?", now(), message.id); }
+    } catch { const updating=/^(?:updated:|layout:)/.test(message.kind);await run("UPDATE ticket_automation_outbox SET state=?,last_error=?,updated_at=? WHERE id=?",updating?'pending':'uncertain',updating?'card_update_retry':'delivery_confirmation_required',now(),message.id); }
   }
 }
 async function ticketDeliveryId(id:string){const h=await digest(id);return `${h.slice(0,8)}-${h.slice(8,12)}-4${h.slice(13,16)}-8${h.slice(17,20)}-${h.slice(20,32)}`;}

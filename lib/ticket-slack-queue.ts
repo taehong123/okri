@@ -2,9 +2,8 @@ import {env} from 'cloudflare:workers';
 import {getSlackConnection,canManageTeam} from '@/lib/pace-data';
 import {dailyMemberBySlack,slackApi,slackTokenForConnection} from '@/lib/slack-daily';
 import {TICKET_STATE_LABELS} from '@/lib/ticket-policy';
-import {TICKET_CATEGORY_LABELS} from '@/lib/ticket-recommendation';
 import {ticketIntakeStatus,requestTicketReconciliation} from '@/lib/ticket-intake-queue';
-import type {TicketAutomationRequest} from '@/lib/ticket-automation';
+import {ticketSummary,type TicketAutomationRequest} from '@/lib/ticket-automation';
 const rows=async<T>(sql:string,...args:unknown[])=>(await env.DB.prepare(sql).bind(...args).all<T>()).results||[];
 const option=(value:string,text:string)=>({text:{type:'plain_text',text},value});
 type QueueState={status:string;query:string;offset:number;coverage?:boolean};
@@ -31,8 +30,8 @@ async function queueView(team:string,user:string,p:QueueState){
     const values:unknown[]=[a.ownerId,...(where==='state=?'?[p.status]:[]),p.query,p.query,p.query];
     const tickets=await rows<TicketAutomationRequest>(`SELECT * FROM ticket_automation_requests WHERE owner_id=? AND ${where} AND (?='' OR instr(lower(title),lower(?))>0 OR instr(lower(description),lower(?))>0) ORDER BY CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END,created_at,id LIMIT 11 OFFSET ?`,...values,p.offset);
     for(const r of tickets.slice(0,10)){
-      blocks.push({type:'section',text:{type:'plain_text',text:`[${TICKET_CATEGORY_LABELS[r.category]}] ${r.title}\n${TICKET_STATE_LABELS[r.state]} · ${r.member_id?'담당자 지정됨':'담당자 미지정'}\n${r.description.slice(0,1200)}`},accessory:{type:'button',text:{type:'plain_text',text:['queued','running'].includes(r.state)?'실행 중지':'열기·수정'},action_id:['queued','running'].includes(r.state)?'ticket_auto_stop':'ticket_auto_edit',value:`${r.id}:${r.revision}`}});
-      if(['recommended','created','review'].includes(r.state))blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:r.state==='recommended'?'티켓 생성':r.state==='created'?r.category==='guidance'?'안내문 검토':'개발 승인':'완료 안내 공유 승인'},action_id:`ticket_auto_${r.state==='recommended'?'create':r.state==='created'?'approve':'publish'}`,value:`${r.id}:${r.revision}`}]});
+      blocks.push({type:'section',text:{type:'mrkdwn',text:`${ticketSummary(r,`<#${r.source_channel}>`)}\n\n${TICKET_STATE_LABELS[r.state]}`},accessory:{type:'button',text:{type:'plain_text',text:['queued','running'].includes(r.state)?'실행 중지':'상세·수정'},action_id:['queued','running'].includes(r.state)?'ticket_auto_stop':'ticket_auto_edit',value:`${r.id}:${r.revision}`}});
+      if(['recommended','created','review','security_review'].includes(r.state))blocks.push({type:'actions',elements:[{type:'button',style:'primary',text:{type:'plain_text',text:r.state==='security_review'?'보안 경고 검토':r.state==='review'||r.category==='guidance'?'회신 작성':'개발 시작'},action_id:`ticket_auto_${r.state==='security_review'?'security':r.state==='review'||r.category==='guidance'?'reply':'start'}`,value:`${r.id}:${r.revision}`}]});
     }
     if(!tickets.length)blocks.push({type:'section',text:{type:'plain_text',text:'이 상태의 티켓이 없습니다.'}});
     blocks.push({type:'actions',elements:[{type:'button',text:{type:'plain_text',text:'새로고침'},action_id:'ticket_queue_refresh',value:metadata},...(p.offset?[{type:'button',text:{type:'plain_text',text:'이전'},action_id:'ticket_queue_previous',value:JSON.stringify({...p,offset:Math.max(0,p.offset-10)})}]:[]),...(tickets.length>10?[{type:'button',text:{type:'plain_text',text:'다음'},action_id:'ticket_queue_next',value:JSON.stringify({...p,offset:p.offset+10})}]:[]),{type:'button',text:{type:'plain_text',text:'수집 점검'},action_id:'ticket_queue_coverage',value:JSON.stringify({...p,coverage:true,offset:0})}]});

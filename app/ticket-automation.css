@@ -29,6 +29,8 @@
 .ticket-request-row[aria-expanded="true"] { background:var(--bg-raised); }
 .ticket-request-detail,.ticket-port-setup { border-block:1px solid var(--border-default); padding-block:var(--space-6); margin-block:var(--space-4); }
 .ticket-request-detail>a { display:inline-flex; gap:var(--space-2); align-items:center; color:var(--text-primary); margin-bottom:var(--space-4); }
+.ticket-request-summary { padding-left:var(--space-4); margin-block:var(--space-4); line-height:1.7; overflow-wrap:anywhere; }
+.ticket-request-detail details>label,.ticket-request-detail details>p { margin-top:var(--space-3); }
 .ticket-security-note { display:flex; gap:var(--space-3); align-items:start; }
 .ticket-security-note svg { flex-shrink:0; margin-top:var(--space-2); }
 .ticket-security-note p { margin:0; }
