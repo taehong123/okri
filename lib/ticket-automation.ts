@@ -652,7 +652,7 @@ function ticketMessagePayload(r:MessageTicket,kind:string,body:string,customer?:
   if(kind!=='source'&&!kind.startsWith('completion:'))blocks.push({type:'context',elements:[{type:'mrkdwn',text:`<${publicUrl()}/?view=tickets&ticketAutomation=1&request=${encodeURIComponent(r.id)}|OKRI에서 보기>`}]});
   if(interactive)blocks.push({type:'actions',elements:[
     ...(action?[{type:'button',style:'primary',text:{type:'plain_text',text:action==='start'?'개발 승인':action==='approve_warning'?'확인하고 개발 승인':action==='edit'?'답변하기':'회신 확인'},action_id:`ticket_auto_${action}`,value:`${r.id}:${r.revision}`}]:[]),
-    {type:'button',text:{type:'plain_text',text:'상세·수정'},action_id:'ticket_auto_edit',value:`${r.id}:${r.revision}`},
+    ...(action==='edit'?[]:[{type:'button',text:{type:'plain_text',text:'상세·수정'},action_id:'ticket_auto_edit',value:`${r.id}:${r.revision}`}]),
   ]});
   return {text:(kind==='source'?escapeSlackText(safe):safe).slice(0,39000),blocks,unfurl_links:false,unfurl_media:false};
 }

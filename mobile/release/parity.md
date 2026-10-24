@@ -1,5 +1,12 @@
 # Native parity ledger
 
+## 2026-10-24 · Slack question card delivery
+
+- Backend/Slack only: answer-waiting ticket cards expose one answer action so
+  Slack accepts their action identifiers. Assignment, execution approval and
+  customer reply approval retain their existing guards.
+- No native v1 payload, auth, schema, mobile screen or binary release changes.
+
 ## 2026-10-22 · Short acknowledgement follow-ups
 
 - Backend/Slack only: exact short acknowledgements on an already linked source
