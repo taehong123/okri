@@ -1,5 +1,14 @@
 # Native parity ledger
 
+## 2026-10-26 · Separate-message follow-up context
+
+- Web/Slack backend only: ambiguous new follow-ups include up to three recent
+  roots from the same requester as reference context, within one hour. New focus
+  messages alone determine intake; earlier context is not imported as new work.
+- Relay and internal messages do not trigger this history expansion. No extra AI
+  request, native v1, database schema or native UI change.
+
+
 ## 2026-10-26 · Fresh per-job preflight state
 
 - Web/Slack backend only: queuing a new ticket job clears the preceding job
