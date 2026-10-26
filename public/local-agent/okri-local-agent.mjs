@@ -76,7 +76,7 @@ async function git(cwd, args) {
     child.stderr.resume();
     const timer=setTimeout(()=>child.kill(),180000);
     child.stdout.on("data", chunk => { size += chunk.length; if (size > 8_000_000) child.kill(); else chunks.push(chunk); });
-    child.once("error", error=>{clearTimeout(timer);reject(error);}); child.once("exit", code => {clearTimeout(timer);code === 0 && size <= 8_000_000 ? resolvePromise(Buffer.concat(chunks).toString("utf8")) : reject(new Error("Local snapshot Git operation failed."));});
+    child.once("error", error=>{clearTimeout(timer);reject(error);}); child.once("exit", code => {clearTimeout(timer);if(code === 0 && size <= 8_000_000)resolvePromise(Buffer.concat(chunks).toString("utf8"));else reject(new Error("Local snapshot Git operation failed."));});
   });
 }
 export {git as runTicketSnapshotGit};
