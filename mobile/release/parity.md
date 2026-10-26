@@ -1,5 +1,13 @@
 # Native parity ledger
 
+## 2026-10-26 · Windows ticket snapshot Git progress
+
+- Local runner 0.4.3 drains Git warning output and bounds local Git subprocesses
+  to three minutes, preventing warning backpressure from blocking source review.
+- Regression uses 1,200 files producing real line-ending warnings. No native UI,
+  mobile v1 API, auth semantics or database schema changes.
+
+
 ## 2026-10-26 · Separate-message follow-up context
 
 - Web/Slack backend only: ambiguous new follow-ups include up to three recent

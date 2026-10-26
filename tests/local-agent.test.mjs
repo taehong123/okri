@@ -6,8 +6,20 @@ import {execFileSync} from 'node:child_process';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
+import {pathToFileURL} from 'node:url';
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test('snapshot Git drains large warning output instead of hanging before product inspection',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'okri-git-warnings-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  execFileSync('git',['init','--quiet'],{cwd:root,stdio:'ignore'});
+  await writeFile(join(root,'.gitattributes'),'* text eol=crlf\n');
+  for(let i=0;i<1200;i++)await writeFile(join(root,`${String(i).padStart(4,'0')}-${'line-ending-warning-'.repeat(5)}.ts`),'const customerVisible = true;\n');
+  const runnerModule=pathToFileURL(join(process.cwd(),'public/local-agent/okri-local-agent.mjs')).href;
+  const code=`import {runTicketSnapshotGit} from ${JSON.stringify(runnerModule)};await runTicketSnapshotGit(${JSON.stringify(root)},['add','.']);console.log('snapshot-ok');`;
+  assert.match(execFileSync(process.execPath,['--input-type=module','-e',code],{encoding:'utf8',timeout:45000,stdio:['ignore','pipe','pipe']}),/snapshot-ok/);
+  assert.equal(execFileSync('git',['ls-files'],{cwd:root,encoding:'utf8'}).trim().split(/\r?\n/).length,1201);
+});
 
 test('product inspection uses the latest approved remote commit and preserves a stale dirty checkout',async t=>{
   const root=await mkdtemp(join(tmpdir(),'okri-current-source-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
