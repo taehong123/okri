@@ -11,12 +11,13 @@ function fixture(t,options={}){
   const config={channels:[{id:'C1',name:'customer-one',enabled:true,autoApprove:'manual'}],destination:'CMGMT'};db.prepare('INSERT INTO ticket_automation_settings VALUES(?,?,?,1)').run('w1','T1',JSON.stringify(config));
   db.exec('CREATE TABLE ticket_automation_requests(id TEXT PRIMARY KEY,owner_id TEXT,state TEXT);CREATE TABLE local_agent_jobs(id TEXT PRIMARY KEY);');
   const statement=(sql,args=[])=>({bind:(...v)=>statement(sql,v),first:async()=>db.prepare(sql).get(...args)||null,all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:{changes:Number(db.prepare(sql).run(...args).changes)}})});
-  let failure=options.failure,modelCalls=0;const slackCalls=[],events=[];
+  let failure=options.failure,modelCalls=0;const slackCalls=[],events=[],operatorReplies=[];
   const connection={ownerId:'w1',teamId:'T1',botUserId:'UBOT'};
   const api=async(_token,method,body)=>{slackCalls.push({method,body});if(options.slack)return options.slack(method,body);return {ok:true,messages:[]};};
-  const service=compile(source,{'cloudflare:workers':{env:{DB:{prepare:statement}}},'@/lib/pace-data':{getSlackConnection:async owner=>owner==='w1'?connection:null,canManageTeam:a=>a.role==='owner'},'@/lib/slack-daily':{slackApi:api,slackTokenForConnection:async()=>'mock'},'@/lib/ticket-automation':{analyzeTicketEvent:async(_c,e)=>{modelCalls++;events.push(e);if(options.delay)await new Promise(resolve=>setTimeout(resolve,20));if(failure)throw Object.assign(Error('provider offline'),typeof failure==='object'?failure:{});return {state:options.noWork?'no_work':'analyzed',requestIds:[],reason:options.noWork?'감사 인사이며 새 요청이 없습니다.':undefined};}},'@/lib/ticket-policy':policy});
+  const service=compile(source,{'cloudflare:workers':{env:{DB:{prepare:statement}}},'@/lib/pace-data':{getSlackConnection:async owner=>owner==='w1'?connection:null,canManageTeam:a=>a.role==='owner'},'@/lib/slack-daily':{slackApi:api,slackTokenForConnection:async()=>'mock'},'@/lib/ticket-automation':{handleTicketThreadReply:async(_team,event)=>{if(failure)throw Error('port temporarily unavailable');if(options.delay)await new Promise(resolve=>setTimeout(resolve,20));operatorReplies.push(event);return true;},deliverTicketOutbox:async()=>{},analyzeTicketEvent:async(_c,e)=>{modelCalls++;events.push(e);if(options.delay)await new Promise(resolve=>setTimeout(resolve,20));if(failure)throw Object.assign(Error('provider offline'),typeof failure==='object'?failure:{});return {state:options.noWork?'no_work':'analyzed',requestIds:[],reason:options.noWork?'감사 인사이며 새 요청이 없습니다.':undefined};}},'@/lib/ticket-policy':policy});
   const event={channel:'C1',ts:'100.000001',user:'UCUSTOMER',text:'견적서 화면이 새하얘졌어요'};
-  return {db,config,service,event,connection,slackCalls,events,get modelCalls(){return modelCalls;},setFailure:v=>{failure=v;}};
+  service.operatorReplyFixture=operatorReplies;
+  return {db,config,service,event,connection,slackCalls,events,operatorReplies,get modelCalls(){return modelCalls;},setFailure:v=>{failure=v;}};
 }
 test('a durable receipt exists before analysis, duplicate webhook/history copies converge, and only one lease runs',async t=>{
   const f=fixture(t),id=await f.service.captureTicketMessage(f.connection,f.event);assert.equal(f.modelCalls,0);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages').get().state,'pending');
@@ -98,4 +99,20 @@ test('excluded messages keep their reason; manual review is scoped and never byp
 });
 test('messages in the same source thread serialize their analyses so later work sees earlier tickets',async t=>{
   const f=fixture(t,{delay:true}),first=await f.service.captureTicketMessage(f.connection,f.event),second=await f.service.captureTicketMessage(f.connection,{...f.event,ts:'101.000001',threadTs:f.event.ts,text:'추가로 다른 기능도 필요합니다.'});await Promise.all([f.service.processTicketReceipt(first),f.service.processTicketReceipt(second)]);assert.equal(f.modelCalls,1);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages WHERE id=?').get(second).state,'pending');f.db.prepare("UPDATE ticket_intake_messages SET next_attempt_at='2000' WHERE id=?").run(second);await f.service.processTicketReceipt(second);assert.equal(f.modelCalls,2);assert.equal(f.db.prepare('SELECT analysis_lease_id FROM ticket_intake_threads').get().analysis_lease_id,null);
+});
+
+test('management replies persist before acknowledgement and message/mention duplicates reach the port once without AI',async t=>{
+  const f=fixture(t,{failure:true});f.db.exec("ALTER TABLE ticket_automation_requests ADD COLUMN team_id TEXT DEFAULT 'T1';INSERT INTO ticket_automation_requests(id,owner_id,state) VALUES('request','w1','waiting_answer');CREATE TABLE ticket_automation_outbox(owner_id TEXT,request_id TEXT,channel_id TEXT,message_ts TEXT,kind TEXT,state TEXT);INSERT INTO ticket_automation_outbox VALUES('w1','request','CMGMT','10.000','source','sent');");
+  const event={channel:'CMGMT',ts:'11.000',threadTs:'10.000',user:'U1',text:'현재 제품 구현에 맞는 추천 범위를 알려 주세요.'};
+  const id=await f.service.captureTicketManagementReply(f.connection,event);assert.ok(id);assert.equal(f.operatorReplies.length,0);
+  assert.equal(await f.service.captureTicketManagementReply(f.connection,event),id);assert.equal(await f.service.captureTicketManagementReply(f.connection,{...event,channel:'OTHER'}),null);
+  await f.service.processTicketReceipt(id);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages WHERE id=?').get(id).state,'retry');
+  f.setFailure(false);f.db.exec("UPDATE ticket_intake_messages SET next_attempt_at='2000'");await f.service.processTicketReceipt(id);await f.service.processTicketReceipt(id);
+  assert.equal(f.operatorReplies.length,1);assert.equal(f.modelCalls,0);assert.equal(f.db.prepare('SELECT state FROM ticket_intake_messages WHERE id=?').get(id).state,'analyzed');
+});
+
+test('different assigned ticket threads do not block each other in the same management channel',async t=>{
+ const f=fixture(t,{delay:true});f.db.exec("ALTER TABLE ticket_automation_requests ADD COLUMN team_id TEXT DEFAULT 'T1';INSERT INTO ticket_automation_requests(id,owner_id,state) VALUES('r1','w1','running'),('r2','w1','running');CREATE TABLE ticket_automation_outbox(owner_id TEXT,request_id TEXT,channel_id TEXT,message_ts TEXT,kind TEXT,state TEXT);INSERT INTO ticket_automation_outbox VALUES('w1','r1','CMGMT','10.000','source','sent'),('w1','r2','CMGMT','20.000','source','sent');");
+ const ids=[];for(const root of ['10.000','20.000'])ids.push(await f.service.captureTicketManagementReply(f.connection,{channel:'CMGMT',ts:root+'1',threadTs:root,user:'U1',text:'현재 구현에 맞춰 검토해 주세요.'}));
+ await Promise.all(ids.map(id=>f.service.processTicketReceipt(id)));assert.equal(f.operatorReplies.length,2);assert.equal(f.db.prepare("SELECT COUNT(*) n FROM ticket_intake_messages WHERE state='analyzed'").get().n,2);assert.equal(f.modelCalls,0);
 });

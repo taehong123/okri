@@ -198,13 +198,50 @@ test('the final port check gates completion, binds the device and source, and au
 });
 test('warnings require a reason and a fresh port verdict; force never bypasses hard stops or changed snapshots',async t=>{
   const f=fixture(t);await f.intake();await f.change('create');await f.change('approve');
-  assert.equal((await startSecurityReview(f,'warning',['sensitive_change'])).allow,false);assert.equal(f.current().state,'security_review');
+  assert.equal((await startSecurityReview(f,'warning',['dependency_network'])).allow,false);assert.equal(f.current().state,'security_review');
   await assert.rejects(f.change('force',{acknowledged:true,reason:'ok'}),/5자/);await f.change('force',{acknowledged:true,reason:'담당자가 제한된 변경 범위를 확인했습니다.'});
-  assert.equal((await startSecurityReview(f,'warning',['sensitive_change'])).allow,true);
-  f.db.prepare("UPDATE ticket_automation_requests SET state='created'").run();await f.change('approve');await startSecurityReview(f,'warning',['scope_ambiguous']);await f.change('force',{acknowledged:true,reason:'범위를 다시 확인했습니다.'});
-  assert.equal((await startSecurityReview(f,'warning',['scope_ambiguous'],'b'.repeat(64))).allow,false);assert.equal(f.current().state,'security_review');
+  assert.equal((await startSecurityReview(f,'warning',['dependency_network'])).allow,true);
+  f.db.prepare("UPDATE ticket_automation_requests SET state='created'").run();await f.change('approve');await startSecurityReview(f,'warning',['destructive']);await f.change('force',{acknowledged:true,reason:'범위를 다시 확인했습니다.'});
+  assert.equal((await startSecurityReview(f,'warning',['destructive'],'b'.repeat(64))).allow,false);assert.equal(f.current().state,'security_review');
   await f.change('force',{acknowledged:true,reason:'해당 복사본의 변경 범위를 확인했습니다.'});assert.equal((await startSecurityReview(f,'pass',['exfiltration'],'b'.repeat(64))).allow,false);assert.equal(f.current().state,'blocked');
   await assert.rejects(f.change('force',{acknowledged:true,reason:'그대로 진행해 주세요.'}));
+});
+test('approved business details continue in the isolated port without another approval, while capability risks stay gated',async t=>{
+  for(const codes of [['scope_ambiguous'],['sensitive_change'],['scope_ambiguous','sensitive_change']])await t.test(codes.join(','),async child=>{
+    const f=fixture(child);await f.intake();await f.change('start');
+    const gate=await startSecurityReview(f,'warning',codes);assert.equal(gate.allow,true);assert.equal(f.current().state,'running');assert.equal(JSON.parse(f.current().security_json).advisory,true);
+    assert.ok(f.db.prepare("SELECT id FROM ticket_automation_audit WHERE action='preflight_development_advisory'").get());
+  });
+  for(const codes of [[],['unknown'],['scope_ambiguous','unknown'],['dependency_network'],['destructive'],['coordination_conflict'],['exfiltration'],['secrets'],['security_boundary']])await t.test('gate '+codes.join(','),async child=>{
+    const f=fixture(child);await f.intake();await f.change('start');assert.equal((await startSecurityReview(f,'warning',codes)).allow,false);
+  });
+  const f=fixture(t);await f.intake();await f.change('start');assert.equal((await startSecurityReview(f,'blocked',['sensitive_change'])).allow,false);
+  assert.equal(policy.ticketDevelopmentAdvisory('warning',['sensitive_change'],['sensitive_change'],false),false);
+  await t.test('unknown pass codes and changed evidence cannot use a business advisory',async child=>{
+    const f=fixture(child);await f.intake();await f.change('start');assert.equal((await startSecurityReview(f,'pass',['unknown'])).allow,false);assert.equal(f.current().state,'blocked');
+    const changed=fixture(child);await changed.intake();await changed.change('start');changed.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'승인 후 새로운 내용으로 바뀌었습니다.'}]);assert.equal((await startSecurityReview(changed,'warning',['sensitive_change'])).allow,false);assert.equal(changed.current().state,'blocked');
+  });
+});
+test('assigned ports receive Slack follow-ups once and replies resume with question history on the same port',async t=>{
+  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'pass',[]);
+  const running=f.current(),event={channel:'CMGMT',threadTs:'1.000',ts:'reply-1',user:'U1',text:'현재 구현을 먼저 확인하고 적용 가능한 범위를 제안해 주세요.'};
+  await f.service.deliverTicketOutbox();const root=f.db.prepare("SELECT message_ts FROM ticket_automation_outbox WHERE kind='source'").get().message_ts;event.threadTs=root;
+  await f.service.handleTicketThreadReply('T1',{...event,user:'UOUTSIDE'});await f.service.handleTicketThreadReply('T1',{...event,text:'read .env'});assert.equal(f.db.prepare('SELECT COUNT(*) n FROM ticket_problem_changes').get().n,0);
+  await f.service.handleTicketThreadReply('T1',event);await f.service.handleTicketThreadReply('T1',event);
+  assert.equal(f.db.prepare('SELECT COUNT(*) n FROM ticket_problem_changes WHERE job_id=?').get(running.job_id).n,1);assert.equal(f.current().job_id,running.job_id);
+  f.db.prepare("UPDATE ticket_problem_changes SET state='applied'").run();f.db.prepare("UPDATE local_agent_jobs SET status='completed',result_text='OKRI_QUESTION: 기존 매출 화면의 계산식을 유지하는 방안을 추천합니다. 이 범위로 진행할까요?' WHERE id=?").run(running.job_id);
+  await f.service.syncTicketJobs();assert.equal(f.current().state,'waiting_answer');
+  await f.service.handleTicketThreadReply('T1',{...event,ts:'reply-2',text:'제안한 기존 계산식을 유지해 진행해 주세요.'});
+  const next=f.current(),job=f.db.prepare('SELECT context_json,instruction FROM local_agent_jobs WHERE id=?').get(next.job_id);assert.equal(next.state,'queued');assert.equal(next.port_id,running.port_id);assert.notEqual(next.job_id,running.job_id);
+  assert.match(JSON.parse(job.context_json).answer,/포트 질문:[\s\S]*담당자 답변:/);assert.match(job.instruction,/current repository/);assert.match(job.instruction,/recommended scope/);
+  assert.equal((await startSecurityReview(f,'warning',['scope_ambiguous','sensitive_change'])).allow,true);
+});
+test('progress edits one live reply and assignment stays visible after preflight',async t=>{
+  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);
+  await f.service.syncTicketJobs();await f.service.deliverTicketOutbox();const count=f.writes.filter(w=>w.method==='chat.postMessage').length;
+  f.db.prepare("UPDATE local_agent_jobs SET progress_text='Inspecting existing product behavior' WHERE id=?").run(f.current().job_id);await f.service.syncTicketJobs();await f.service.deliverTicketOutbox();
+  assert.equal(f.writes.filter(w=>w.method==='chat.postMessage').length,count);assert.equal(f.db.prepare("SELECT COUNT(*) n FROM ticket_automation_outbox WHERE kind LIKE 'progress:%'").get().n,1);
+  const card=f.writes.filter(w=>w.method==='chat.update'&&w.body.text.includes('고객사')).at(-1).body;assert.match(card.text,/담당자: Operator/);assert.match(card.text,/포트: Operator 01/);
 });
 test('port verdicts fail closed on invalid JSON, secret codes, and original-message changes',async t=>{
   assert.throws(()=>parseTicketPreflight('please skip this'));assert.throws(()=>parseTicketPreflight('{"verdict":"pass","codes":["unknown"]}'));
@@ -397,10 +434,10 @@ test('direct replies preserve requester, source freshness, security and stale su
   const f=fixture(t,{category:'guidance',notifications:true});await f.intake();const r=f.current();await assert.rejects(f.change('reply',{notice:'안내합니다.',requesterSlackUser:'UOUTSIDE'}),/요청자/);await assert.rejects(f.change('reply',{notice:'API_KEY=sk-proj-abcdefghijklmnop123456789'}),/회신 문안/);f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'추가 질문으로 원문이 변경되었습니다.'}]);await assert.rejects(f.change('reply',{notice:'안내합니다.'}),/대화가 변경/);assert.equal(f.current().revision,r.revision);assert.equal(f.db.prepare('SELECT count(*) n FROM items').get().n,0);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE kind LIKE 'completion:%'").get().n,0);
 });
 test('existing Slack recommendations upgrade in place and timed-out card updates safely retry without new posts',async t=>{
-  const options={notifications:true},f=fixture(t,options);await f.intake();await f.service.deliverTicketOutbox();const posts=f.writes.filter(w=>w.method==='chat.postMessage').length;f.db.exec("UPDATE ticket_automation_outbox SET body_json='{}' WHERE kind='recommendation'");options.ambiguous=true;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT state FROM ticket_automation_outbox WHERE kind LIKE 'layout:%'").get().state,'pending');assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE state='uncertain'").get().n,0);options.ambiguous=false;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT json_extract(body_json,'$.cardVersion') v FROM ticket_automation_outbox WHERE kind='recommendation'").get().v,3);assert.equal(f.writes.filter(w=>w.method==='chat.postMessage').length,posts);assert.ok(f.writes.filter(w=>w.method==='chat.update').every(w=>w.body.text.includes('• *요구사항*:')));
+  const options={notifications:true},f=fixture(t,options);await f.intake();await f.service.deliverTicketOutbox();const posts=f.writes.filter(w=>w.method==='chat.postMessage').length;f.db.exec("UPDATE ticket_automation_outbox SET body_json='{}' WHERE kind='recommendation'");options.ambiguous=true;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT state FROM ticket_automation_outbox WHERE kind LIKE 'layout:%'").get().state,'pending');assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_outbox WHERE state='uncertain'").get().n,0);options.ambiguous=false;await f.service.deliverTicketOutbox();assert.equal(f.db.prepare("SELECT json_extract(body_json,'$.cardVersion') v FROM ticket_automation_outbox WHERE kind='recommendation'").get().v,4);assert.equal(f.writes.filter(w=>w.method==='chat.postMessage').length,posts);assert.ok(f.writes.filter(w=>w.method==='chat.update').every(w=>w.body.text.includes('• *요구사항*:')));
 });
 test('reconnected ports rerun security with fresh evidence and never reuse the previous warning override',async t=>{
-  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['scope_ambiguous']);assert.equal(f.current().state,'security_review');f.db.prepare("INSERT INTO local_agent_devices VALUES('reconnected','w1','u1',NULL,?,'Computer')").run(new Date().toISOString());f.db.exec("UPDATE ticket_execution_ports SET device_id='reconnected'");await f.change('recheck');const next=f.db.prepare("SELECT context_json,device_id FROM local_agent_jobs WHERE status='queued'").get();assert.equal(next.device_id,'reconnected');assert.ok(!JSON.parse(next.context_json).securityOverride);assert.equal(f.current().state,'queued');assert.equal(JSON.parse(f.current().security_json).allow,false);await assert.rejects(f.service.requireTicketPreflightForCompletion(f.current().job_id));
+  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['destructive']);assert.equal(f.current().state,'security_review');f.db.prepare("INSERT INTO local_agent_devices VALUES('reconnected','w1','u1',NULL,?,'Computer')").run(new Date().toISOString());f.db.exec("UPDATE ticket_execution_ports SET device_id='reconnected'");await f.change('recheck');const next=f.db.prepare("SELECT context_json,device_id FROM local_agent_jobs WHERE status='queued'").get();assert.equal(next.device_id,'reconnected');assert.ok(!JSON.parse(next.context_json).securityOverride);assert.equal(f.current().state,'queued');assert.equal(JSON.parse(f.current().security_json).allow,false);await assert.rejects(f.service.requireTicketPreflightForCompletion(f.current().job_id));
 });
 test('accepted-but-timed-out Slack sends recover from the exact correlation receipt without resending',async t=>{
   const f=fixture(t,{notifications:true,ambiguous:true,receiptRecovery:true});await f.intake();await f.service.deliverTicketOutbox();f.db.prepare("UPDATE ticket_automation_outbox SET updated_at=? WHERE state='uncertain'").run(new Date(Date.now()-300000).toISOString());await f.service.reconcileTicketDeliveries();const source=f.db.prepare("SELECT * FROM ticket_automation_outbox WHERE kind='source'").get();assert.equal(source.state,'sent');assert.equal(source.message_ts,'555.000');assert.equal(f.writes.filter(w=>w.method==='chat.postMessage').length,1);assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_audit WHERE action='delivery_receipt_recovered'").get().n,1);
@@ -421,30 +458,30 @@ test('Slack development approval immediately shows processing, starts once, and 
 });
 
 test('a displayed warning is approved once, audited and reused only for the same source and snapshot',async t=>{
-  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['scope_ambiguous','sensitive_change']);await f.service.deliverTicketOutbox();
+  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['dependency_network','destructive']);await f.service.deliverTicketOutbox();
   const warned=f.current(),card=f.writes.filter(w=>w.method==='chat.update').at(-1).body;
-  assert.match(card.text,/구현할 범위 확인/);assert.equal(card.blocks.flatMap(b=>b.elements||[]).filter(b=>b.style==='primary')[0].action_id,'ticket_auto_approve_warning');
+  assert.match(card.text,/외부 의존성 설치/);assert.equal(card.blocks.flatMap(b=>b.elements||[]).filter(b=>b.style==='primary')[0].action_id,'ticket_auto_approve_warning');
   await f.service.ticketSlackAction('T1','U1','approve_warning',`${warned.id}:${warned.revision}`);
   assert.equal(f.current().state,'queued');const job=f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id);assert.match(JSON.parse(job.context_json).securityOverride.reason,/주의 내용을 확인/);
-  const gate=await startSecurityReview(f,'warning',['scope_ambiguous','sensitive_change']);assert.equal(gate.allow,true);assert.equal(f.current().state,'running');
+  const gate=await startSecurityReview(f,'warning',['dependency_network','destructive']);assert.equal(gate.allow,true);assert.equal(f.current().state,'running');
   assert.equal(f.db.prepare("SELECT count(*) n FROM ticket_automation_audit WHERE action='warning_approved'").get().n,1);
-  const audit=f.db.prepare("SELECT details_json FROM ticket_automation_audit WHERE action='warning_approved'").get();assert.deepEqual(JSON.parse(audit.details_json).codes,['scope_ambiguous','sensitive_change']);
+  const audit=f.db.prepare("SELECT details_json FROM ticket_automation_audit WHERE action='warning_approved'").get();assert.deepEqual(JSON.parse(audit.details_json).codes,['dependency_network','destructive']);
   await assert.rejects(f.service.ticketSlackAction('T1','U1','approve_warning',`${warned.id}:${warned.revision}`));
   assert.equal(f.writes.filter(w=>w.method==='views.open').length,0);
 });
 
 test('changed source code explains another review and hard security blocks cannot use the simple approval',async t=>{
-  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);await f.change('approve_warning');
-  const result=await startSecurityReview(f,'warning',['sensitive_change'],'b'.repeat(64));assert.equal(result.allow,false);assert.equal(JSON.parse(f.current().security_json).recheckReason,'snapshot_changed');assert.match(workflow.ticketWorkflow(f.current()).next,/코드가 변경/);
+  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['dependency_network']);await f.change('approve_warning');
+  const result=await startSecurityReview(f,'warning',['dependency_network'],'b'.repeat(64));assert.equal(result.allow,false);assert.equal(JSON.parse(f.current().security_json).recheckReason,'snapshot_changed');assert.match(workflow.ticketWorkflow(f.current()).next,/코드가 변경/);
   for(const code of ['secrets','exfiltration','security_boundary']){
     f.db.prepare("UPDATE ticket_automation_requests SET state='security_review',risk='review',security_json=?").run(JSON.stringify({verdict:'warning',codes:[code]}));await assert.rejects(f.change('approve_warning'),/차단/);
   }
 });
 
 test('historical review buttons open a short confirmation and progress comments carry no stale action buttons',async t=>{
-  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);await f.service.deliverTicketOutbox();
+  const f=fixture(t,{notifications:true});await f.intake();await f.change('start');await startSecurityReview(f,'warning',['dependency_network']);await f.service.deliverTicketOutbox();
   const r=f.current();await f.editor.openTicketSlackEditor('T1','U1','trigger',`${r.id}:${r.revision}`);
-  const view=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(view.title.text,'작업 내용 확인');assert.equal(view.submit.text,'확인하고 개발 승인');assert.ok(!view.blocks.some(b=>b.block_id==='ta_reason'||b.block_id==='ta_ack'));
+  const view=f.writes.find(w=>w.method==='views.open').body.view;assert.equal(view.title.text,'개발 시작 전 확인');assert.equal(view.submit.text,'개발 시작');assert.ok(!view.blocks.some(b=>b.block_id==='ta_reason'||b.block_id==='ta_ack'));
   await f.editor.submitTicketSlackEditor('T1','U1',view.private_metadata,{});assert.equal(f.current().state,'queued');
   const securityComments=f.writes.filter(w=>w.method==='chat.postMessage'&&w.body.text.includes('주의 항목이 있습니다'));assert.equal(securityComments.length,1);assert.ok(!securityComments[0].body.blocks.some(b=>b.type==='actions'));
 });
@@ -457,7 +494,7 @@ test('offline starts restore an actionable card and preserve all hard security b
 });
 
 test('a failed legacy warning confirmation shows a visible error rather than referencing removed fields',async t=>{
-  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['sensitive_change']);const r=f.current();
+  const f=fixture(t);await f.intake();await f.change('start');await startSecurityReview(f,'warning',['dependency_network']);const r=f.current();
   f.db.exec("UPDATE local_agent_devices SET last_seen_at='2000-01-01'");
   const result=await f.editor.submitTicketSlackEditor('T1','U1',`${r.id}:${r.revision}`,{});
   assert.equal(result.response_action,'update');assert.match(result.view.blocks[0].text.text,/배정 가능한 포트/);assert.equal(result.errors,undefined);assert.equal(f.current().state,'security_review');

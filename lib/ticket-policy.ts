@@ -1,5 +1,10 @@
 /** Pure policy. Customer text can never grant capabilities or select a runner. */
 export type TicketRisk = "blocked" | "review" | "low";
+const DEVELOPMENT_ADVISORIES=new Set(['scope_ambiguous','sensitive_change']);
+/** Approved, isolated code work may investigate business details; capabilities remain gated. */
+export function ticketDevelopmentAdvisory(verdict:string,reported:unknown,codes:string[],approved:boolean){
+  return approved&&verdict==='warning'&&Array.isArray(reported)&&reported.length>0&&reported.every(v=>typeof v==='string'&&DEVELOPMENT_ADVISORIES.has(v))&&codes.length>0&&codes.every(v=>DEVELOPMENT_ADVISORIES.has(v));
+}
 export const TICKET_PRIORITIES = ['urgent','high','medium','low'] as const;
 export type TicketPriority = typeof TICKET_PRIORITIES[number];
 export const TICKET_PRIORITY_LABELS:Record<TicketPriority,string>={urgent:'긴급',high:'높음',medium:'보통',low:'낮음'};
