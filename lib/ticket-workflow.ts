@@ -27,6 +27,7 @@ export function ticketWorkflow(r:{state:TicketState;category?:string;security_js
   const guidance=r.category==='guidance',security=ticketWarning(r.security_json||'{}');
   const preparing=JSON.parse(r.analysis_json||'{}').preparation;
   if(preparing&&preparing.stage!=='ready'&&['recommended','created','queued','running'].includes(r.state))return {step:0,label:r.state==='running'?'제품 확인 중':r.state==='queued'?'시작 준비 중':'제품 확인 대기',next:'현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.'};
+  if(r.state==='security_review'&&(guidance||preparing?.stage==='reading'))return {step:0,label:'제품 확인 대기',next:'현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.'};
   if(r.state==='recommended'||r.state==='created')return {step:0,label:guidance?'제품 확인 대기':'개발 승인 대기',next:guidance?'포트가 실제 제품 코드를 확인하고 회신을 준비합니다.':'승인하면 포트를 배정하고 자동 검사를 시작합니다.'};
   if(r.state==='security_review')return {step:1,label:'개발 시작 대기',next:security.recheckReason==='snapshot_changed'?'작업 코드가 변경되어 다시 확인이 필요합니다.':security.recheckReason==='additional_warning'?'새로운 주의 항목이 추가되어 확인이 필요합니다.':'주의 내용을 확인하고 개발 시작을 누르면 배정된 포트에서 이어갑니다.'};
   if(r.state==='queued')return {step:1,label:'시작 준비 중',next:guidance?'포트가 실제 제품 코드를 확인하고 회신을 준비합니다.':'포트가 자동 검사를 마치면 개발을 시작합니다.'};

@@ -206,8 +206,8 @@ function TicketWorkflowProgress({value:r,busy}:{value:TicketAutomationRequest;bu
   return <div className="ticket-workflow"><ol data-guidance={guidance} aria-label={t('티켓 진행 단계')}>{steps.map((label,i)=><li key={label} aria-current={i===currentStep?'step':undefined} data-complete={i<currentStep}><span aria-hidden="true">{i===currentStep&&['queued','running','publishing'].includes(r.state)?<LoaderCircle size={14} className="ticket-working"/>:i<currentStep?<Check size={14}/>:i+1}</span>{t(label)}</li>)}</ol><div role="status" aria-live="polite" aria-atomic="true"><strong>{busy?<><LoaderCircle size={16} className="ticket-working"/>{t('처리 중…')}</>:t(flow.label)}</strong><p>{busy?t('완료되면 다음 단계가 여기에 표시됩니다.'):t(flow.next)}</p></div></div>;
 }
 function TicketSecurityWarning({value:r,onAction}:{value:TicketAutomationRequest;onAction:(p:Record<string,unknown>)=>Promise<boolean>}) {
-  const warning=ticketWarning(r.security_json||'{}');
-  return <div className="ticket-approval"><p>{t('개발 시작 전 확인')}</p><ul>{warning.labels.map(label=><li key={label}>{t(label)}</li>)}</ul>{warning.approvable&&<button className="primary-action" onClick={()=>void onAction({action:'approve_warning'})}><Check size={14}/>{t('개발 시작')}</button>}</div>;
+  const warning=ticketWarning(r.security_json||'{}'),reading=r.category==='guidance'||JSON.parse(r.analysis_json||'{}').preparation?.stage==='reading';
+  return <div className="ticket-approval"><p>{t(reading?'제품 확인':'개발 시작 전 확인')}</p><ul>{warning.labels.map(label=><li key={label}>{t(label)}</li>)}</ul>{warning.approvable&&<button className="primary-action" onClick={()=>void onAction({action:'approve_warning'})}><Check size={14}/>{t(reading?'제품 확인':'개발 시작')}</button>}</div>;
 }
 function RequesterEditor({value:r,onAction}:{value:TicketAutomationRequest;onAction:(p:Record<string,unknown>)=>Promise<boolean>}) {
   const [query,setQuery]=useState(""),[users,setUsers]=useState(r.requester_slack_user?[{id:r.requester_slack_user,name:r.requester_name||r.requester_slack_user}]:[]),[selected,setSelected]=useState(r.requester_slack_user||''),[busy,setBusy]=useState(false),[error,setError]=useState("");

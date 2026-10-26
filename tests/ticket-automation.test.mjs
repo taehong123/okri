@@ -452,6 +452,12 @@ test('configured cosmetic automatic approval waits for source verification and p
   const proposal={category:'improvement',title:'오타 문구 수정',problem:'고객 화면의 오타',solution:'잘못된 문구의 오타만 수정합니다.',acceptanceCriteria:['문구가 올바르게 표시됩니다.'],questions:[],evidence:[{path:'src/labels.ts',quote:'const submitLabel = "Savee the request";'}]};
   f.db.prepare("UPDATE local_agent_jobs SET status='completed',result_text=?").run('OKRI_PROPOSAL:'+JSON.stringify(proposal));await f.service.syncTicketJobs();assert.equal(f.current().state,'queued');assert.notEqual(f.current().job_id,prepared);const next=JSON.parse(f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id).context_json);assert.equal(next.readOnly,false);assert.equal(next.preparation,false);
 });
+
+test('pending preparation cannot skip recommendation review and caution approval preserves read-only execution',async t=>{
+  const f=fixture(t,{sourceFirst:true});await f.intake();await assert.rejects(f.change('start'),/제품 확인 후 추천/);
+  await startSecurityReview(f,'warning',['dependency_network']);assert.equal(f.current().state,'security_review');await f.change('approve_warning');
+  const context=JSON.parse(f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id).context_json);assert.equal(context.preparation,true);assert.equal(context.readOnly,true);assert.equal(f.db.prepare("SELECT count(*) n FROM items WHERE status='in_progress'").get().n,0);
+});
 test('migration preserves legacy requests, sent messages and immediate foreign-key enforcement',async t=>{
   const f=fixture(t,{legacy:true});assert.equal(f.current().id,'legacy');assert.equal(f.current().source_digest,'digest');assert.equal(f.db.prepare("SELECT state,message_ts FROM ticket_automation_outbox WHERE id='old-message'").get().message_ts,'55.000');assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(),[]);
   assert.throws(()=>f.db.exec("INSERT INTO ticket_automation_outbox(id,owner_id,request_id,kind,channel_id,body_json,created_at,updated_at) VALUES('bad','w1','missing','source','C1','{}','now','now')"),/FOREIGN KEY/);assert.doesNotMatch(coverageMigration,/\r|foreign_keys\s*=\s*(?:OFF|0)/i);

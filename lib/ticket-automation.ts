@@ -444,7 +444,8 @@ export async function ticketRequesterOptions(a:RequestAuthorization,id:string,qu
 }
 export async function changeTicketRequest(a: RequestAuthorization, p: Record<string, unknown>) {
   let r = await requestFor(a, text(p.id, 80));
-  const preparation=p.action==='prepare',action = p.action==='approve_warning'?'force':['inspect','prepare'].includes(String(p.action))?'start':text(p.action, 30), time = now();
+  const priorPreparation=JSON.parse(r.analysis_json||'{}').preparation;
+  const preparation=p.action==='prepare'||priorPreparation?.stage==='reading'&&['approve_warning','force','recheck','approve'].includes(String(p.action)),action = p.action==='approve_warning'?'force':['inspect','prepare'].includes(String(p.action))?'start':text(p.action, 30), time = now();
   if (Number(p.revision) !== r.revision) fail("내용이 변경되었습니다. 새로고침 후 확인해 주세요.", 409);
   if(action==='answer_resume'){
     await changeTicketRequest(a,{...p,action:'answer'});
@@ -452,6 +453,7 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
   }
   // One reviewed start commits assignment, ticket creation and execution together.
   if(action==='start') {
+    if(priorPreparation&&priorPreparation.stage!=='ready'&&!preparation)fail('제품 확인 후 추천을 먼저 확인해 주세요.',409);
     if(!['recommended','created'].includes(r.state)||r.risk==='blocked'||p.action==='inspect'&&r.category!=='guidance')fail('개발 전 요청을 확인해 주세요.',409);
     const self=await one<{id:string}>("SELECT id FROM workspace_members WHERE workspace_id=? AND user_id=? AND status='active'",a.ownerId,a.userId);
     const memberId=p.memberId===undefined?r.member_id||self?.id||'':text(p.memberId,80);
@@ -631,7 +633,7 @@ export async function changeTicketRequest(a: RequestAuthorization, p: Record<str
     if (!["recommended", "created", "security_review", "blocked", "failed"].includes(r.state)) fail("진행 중인 요청은 제외할 수 없습니다.");
     await updateTicketRevision("UPDATE ticket_automation_requests SET state='dismissed',revision=revision+1,updated_at=? WHERE id=? AND owner_id=? AND revision=?", time, r.id, a.ownerId, r.revision);
   } else fail("지원하지 않는 작업입니다.");
-  await audit(a.ownerId, r.id, a.userId, preparation?'recommendation_preparation_started':p.action==='inspect'?'guidance_inspection_started':p.action==='approve_warning'?'warning_approved':action, r.revision,action==='force'?{reason:p.action==='approve_warning'?'표시된 주의 내용을 확인하고 개발 진행을 승인했습니다.':text(p.reason,500),codes:ticketWarning(r.security_json).codes}:{});
+  await audit(a.ownerId, r.id, a.userId, p.action==='approve_warning'?'warning_approved':preparation?'recommendation_preparation_started':p.action==='inspect'?'guidance_inspection_started':action, r.revision,action==='force'?{reason:p.action==='approve_warning'?'표시된 주의 내용을 확인하고 개발 진행을 승인했습니다.':text(p.reason,500),codes:ticketWarning(r.security_json).codes}:{});
   if(['edit','create','approve','start','reply','force','recheck','answer','requester','notice','review_notice','refresh_source','reassign'].includes(action))await queueTicketUpdate(a,r.id,'updated');
   return getTicketAutomation(a,{requestId:r.id});
 }
@@ -687,7 +689,7 @@ function ticketMessagePayload(r:MessageTicket,kind:string,body:string,customer?:
   for(let offset=0;offset<safe.length;offset+=2800)blocks.push({type:'section',text:{type:kind==='source'?'plain_text':'mrkdwn',text:safe.slice(offset,offset+2800)}});
   if(kind!=='source'&&!kind.startsWith('completion:'))blocks.push({type:'context',elements:[{type:'mrkdwn',text:`<${publicUrl()}/?view=tickets&ticketAutomation=1&request=${encodeURIComponent(r.id)}|OKRI에서 보기>`}]});
   if(interactive)blocks.push({type:'actions',elements:[
-    ...(action?[{type:'button',style:'primary',text:{type:'plain_text',text:action==='start'?'개발 승인':['inspect','prepare'].includes(action)?'제품 확인':action==='approve_warning'?'개발 시작':action==='edit'?'답변하기':'회신 확인'},action_id:`ticket_auto_${action}`,value:`${r.id}:${r.revision}`}]:[]),
+    ...(action?[{type:'button',style:'primary',text:{type:'plain_text',text:action==='start'?'개발 승인':['inspect','prepare'].includes(action)?'제품 확인':action==='approve_warning'?r.category==='guidance'||preparation?.stage==='reading'?'제품 확인':'개발 시작':action==='edit'?'답변하기':'회신 확인'},action_id:`ticket_auto_${action}`,value:`${r.id}:${r.revision}`}]:[]),
     ...(action==='edit'?[]:[{type:'button',text:{type:'plain_text',text:'상세·수정'},action_id:'ticket_auto_edit',value:`${r.id}:${r.revision}`}]),
   ]});
   return {text:(kind==='source'?escapeSlackText(safe):safe).slice(0,39000),blocks,unfurl_links:false,unfurl_media:false};
