@@ -1,7 +1,7 @@
 import {env} from 'cloudflare:workers';
 import {getSlackConnection,type RequestAuthorization,canManageTeam} from '@/lib/pace-data';
 import {slackApi,slackTokenForConnection} from '@/lib/slack-daily';
-import {analyzeTicketEvent,type TicketIntakeEvent,type TicketAutomationConfig} from '@/lib/ticket-automation';
+import {analyzeTicketEvent,handleTicketThreadReply,deliverTicketOutbox,type TicketIntakeEvent,type TicketAutomationConfig} from '@/lib/ticket-automation';
 import {redactTicketText,assessTicketText} from '@/lib/ticket-policy';
 const now=()=>new Date().toISOString();
 const run=(sql:string,...args:unknown[])=>env.DB.prepare(sql).bind(...args).run();
@@ -37,6 +37,16 @@ async function notifyAnalysisPaused(owner:string,code:string,retryAt:string){
 }
 
 /** This write finishes BEFORE Slack receives 200. No AI or remote read is required here. */
+export async function captureTicketManagementReply(connection:Connection,event:TicketIntakeEvent){
+  if(!event.threadTs||event.user===connection.botUserId||event.isRelay)return null;
+  const r=await one<{id:string}>(`SELECT r.id FROM ticket_automation_requests r JOIN ticket_automation_outbox o ON o.request_id=r.id AND o.owner_id=r.owner_id JOIN ticket_automation_settings s ON s.owner_id=r.owner_id AND s.enabled=1 WHERE r.owner_id=? AND r.team_id=? AND o.channel_id=? AND o.channel_id=json_extract(s.config_json,'$.destination') AND o.message_ts=? AND o.kind IN ('source','recommendation') AND o.state='sent' LIMIT 1`,connection.ownerId,connection.teamId,event.channel,event.threadTs);
+  if(!r)return null;
+  const digest=await hash(JSON.stringify({channel:event.channel,ts:event.ts,user:event.user,text:event.text})),id=await hash(`operator_reply:${connection.ownerId}:${event.channel}:${event.ts}:${digest}`),time=now();
+  await run(`INSERT OR IGNORE INTO ticket_intake_messages(id,owner_id,team_id,channel_id,root_ts,message_ts,user_id,event_json,digest,next_attempt_at,received_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,id,connection.ownerId,connection.teamId,event.channel,event.threadTs,event.ts,event.user,JSON.stringify({...event,text:safe(event.text),securityBlocked:assessTicketText(event.text).risk==='blocked',operatorReply:true,ticketRequestId:r.id}),digest,time,time,time);
+  return id;
+}
+
+/** This write finishes BEFORE Slack receives 200. No AI or remote read is required here. */
 export async function captureTicketMessage(connection:Connection,event:TicketIntakeEvent){
   const s=await one<Settings>('SELECT * FROM ticket_automation_settings WHERE owner_id=?',connection.ownerId);
   if(!s?.enabled||s.team_id!==connection.teamId||event.user===connection.botUserId)return null;
@@ -60,18 +70,24 @@ export async function processTicketReceipt(id:string){
   const claimed=await run(`UPDATE ticket_intake_messages SET state='processing',attempts=attempts+1,lease_id=?,lease_until=?,updated_at=? WHERE id=? AND ((state IN ('pending','retry') AND next_attempt_at<=?) OR (state='processing' AND lease_until<?))`,lease,new Date(Date.now()+120000).toISOString(),time,id,time,time);
   if(!claimed.meta.changes)return;
   const r=await one<Receipt>('SELECT * FROM ticket_intake_messages WHERE id=? AND lease_id=?',id,lease);if(!r)return;
-  await run('INSERT OR IGNORE INTO ticket_intake_channel_leases(owner_id,channel_id) VALUES(?,?)',r.owner_id,r.channel_id);
-  const channelClaim=await run('UPDATE ticket_intake_channel_leases SET lease_id=?,lease_until=? WHERE owner_id=? AND channel_id=? AND (lease_until IS NULL OR lease_until<?)',lease,new Date(Date.now()+120000).toISOString(),r.owner_id,r.channel_id,time);
+  const leaseChannel=JSON.parse(r.event_json).operatorReply?`${r.channel_id}:${r.root_ts}`:r.channel_id;
+  await run('INSERT OR IGNORE INTO ticket_intake_channel_leases(owner_id,channel_id) VALUES(?,?)',r.owner_id,leaseChannel);
+  const channelClaim=await run('UPDATE ticket_intake_channel_leases SET lease_id=?,lease_until=? WHERE owner_id=? AND channel_id=? AND (lease_until IS NULL OR lease_until<?)',lease,new Date(Date.now()+120000).toISOString(),r.owner_id,leaseChannel,time);
   if(!channelClaim.meta.changes){await run("UPDATE ticket_intake_messages SET state='pending',attempts=MAX(0,attempts-1),next_attempt_at=?,lease_id=NULL,lease_until=NULL WHERE id=? AND lease_id=?",new Date(Date.now()+10000).toISOString(),id,lease);return;}
   await run('INSERT OR IGNORE INTO ticket_intake_threads(owner_id,channel_id,root_ts,latest_reply,scanned_reply,next_scan_at) VALUES(?,?,?,?,?,?)',r.owner_id,r.channel_id,r.root_ts,r.root_ts,r.root_ts,time);
   const threadClaim=await run('UPDATE ticket_intake_threads SET analysis_lease_id=?,analysis_lease_until=? WHERE owner_id=? AND channel_id=? AND root_ts=? AND (analysis_lease_until IS NULL OR analysis_lease_until<?)',lease,new Date(Date.now()+120000).toISOString(),r.owner_id,r.channel_id,r.root_ts,time);
-  if(!threadClaim.meta.changes){await run("UPDATE ticket_intake_messages SET state='pending',attempts=MAX(0,attempts-1),next_attempt_at=?,lease_id=NULL,lease_until=NULL WHERE id=? AND lease_id=?",new Date(Date.now()+10000).toISOString(),id,lease);await run('UPDATE ticket_intake_channel_leases SET lease_id=NULL,lease_until=NULL WHERE owner_id=? AND channel_id=? AND lease_id=?',r.owner_id,r.channel_id,lease);return;}
+  if(!threadClaim.meta.changes){await run("UPDATE ticket_intake_messages SET state='pending',attempts=MAX(0,attempts-1),next_attempt_at=?,lease_id=NULL,lease_until=NULL WHERE id=? AND lease_id=?",new Date(Date.now()+10000).toISOString(),id,lease);await run('UPDATE ticket_intake_channel_leases SET lease_id=NULL,lease_until=NULL WHERE owner_id=? AND channel_id=? AND lease_id=?',r.owner_id,leaseChannel,lease);return;}
   let siblings:Receipt[]=[];
   try{
     const connection=await getSlackConnection(r.owner_id);if(!connection)throw new Error('connection_unavailable');
     const setting=await one<Settings>('SELECT * FROM ticket_automation_settings WHERE owner_id=?',r.owner_id),configuration=JSON.parse(setting?.config_json||'{}') as TicketAutomationConfig;
-    const event=JSON.parse(r.event_json) as TicketIntakeEvent&{operatorImport?:boolean};
-    siblings=configuration.intakeStartAt&&!event.operatorImport?await rows<Receipt>(`SELECT * FROM ticket_intake_messages WHERE owner_id=? AND channel_id=? AND state IN ('pending','retry') AND next_attempt_at<=? AND COALESCE(json_extract(event_json,'$.operatorImport'),0)=0 AND (root_ts=? OR received_at>=?) AND id<>? ORDER BY message_ts LIMIT 19`,r.owner_id,r.channel_id,time,r.root_ts,new Date(Date.now()-120000).toISOString(),id):[];
+    const event=JSON.parse(r.event_json) as TicketIntakeEvent&{operatorImport?:boolean;operatorReply?:boolean;ticketRequestId?:string;securityBlocked?:boolean};
+    if(event.operatorReply){
+      if(!event.securityBlocked)await handleTicketThreadReply(connection.teamId,event);
+      await run("UPDATE ticket_intake_messages SET state=?,request_ids_json=?,last_error=?,lease_id=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_id=?",event.securityBlocked?'ignored':'analyzed',JSON.stringify(event.ticketRequestId?[event.ticketRequestId]:[]),event.securityBlocked?'unsafe_operator_reply':'',now(),id,lease);
+      await deliverTicketOutbox();return;
+    }
+    siblings=configuration.intakeStartAt&&!event.operatorImport?await rows<Receipt>(`SELECT * FROM ticket_intake_messages WHERE owner_id=? AND channel_id=? AND state IN ('pending','retry') AND next_attempt_at<=? AND COALESCE(json_extract(event_json,'$.operatorImport'),0)=0 AND COALESCE(json_extract(event_json,'$.operatorReply'),0)=0 AND (root_ts=? OR received_at>=?) AND id<>? ORDER BY message_ts LIMIT 19`,r.owner_id,r.channel_id,time,r.root_ts,new Date(Date.now()-120000).toISOString(),id):[];
     // Keep the full source context for detection, but one bounded burst uses one model reservation.
     const outcome=await analyzeTicketEvent(connection,{...event,...(siblings.length&&!event.operatorImport?{batchEvents:[event,...siblings.map(v=>JSON.parse(v.event_json) as TicketIntakeEvent)]}:{})},event.operatorImport===true);
     await run(`UPDATE ticket_intake_messages SET state=?,request_ids_json=?,last_error=?,lease_id=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_id=?`,outcome.state,JSON.stringify(outcome.requestIds),safe(outcome.reason||'').slice(0,500),now(),id,lease);
@@ -84,7 +100,7 @@ export async function processTicketReceipt(id:string){
     await run(`UPDATE ticket_intake_messages SET state='retry',next_attempt_at=?,last_error=?,lease_id=NULL,lease_until=NULL,updated_at=? WHERE id=? AND lease_id=?`,retry,code,now(),id,lease);
     if(siblings.length)await run(`UPDATE ticket_intake_messages SET state='retry',next_attempt_at=?,last_error=?,updated_at=? WHERE id IN(SELECT value FROM json_each(?)) AND state IN('pending','retry')`,retry,code,now(),JSON.stringify(siblings.map(v=>v.id)));
     await notifyAnalysisPaused(r.owner_id,code,retry).catch(()=>undefined);
-  }finally{await run('UPDATE ticket_intake_threads SET analysis_lease_id=NULL,analysis_lease_until=NULL WHERE owner_id=? AND channel_id=? AND root_ts=? AND analysis_lease_id=?',r.owner_id,r.channel_id,r.root_ts,lease);await run('UPDATE ticket_intake_channel_leases SET lease_id=NULL,lease_until=NULL WHERE owner_id=? AND channel_id=? AND lease_id=?',r.owner_id,r.channel_id,lease);}
+  }finally{await run('UPDATE ticket_intake_threads SET analysis_lease_id=NULL,analysis_lease_until=NULL WHERE owner_id=? AND channel_id=? AND root_ts=? AND analysis_lease_id=?',r.owner_id,r.channel_id,r.root_ts,lease);await run('UPDATE ticket_intake_channel_leases SET lease_id=NULL,lease_until=NULL WHERE owner_id=? AND channel_id=? AND lease_id=?',r.owner_id,leaseChannel,lease);}
 }
 
 async function captureSlackPage(connection:Connection,channel:string,messages:SlackMessage[],recovery:boolean){
@@ -150,7 +166,7 @@ export async function reconcileTicketIntake(){
 }
 export async function runTicketIntake(){
   await reconcileTicketIntake().catch(()=>undefined);
-  const due=await rows<{id:string}>(`SELECT id FROM (SELECT q.id,q.received_at,COALESCE(json_extract(q.event_json,'$.recovery'),0) AS recovery,ROW_NUMBER() OVER(PARTITION BY q.owner_id,q.channel_id ORDER BY COALESCE(json_extract(q.event_json,'$.recovery'),0),q.received_at,q.id) AS channel_rank FROM ticket_intake_messages q JOIN ticket_automation_settings s ON s.owner_id=q.owner_id AND s.enabled=1 WHERE (q.state IN ('pending','retry') AND q.next_attempt_at<=?) OR (q.state='processing' AND q.lease_until<?)) WHERE channel_rank=1 ORDER BY recovery,received_at,id LIMIT 6`,now(),now());
+  const due=await rows<{id:string}>(`SELECT id FROM (SELECT q.id,q.received_at,COALESCE(json_extract(q.event_json,'$.recovery'),0) AS recovery,ROW_NUMBER() OVER(PARTITION BY q.owner_id,q.channel_id,CASE WHEN json_extract(q.event_json,'$.operatorReply')=1 THEN q.root_ts ELSE '' END ORDER BY COALESCE(json_extract(q.event_json,'$.recovery'),0),q.received_at,q.id) AS channel_rank FROM ticket_intake_messages q JOIN ticket_automation_settings s ON s.owner_id=q.owner_id AND s.enabled=1 WHERE (q.state IN ('pending','retry') AND q.next_attempt_at<=?) OR (q.state='processing' AND q.lease_until<?)) WHERE channel_rank=1 ORDER BY recovery,received_at,id LIMIT 6`,now(),now());
   // Keep live intake responsive without allowing duplicate workers or unbounded model concurrency.
   for(let i=0;i<due.length;i+=2)await Promise.all(due.slice(i,i+2).map(r=>processTicketReceipt(r.id)));
 }

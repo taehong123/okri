@@ -2940,5 +2940,14 @@ const messages = {
   "설정·운영": "Configuración y operaciones",
   "해결 제안": "Solución propuesta",
   "보안 검사 다시 실행": "Volver a comprobar",
+  "개발 배정": "Asignación de desarrollo",
+  "개발 시작 전 확인": "Antes de iniciar el desarrollo",
+  "개발 시작 대기": "Listo para iniciar el desarrollo",
+  "담당자 회신 대기": "Esperando respuesta del responsable",
+  "답변하고 계속 진행": "Responder y continuar",
+  "주의 내용을 확인하고 개발 시작을 누르면 배정된 포트에서 이어갑니다.": "Revise la advertencia y pulse Iniciar desarrollo para continuar en el puerto asignado.",
+  "포트가 확인한 내용을 검토하고 답변하면 같은 포트에서 이어갑니다.": "Revise lo que encontró el puerto y responda para continuar en el mismo puerto.",
+  "모델": "Modelo",
+  "기본 모델 상속": "Usar el modelo predeterminado",
 } satisfies Catalog;
 export default messages;

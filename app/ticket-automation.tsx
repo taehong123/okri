@@ -156,6 +156,7 @@ function TicketRequestEditor({value:r,data,busy,onAction}:{value:TicketAutomatio
   const allowed=data.canManage||self?.id===r.member_id;
   const scopeDirty=category!==r.category||title!==r.title||description!==r.description||priority!==(r.priority||'medium')||JSON.stringify(dependencies)!==JSON.stringify(JSON.parse(r.dependencies_json||'[]'));
   return <section className="ticket-request-detail" aria-label={t("요청 검토")}><TicketWorkflowProgress value={r} busy={busy}/><a href={`https://slack.com/archives/${r.source_channel}/p${r.source_ts.replace(".","")}`} target="_blank" rel="noreferrer"><ExternalLink size={14}/>{t("Slack 원문")}</a>
+    {(r.member_id||r.port_id)&&<TicketExecutionAssignment value={r} data={data}/>}
     {(r.risk==="blocked"||r.state==="blocked")&&<p role="alert">{t("보안 검증에서 차단된 요청입니다. 승인으로 우회할 수 없습니다.")}</p>}
     <ul className="ticket-request-summary"><li>{t('고객사')}: {data.settings.channels.find(c=>c.id===r.source_channel)?.name||r.source_channel}</li><li>{t('요청자')}: {r.requester_name||r.requester_slack_user||t('미지정')}</li><li>{t('요구사항')}: {r.title}</li><li>{t('분류')}: {t(TICKET_CATEGORY_LABELS[r.category]||'분류 검토')}</li></ul>
     {r.category!=='guidance'&&ticketSolutionPreview(r.description)&&<p className="ticket-solution">{t('해결 제안')}: {ticketSolutionPreview(r.description)}</p>}
@@ -175,8 +176,12 @@ function TicketRequestEditor({value:r,data,busy,onAction}:{value:TicketAutomatio
     {['queued','running','waiting_answer'].includes(r.state)&&<button className="secondary" onClick={()=>void onAction({action:'stop'})}>{t('실행 중지')}</button>}
     </details>
     {r.state==='publishing'&&<><p>{t('승인한 완료 안내의 전송을 기다리고 있습니다.')}</p><button className="secondary" onClick={()=>void onAction({action:'cancel_publish'})}>{t('전송 전 취소하고 문안 수정')}</button></>}
-    {r.state==="waiting_answer"&&<><p>{r.question}</p><label>{t("담당자 답변")}<textarea rows={3} value={answer} onChange={e=>setAnswer(e.target.value)}/></label><button className="primary-action" disabled={!answer.trim()} onClick={()=>void onAction({action:"answer",answer})}>{t("답변 저장")}</button></>}
+    {r.state==="waiting_answer"&&<><p>{r.question}</p><label>{t("담당자 답변")}<textarea rows={3} value={answer} onChange={e=>setAnswer(e.target.value)}/></label><button className="primary-action" disabled={!answer.trim()} onClick={()=>void onAction({action:"answer_resume",answer})}>{t("답변하고 계속 진행")}</button></>}
     </fieldset></section>;
+}
+function TicketExecutionAssignment({value:r,data}:{value:TicketAutomationRequest;data:Data}){
+  const port=data.ports.find(p=>p.id===r.port_id),member=data.members.find(m=>m.id===r.member_id);
+  return <dl className="ticket-execution" aria-label={t('개발 배정')}><div><dt>{t('담당자')}</dt><dd>{member?.display_name||t('확인 필요')}</dd></div><div><dt>{t('PC 이름')}</dt><dd>{port?.computer_label||t('기본 PC')}</dd></div><div><dt>{t('실행 포트')}</dt><dd>{port?.name||t('배정 대기')}</dd></div><div><dt>{t('모델')}</dt><dd>{port?.model||data.settings.defaultModel||t('기본 모델 상속')}</dd></div></dl>;
 }
 function TicketWorkflowProgress({value:r,busy}:{value:TicketAutomationRequest;busy:boolean}){
   const flow=ticketWorkflow(r),guidance=r.category==='guidance',steps=guidance?['승인','회신','완료']:['승인','개발','회신','완료'],currentStep=guidance?Math.max(0,flow.step-1):flow.step;
@@ -184,7 +189,7 @@ function TicketWorkflowProgress({value:r,busy}:{value:TicketAutomationRequest;bu
 }
 function TicketSecurityWarning({value:r,onAction}:{value:TicketAutomationRequest;onAction:(p:Record<string,unknown>)=>Promise<boolean>}) {
   const warning=ticketWarning(r.security_json||'{}');
-  return <div className="ticket-approval"><p>{t('승인 전 확인')}</p><ul>{warning.labels.map(label=><li key={label}>{t(label)}</li>)}</ul>{warning.approvable&&<button className="primary-action" onClick={()=>void onAction({action:'approve_warning'})}><Check size={14}/>{t('확인하고 개발 승인')}</button>}</div>;
+  return <div className="ticket-approval"><p>{t('개발 시작 전 확인')}</p><ul>{warning.labels.map(label=><li key={label}>{t(label)}</li>)}</ul>{warning.approvable&&<button className="primary-action" onClick={()=>void onAction({action:'approve_warning'})}><Check size={14}/>{t('개발 시작')}</button>}</div>;
 }
 function RequesterEditor({value:r,onAction}:{value:TicketAutomationRequest;onAction:(p:Record<string,unknown>)=>Promise<boolean>}) {
   const [query,setQuery]=useState(""),[users,setUsers]=useState(r.requester_slack_user?[{id:r.requester_slack_user,name:r.requester_name||r.requester_slack_user}]:[]),[selected,setSelected]=useState(r.requester_slack_user||''),[busy,setBusy]=useState(false),[error,setError]=useState("");

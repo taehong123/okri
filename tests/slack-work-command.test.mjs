@@ -67,7 +67,7 @@ test("channel, private channel, DM and tagged multiline commands reach their for
   const events = await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8");
   for (const [type, channelType, prefix] of [["message", "channel", ""], ["message", "group", ""], ["message", "im", ""], ["message", "mpim", ""], ["message", undefined, ""], ["message", "channel", "<@UBOT> "], ["app_mention", "channel", "<@UBOT> "], ["app_mention", "group", "<@UBOT|OKRI> "]]) {
     const calls = [], pending = [], receipts = new Set();
-    const route = compile(events, {"@/lib/ticket-intake-queue":{captureTicketMessage:async()=>null,processTicketReceipt:async()=>{}},
+    const route = compile(events, {"@/lib/ticket-intake-queue":{captureTicketManagementReply:async()=>null,captureTicketMessage:async()=>null,processTicketReceipt:async()=>{}},
       "cloudflare:workers": { env: { DB: { prepare: () => ({ bind: (id) => ({ run: async () => {
         const changes = receipts.has(id) ? 0 : 1;
         receipts.add(id);
@@ -296,7 +296,7 @@ test("a failed thread read is retryable without creating an item or caching an e
 test("production-shaped Ticket event reaches a durable button and source-filled modal with duplicate delivery suppressed", async () => {
   const domainSource = await readFile(new URL("../lib/slack-work-command.ts", import.meta.url), "utf8");
   const f = commandFixture("!티켓생성\nCI 실행기 시작 지연 원인 확인\n저장소: https://github.com/example/service\n완료 기준: 필수 CI 성공", { domainSource, reply: true, historyDenied: true });
-  const route = compile(await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"), {"@/lib/ticket-intake-queue":{captureTicketMessage:async()=>null,processTicketReceipt:async()=>{}},
+  const route = compile(await readFile(new URL("../app/api/slack/events/route.ts", import.meta.url), "utf8"), {"@/lib/ticket-intake-queue":{captureTicketManagementReply:async()=>null,captureTicketMessage:async()=>null,processTicketReceipt:async()=>{}},
     "cloudflare:workers": f.runtime,
     "@/lib/pace-data": { getSlackConnectionByTeam: async () => f.connection },
     "@/lib/slack-oauth": { slackConfigured: () => true, verifySlackRequest: async () => true },
@@ -454,4 +454,19 @@ test("manual share joins an eligible public channel and posts the shared guide o
   assert.deepEqual(calls.map((call) => call.method), ["conversations.join", "chat.postMessage"]);
   assert.match(calls[1].payload.text, /!티켓 \[이름\]/);
   assert.equal(calls[1].payload.channel, "C123");
+});
+
+test('assigned ticket-thread mentions are captured before the general chatbot can respond',async()=>{
+  const pending=[],forwarded=[],captured=[];
+  const route=compile(await readFile(new URL('../app/api/slack/events/route.ts',import.meta.url),'utf8'),{
+    'cloudflare:workers':{env:{},waitUntil:p=>pending.push(p)},
+    '@/lib/pace-data':{getSlackConnectionByTeam:async()=>({ownerId:'w1',teamId:'T1',botUserId:'UBOT'})},
+    '@/lib/slack-oauth':{slackConfigured:()=>true,verifySlackRequest:async()=>true},
+    '@/lib/slack-daily':{},'@/lib/okri-manual':{isOkriManualQuestion:()=>false},
+    '@/lib/slack-work-command':parser,
+    '@/lib/slack-mcp-agent':{handleSlackMcpConversation:async()=>assert.fail('Ticket conversations must stay with their assigned port')},
+    '@/lib/ticket-intake-queue':{captureTicketManagementReply:async(_c,e)=>{captured.push(e);return 'durable-reply';},processTicketReceipt:async id=>forwarded.push(id)}
+  });
+  for(const type of ['message','app_mention'])assert.equal((await route.POST(new Request('https://okri.test/api/slack/events',{method:'POST',body:JSON.stringify({event_id:type,team_id:'T1',event:{type,channel:'CMGMT',channel_type:'channel',user:'U1',ts:'11.000',thread_ts:'10.000',text:'<@UBOT> 현재 제품을 확인하고 범위를 제안해 주세요.'}})}))).status,200);
+  await Promise.all(pending);assert.equal(captured.length,2);assert.equal(captured[0].text,captured[1].text);assert.doesNotMatch(captured[0].text,/UBOT/);assert.deepEqual(forwarded,['durable-reply','durable-reply']);
 });

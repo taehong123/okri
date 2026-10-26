@@ -11,6 +11,7 @@ export type SlackWorkGuideGroup = {
 };
 
 export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
+  {label: "티켓 포트 대화",description: "개발 승인 시 담당자·포트를 배정합니다. 포트는 제품 명세와 현재 저장소를 확인해 범위를 제안하고, 티켓 스레드의 담당자 회신을 받아 이어갑니다. 진행 보고는 한 댓글을 갱신하며 일반 챗봇은 중복 응답하지 않습니다.",entries: [{command: "!티켓관리",label: "티켓 상태·배정 확인"}]},
   {
     label: "양식으로 추가",
     description: "같은 스레드에 남는 '양식 열기' 버튼을 누르면 명령을 입력한 사람에게 확인 양식이 열립니다. 제출 전에는 생성되지 않습니다.",

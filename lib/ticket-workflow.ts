@@ -15,10 +15,10 @@ export function ticketWarning(value:string){
 export function ticketWorkflow(r:{state:TicketState;category?:string;security_json?:string}){
   const guidance=r.category==='guidance',security=ticketWarning(r.security_json||'{}');
   if(r.state==='recommended'||r.state==='created')return {step:0,label:guidance?'회신 승인 대기':'개발 승인 대기',next:guidance?'문안을 확인하고 승인하면 고객에게 보냅니다.':'승인하면 포트를 배정하고 자동 검사를 시작합니다.'};
-  if(r.state==='security_review')return {step:0,label:'작업 내용 확인',next:security.recheckReason==='snapshot_changed'?'작업 코드가 변경되어 다시 확인이 필요합니다.':security.recheckReason==='additional_warning'?'새로운 주의 항목이 추가되어 확인이 필요합니다.':'아래 주의 내용을 확인하고 승인하면 개발을 이어갑니다.'};
+  if(r.state==='security_review')return {step:1,label:'개발 시작 대기',next:security.recheckReason==='snapshot_changed'?'작업 코드가 변경되어 다시 확인이 필요합니다.':security.recheckReason==='additional_warning'?'새로운 주의 항목이 추가되어 확인이 필요합니다.':'주의 내용을 확인하고 개발 시작을 누르면 배정된 포트에서 이어갑니다.'};
   if(r.state==='queued')return {step:1,label:'시작 준비 중',next:'포트가 자동 검사를 마치면 개발을 시작합니다.'};
   if(r.state==='running')return security.allow?{step:1,label:'개발 중',next:'완료되면 고객에게 보낼 회신을 확인합니다.'}:{step:1,label:'자동 검사 중',next:'검사를 통과하면 개발을 시작합니다.'};
-  if(r.state==='waiting_answer')return {step:1,label:'답변 대기',next:'담당자 답변을 반영한 뒤 개발을 이어갑니다.'};
+  if(r.state==='waiting_answer')return {step:1,label:'담당자 회신 대기',next:'포트가 확인한 내용을 검토하고 답변하면 같은 포트에서 이어갑니다.'};
   if(r.state==='review')return {step:2,label:'회신 승인 대기',next:'문안을 확인하고 승인하면 고객에게 보냅니다.'};
   if(r.state==='publishing')return {step:2,label:'회신 전송 중',next:'전송이 확인되면 완료로 바뀝니다.'};
   if(r.state==='published')return {step:3,label:'완료',next:'고객 원문 스레드에 회신했습니다.'};

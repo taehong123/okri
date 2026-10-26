@@ -2939,6 +2939,15 @@ const messages = {
   "설정·운영": "Settings and operations",
   "해결 제안": "Proposed solution",
   "보안 검사 다시 실행": "Run checks again",
+  "개발 배정": "Development assignment",
+  "개발 시작 전 확인": "Before starting development",
+  "개발 시작 대기": "Ready to start development",
+  "담당자 회신 대기": "Waiting for assignee reply",
+  "답변하고 계속 진행": "Reply and continue",
+  "주의 내용을 확인하고 개발 시작을 누르면 배정된 포트에서 이어갑니다.": "Review the warning and select Start development to continue on the assigned port.",
+  "포트가 확인한 내용을 검토하고 답변하면 같은 포트에서 이어갑니다.": "Review the port’s findings and reply to continue on the same port.",
+  "모델": "Model",
+  "기본 모델 상속": "Use the default model",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

@@ -1,5 +1,16 @@
 # Native parity ledger
 
+## 2026-10-26 · Assigned ticket ports and Slack conversation
+
+- Web/Slack only: assigned person, PC, port and model stay visible. Approved
+  isolated code work records scope and business-data advisories without another
+  approval; exfiltration, credentials, execution boundaries, destructive work,
+  dependency installation and concurrent-file conflicts retain their gates.
+- Ticket-thread replies are durably captured before Slack acknowledgement and
+  routed to the assigned port rather than the general chatbot. Question history
+  follows the same port; progress updates reuse one reply.
+- No native v1 payload, auth, schema, mobile screen or binary release changes.
+
 ## 2026-10-24 · Slack question card delivery
 
 - Backend/Slack only: answer-waiting ticket cards expose one answer action so
