@@ -2949,5 +2949,18 @@ const messages = {
   "포트가 확인한 내용을 검토하고 답변하면 같은 포트에서 이어갑니다.": "Revise lo que encontró el puerto y responda para continuar en el mismo puerto.",
   "모델": "Modelo",
   "기본 모델 상속": "Usar el modelo predeterminado",
+  "상태 갱신 지연": "Actualización de estado retrasada",
+  "완료 확인 중": "Verificando la finalización",
+  "작업 결과를 티켓에 반영하고 있습니다.": "Se está incorporando el resultado al ticket.",
+  "티켓에서 실행 결과를 확인해 주세요.": "Consulta el resultado de ejecución en el ticket.",
+  "실행 연결 확인": "Revisar la conexión de ejecución",
+  "PC 연결과 실행 상태를 확인하고 있습니다.": "Se están comprobando la conexión del PC y el estado de ejecución.",
+  "제품 확인": "Verificar el producto",
+  "제품 확인 대기": "Esperando verificación del producto",
+  "제품 확인 중": "Verificando el producto",
+  "포트가 실제 제품 코드를 확인하고 회신을 준비합니다.": "El puerto lee el código real del producto y prepara una respuesta.",
+  "현재 구현과 제한 사항을 확인해 회신을 준비합니다.": "Se prepara una respuesta comprobando la implementación actual y sus restricciones.",
+  "검사를 통과하면 제품 코드를 읽습니다.": "El código del producto se lee tras superar las comprobaciones.",
+  "현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.": "Consulta el código actual del producto y recomienda una solución concreta.",
 } satisfies Catalog;
 export default messages;

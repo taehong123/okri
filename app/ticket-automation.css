@@ -22,6 +22,10 @@
 .ticket-relay-settings { grid-column:1/-1; }
 .ticket-automation .ticket-request-row,.ticket-port-row { display:grid; grid-template-columns:minmax(0,3fr) repeat(3,minmax(0,1fr)); gap:var(--space-4); width:100%; min-height:3rem; text-align:left; padding-block:var(--space-4); border:0; border-bottom:1px solid var(--border-default); background:var(--bg-surface); color:var(--text-primary); }
 .ticket-port-row>button { align-self:center; }
+.ticket-port-activity { align-content:start; }
+.ticket-port-activity>span { display:flex; align-items:center; gap:var(--space-2); font-size:var(--type-label); }
+.ticket-port-activity>a { color:var(--text-primary); overflow-wrap:anywhere; }
+.ticket-port-activity svg { flex-shrink:0; }
 .ticket-request-row span,.ticket-port-row>div { min-width:0; overflow-wrap:anywhere; }
 .ticket-request-row>span:first-child,.ticket-port-row>div { display:grid; gap:var(--space-2); }
 .ticket-request-row strong,.ticket-port-row strong { font-weight:400; }

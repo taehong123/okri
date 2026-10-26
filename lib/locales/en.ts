@@ -2948,6 +2948,19 @@ const messages = {
   "포트가 확인한 내용을 검토하고 답변하면 같은 포트에서 이어갑니다.": "Review the port’s findings and reply to continue on the same port.",
   "모델": "Model",
   "기본 모델 상속": "Use the default model",
+  "상태 갱신 지연": "Status refresh delayed",
+  "완료 확인 중": "Checking completion",
+  "작업 결과를 티켓에 반영하고 있습니다.": "Applying the work result to the ticket.",
+  "티켓에서 실행 결과를 확인해 주세요.": "Check the execution result in the ticket.",
+  "실행 연결 확인": "Check execution connection",
+  "PC 연결과 실행 상태를 확인하고 있습니다.": "Checking the PC connection and execution status.",
+  "제품 확인": "Check product",
+  "제품 확인 대기": "Waiting for product verification",
+  "제품 확인 중": "Checking product",
+  "포트가 실제 제품 코드를 확인하고 회신을 준비합니다.": "The port reads the actual product code and prepares a reply.",
+  "현재 구현과 제한 사항을 확인해 회신을 준비합니다.": "Preparing a reply by checking the current implementation and restrictions.",
+  "검사를 통과하면 제품 코드를 읽습니다.": "Product code is read after the checks pass.",
+  "현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.": "Reads the current product code and recommends a concrete solution.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

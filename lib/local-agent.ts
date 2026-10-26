@@ -343,7 +343,7 @@ User request:
 ${job.instruction}`;
 }
 
-export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization, isolatedTicketSupport = false) {
+export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization, isolatedTicketSupport = false,readOnlyTicketSupport=false) {
   const now = new Date();
   const nowIso = now.toISOString();
   await env.DB.prepare(`UPDATE local_agent_jobs SET status = 'queued', lease_id = NULL, lease_expires_at = NULL,
@@ -360,7 +360,7 @@ export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorizati
     )).orderBy(sql`COALESCE((SELECT CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END FROM ticket_automation_requests WHERE job_id=${localAgentJobs.id}),2)`,asc(localAgentJobs.createdAt)).limit(100);
   for (const job of candidates) {
     const { validateTicketJobPickup,ticketRuntimeContext } = await import("@/lib/ticket-automation");
-    if (!await validateTicketJobPickup(job.id, isolatedTicketSupport)) continue;
+    if (!await validateTicketJobPickup(job.id, isolatedTicketSupport,readOnlyTicketSupport)) continue;
     const context={...JSON.parse(job.contextJson||'{}'),...(await ticketRuntimeContext(job.id)||{})};
     job.contextJson=JSON.stringify(context);
     const leaseId = crypto.randomUUID();
@@ -370,7 +370,7 @@ export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorizati
       WHERE id = ? AND device_id = ? AND status = 'queued' AND NOT EXISTS(SELECT 1 FROM local_agent_jobs active WHERE active.device_id=? AND active.workspace_id=? AND active.user_id=? AND active.status='running' AND active.lease_expires_at>?)`)
       .bind(leaseId, leaseExpiresAt, nowIso, nowIso, job.contextJson,job.id, device.id,device.id,device.workspaceId,device.userId,nowIso).run();
     if ((result.meta.changes ?? 0) === 1) {
-        return { ...serializeJob({ ...job, status: "running", leaseId, leaseExpiresAt, startedAt: job.startedAt ?? nowIso, updatedAt: nowIso }), leaseId, executionPolicy:context.executionPolicy,basisDigest:context.basisDigest,model:context.model??null,repository:context.repository,dependencies:context.dependencies,priority:context.priority,prompt:buildLocalAgentPrompt(job) };
+        return { ...serializeJob({ ...job, status: "running", leaseId, leaseExpiresAt, startedAt: job.startedAt ?? nowIso, updatedAt: nowIso }), leaseId, executionPolicy:context.executionPolicy,readOnly:context.readOnly===true,preparation:context.preparation===true,basisDigest:context.basisDigest,model:context.model??null,repository:context.repository,dependencies:context.dependencies,priority:context.priority,prompt:buildLocalAgentPrompt(job) };
     }
   }
   return null;

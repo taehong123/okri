@@ -1,9 +1,36 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { parseArgs, sanitizedCodexEnvironment, validateBaseUrl } from "../public/local-agent/okri-local-agent.mjs";
+import { parseArgs, sanitizedCodexEnvironment, validateBaseUrl,verifyTicketGuidance,CodexAppServer,createCurrentTicketSnapshot,cleanupTicketSnapshot } from "../public/local-agent/okri-local-agent.mjs";
+import {execFileSync} from 'node:child_process';
+import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test('product inspection uses the latest approved remote commit and preserves a stale dirty checkout',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'okri-current-source-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const run=(cwd,...args)=>execFileSync('git',['-c','core.hooksPath=','-c','user.name=Fixture','-c','user.email=fixture@example.invalid',...args],{cwd,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+  const remote=join(root,'remote.git'),author=join(root,'author'),stale=join(root,'stale');run(root,'init','--bare','--initial-branch=main',remote);run(root,'init','--initial-branch=main',author);run(author,'remote','add','origin',remote);
+  await writeFile(join(author,'sales.ts'),'group by registered_at');run(author,'add','.');run(author,'commit','-qm','old source');run(author,'push','-u','origin','main');run(root,'clone',remote,stale);
+  await writeFile(join(author,'sales.ts'),'group by ordered_at');run(author,'add','.');run(author,'commit','-qm','current source');run(author,'push');await writeFile(join(stale,'sales.ts'),'preserve unrelated local edits');
+  const before=run(stale,'status','--porcelain'),snapshot=await createCurrentTicketSnapshot(stale);t.after(()=>cleanupTicketSnapshot(snapshot.directory));
+  assert.equal(await readFile(join(snapshot.directory,'sales.ts'),'utf8'),'group by ordered_at');assert.equal(snapshot.revision,run(author,'rev-parse','HEAD').trim());assert.equal(await readFile(join(stale,'sales.ts'),'utf8'),'preserve unrelated local edits');assert.equal(run(stale,'status','--porcelain'),before);
+});
+
+test('read-only guidance uses the read permission profile and validates quotes against real local files',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'okri-guidance-test-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const quote='if (order.status !== "registered") return forbidden;';await writeFile(join(directory,'orders.ts'),quote);
+  const value={answer:'접수 전 주문만 변경할 수 있습니다.',evidence:[{path:'orders.ts',quote}]};
+  assert.deepEqual(await verifyTicketGuidance('OKRI_GUIDANCE:'+JSON.stringify(value),directory),value);
+  for(const evidence of [[],[{path:'orders.ts',quote:'This invented statement is not in the source.'}],[{path:'../outside.ts',quote}],[{path:join(directory,'orders.ts'),quote}]])await assert.rejects(verifyTicketGuidance('OKRI_GUIDANCE:'+JSON.stringify({...value,evidence}),directory));
+  await assert.rejects(verifyTicketGuidance('현재 자료만으로는 확인할 수 없습니다.',directory));
+  const server=new CodexAppServer(directory),calls=[];server.request=async(method,params)=>{calls.push({method,params});return method==='thread/start'?{thread:{id:'thread-1'}}:{turn:{id:'turn-1'}};};
+  const result=server.run('guidance:1','Inspect actual product','gpt-6.1-sol',{readOnly:true});
+  await new Promise(resolve=>setImmediate(resolve));server.receiveNotification({method:'item/completed',params:{turnId:'turn-1',item:{type:'agentMessage',text:'verified'}}});server.receiveNotification({method:'turn/completed',params:{turn:{id:'turn-1',status:'completed'}}});assert.equal(await result,'verified');
+  assert.equal(calls[0].params.permissions,'okri_ticket_review');assert.equal(calls[0].params.config['permissions.okri_ticket_review.filesystem'][directory],'read');assert.equal(calls[1].params.permissions,'okri_ticket_review');
+});
 
 test("runner only accepts HTTPS outside localhost", () => {
   assert.equal(validateBaseUrl("https://okri.ai/path?q=1"), "https://okri.ai");
