@@ -1,5 +1,12 @@
 # Native parity ledger
 
+## 2026-10-26 · Fresh per-job preflight state
+
+- Web/Slack backend only: queuing a new ticket job clears the preceding job
+  security display. Existing explicit override data stays bound to its context.
+- No native v1, auth, database schema or native UI changes.
+
+
 ## 2026-10-26 · Source-first recommendations
 
 - Web/Slack/local runner only: new requests prepare concrete recommendations
