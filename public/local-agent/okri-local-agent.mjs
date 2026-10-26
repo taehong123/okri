@@ -9,7 +9,7 @@ import { homedir, tmpdir } from "node:os";
 import { pathToFileURL, fileURLToPath } from "node:url";
 import {prepareTicketNodeCache} from './prepare-ticket-node-cache.mjs';
 
-const VERSION = "0.4.2";
+const VERSION = "0.4.3";
 const TICKET_IMAGE = "okri-ticket-codex:0.4.0";
 const POLL_INTERVAL_MS = 3_000;
 const REPORT_INTERVAL_MS = 30_000;
@@ -72,10 +72,14 @@ async function git(cwd, args) {
   return new Promise((resolvePromise, reject) => {
     const child = spawn("git", ["-c", "core.hooksPath=", ...args], { cwd, env: cleanGitEnvironment(), windowsHide: true, stdio: ["ignore", "pipe", "pipe"] });
     const chunks = []; let size = 0;
+    // Git emits per-file line-ending warnings on Windows. An unread stderr pipe can block add/checkout indefinitely.
+    child.stderr.resume();
+    const timer=setTimeout(()=>child.kill(),180000);
     child.stdout.on("data", chunk => { size += chunk.length; if (size > 8_000_000) child.kill(); else chunks.push(chunk); });
-    child.once("error", reject); child.once("exit", code => code === 0 && size <= 8_000_000 ? resolvePromise(Buffer.concat(chunks).toString("utf8")) : reject(new Error("Local snapshot Git operation failed.")));
+    child.once("error", error=>{clearTimeout(timer);reject(error);}); child.once("exit", code => {clearTimeout(timer);code === 0 && size <= 8_000_000 ? resolvePromise(Buffer.concat(chunks).toString("utf8")) : reject(new Error("Local snapshot Git operation failed."));});
   });
 }
+export {git as runTicketSnapshotGit};
 const ownedSnapshots=new Set();
 async function trustedRepositoryGit(cwd,args){
   return new Promise((resolvePromise,reject)=>{
