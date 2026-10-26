@@ -1,5 +1,30 @@
 # Native parity ledger
 
+## 2026-10-26 · Source-first recommendations
+
+- Web/Slack/local runner only: new requests prepare concrete recommendations
+  from the current approved Git HEAD in read-only snapshots before development
+  approval. Existing capabilities become guidance. Dirty checkouts are preserved;
+  source revisions and evidence paths are audited. Existing tickets do not restart.
+- No native v1 payload, schema, auth or native UI change; no native release.
+
+## 2026-10-26 · Source-verified guidance
+
+- Web/Slack/local runner only: new guidance assigns a read-only product port,
+  verifies exact source excerpts and prepares a reply for human approval.
+  A new optional web-local-agent capability header and job flag are additive;
+  older runners skip these jobs. Existing tickets are not restarted.
+- No native v1 payload, auth, schema or native UI changes.
+
+## 2026-10-26 · Accurate port activity
+
+- Web/Slack only: retain answer/review assignments, live port/list refresh and
+  real job/lease/PC execution state, including tickets outside the loaded page.
+  The shared progress reply follows question, stop and failure transitions.
+- Additive web automation port activity only; native v1, auth, database schema
+  and native UI are unchanged. No native binary or OTA release is claimed.
+
+
 ## 2026-10-26 · Assigned ticket ports and Slack conversation
 
 - Web/Slack only: assigned person, PC, port and model stay visible. Approved

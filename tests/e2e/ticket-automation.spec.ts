@@ -2,6 +2,32 @@ import { expect, test } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 import { installApiMocks, json } from "./api-mocks";
 
+test('source-first preparation shows the actual proposal before a single writable-development approval',async({page})=>{
+  await installApiMocks(page);const writes:Record<string,unknown>[]=[];
+  const r={id:'new-issue',category:'improvement',title:'매출 기준 확인',description:'분류 단계의 임시 제안',state:'running',member_id:'m1',port_id:'p1',product_id:'prod1',repository_id:'repo1',revision:1,security_json:'{"allow":true}',analysis_json:'{"preparation":{"stage":"reading"}}',source_channel:'C1',source_ts:'123.000',dependencies_json:'[]',notice:'',requester_slack_user:'UCUSTOMER'};
+  const data={settings:{enabled:true,channels:[{id:'C1',name:'고객-예시'}]},requests:[r],ports:[{id:'p1',member_id:'m1',device_id:'d1',name:'담당 01 포트',computer_label:'담당 PC',product_id:'prod1',repository_id:'repo1',online:true}],members:[{id:'m1',user_id:'user-1',display_name:'박담당'}],products:[],devices:[],canManage:true,userId:'user-1'};
+  await page.route('**/api/ticket-automation*',async route=>{if(route.request().method()==='POST'){writes.push(route.request().postDataJSON());r.state='queued';r.revision++;}return json(route,data);});
+  await page.goto('/?view=tickets&ticketAutomation=1&request=new-issue');const detail=page.getByRole('region',{name:'요청 검토',exact:true});await expect(detail.getByRole('status')).toContainText('제품 확인 중');await expect(detail.getByRole('button',{name:'개발 승인',exact:true})).toHaveCount(0);await expect(detail.locator('.ticket-solution')).toHaveCount(0);
+  r.state='recommended';r.revision++;r.analysis_json='{"preparation":{"stage":"ready"}}';r.description='고객의 문제\n매출 화면과 접수일 기준이 다릅니다.\n\n해결 제안\n기존 접수일 필터를 매출 조회에 연결하고 한국 시간 날짜 경계를 검증합니다.\n\n완료 확인 기준\n26일 접수 건은 26일 매출에 한 번 집계됩니다.';
+  await expect(detail.getByRole('button',{name:'개발 승인',exact:true})).toBeVisible({timeout:12000});await expect(detail.locator('.ticket-solution')).toContainText('기존 접수일 필터');await detail.getByRole('button',{name:'개발 승인',exact:true}).click();expect(writes).toEqual([expect.objectContaining({action:'start',memberId:'m1',portId:'p1'})]);await expect(detail.getByRole('status')).toContainText('시작 준비 중');
+});
+
+test('ports retain reply-waiting assignments beyond pagination and refresh actual execution without clearing edits',async({page},info)=>{
+  await installApiMocks(page);let reads=0;const writes:unknown[]=[];
+  const activity={requestId:'outside-page',title:'접수일별 순익·거래처별 마진 정산 조회 '.repeat(3),state:'waiting_answer',category:'feature',preflightAllowed:true,jobStatus:'completed',progress:'',leaseExpiresAt:null as string|null,updatedAt:new Date().toISOString()};
+  const port={id:'p1',member_id:'m1',name:'담당 02 포트',computer_label:'담당 PC',device_id:'d1',enabled:1,online:true,models_json:'["gpt-6.1-sol"]',channel_ids_json:'["C1"]',activity};
+  const data={settings:{enabled:true,channels:[{id:'C1',name:'고객-예시',enabled:true}],defaultModel:'gpt-6.1-sol'},requests:[],ports:[port],members:[{id:'m1',user_id:'user-1',display_name:'박담당'}],devices:[],products:[],canManage:true,userId:'user-1'};
+  await page.route('**/api/ticket-automation*',async route=>{if(route.request().method()==='POST')writes.push(route.request().postDataJSON());reads++;return json(route,data);});
+  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByText('설정·운영',{exact:true}).click();await page.getByRole('button',{name:'실행 포트',exact:true}).click();
+  const row=page.locator('.ticket-port-row');await expect(row.getByRole('status')).toHaveText('담당자 회신 대기');await expect(row.getByRole('link')).toHaveAttribute('href',/request=outside-page/);await expect(row).not.toContainText('배정 대기');
+  await page.getByLabel('이름 앞부분',{exact:true}).fill('작성 중인 포트 이름');await row.getByText('포트 설정',{exact:true}).click();await row.getByRole('combobox',{name:'포트 모델',exact:true}).selectOption('gpt-6.1-sol');
+  activity.state='running';activity.jobStatus='running';activity.progress='현재 제품 코드 확인 중';activity.leaseExpiresAt=new Date(Date.now()+60000).toISOString();const before=reads;
+  await expect.poll(()=>reads,{timeout:12000}).toBeGreaterThan(before);await expect(row.getByRole('status')).toHaveText('개발 중');await expect(row.locator('.ticket-working')).toBeVisible();await expect(row).toContainText('현재 제품 코드 확인 중');await expect(page.getByLabel('이름 앞부분',{exact:true})).toHaveValue('작성 중인 포트 이름');await expect(row.getByRole('combobox',{name:'포트 모델',exact:true})).toHaveValue('gpt-6.1-sol');
+  for(const width of [320,390,1440,2560]){await page.setViewportSize({width,height:1000});expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);}
+  await page.setViewportSize({width:390,height:1000});await page.evaluate(()=>document.documentElement.style.fontSize='200%');expect(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)).toBeLessThanOrEqual(1);await page.evaluate(()=>document.documentElement.style.fontSize='');
+  expect((await new AxeBuilder({page:page as never}).include('.ticket-automation').analyze()).violations).toEqual([]);expect(writes).toEqual([]);await page.screenshot({path:info.outputPath('ticket-live-port-state.png'),fullPage:true});
+});
+
 test('four categories, original evidence and paginated intake coverage remain visible with mocked writes',async({page},info)=>{
   await installApiMocks(page);const writes:Record<string,unknown>[]=[];
   const categories=['bug_fix','improvement','feature','guidance'];
@@ -95,12 +121,12 @@ test('one warning approval shows processing and automatically advances to develo
   await expect(detail.getByRole('status')).toContainText('개발 중',{timeout:15_000});await expect(detail.getByRole('status')).toContainText('회신');expect(writes).toHaveLength(1);await page.screenshot({path:info.outputPath('ticket-development-progress.png'),fullPage:true});
 });
 
-test('guidance replies from the draft without ticket creation or port selection',async({page},info)=>{
+test('guidance reads the product before exposing a customer reply approval',async({page},info)=>{
   await installApiMocks(page);const writes:Record<string,unknown>[]=[];
   const r={id:'guide-1',category:'guidance',source_channel:'C1',source_ts:'123.000',source_text:'택배사 선택은 어디서 하나요?',title:'기본 택배사 설정 방법 안내',description:'고객의 문제\n택배사 설정 위치 문의\n\n안내 초안\n설정 화면에서 기본 택배사를 선택해 주세요.\n\n완료 확인 기준\n설정 확인',state:'recommended',risk:'review',member_id:null,port_id:null,requester_slack_user:'UCUSTOMER',requester_name:'김고객',revision:1,notice:'',dependencies_json:'[]'};
   const data={settings:{enabled:true,channels:[{id:'C1',name:'고객-초록청년',enabled:true}],notificationsAuthorized:true},requests:[r],ports:[],members:[],devices:[],products:[],canManage:true,userId:'user-1'};
-  await page.route('**/api/ticket-automation*',async route=>{if(route.request().method()==='POST'){writes.push(route.request().postDataJSON());r.state='publishing';r.revision++;}return json(route,data);});
-  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByRole('button',{name:/기본 택배사 설정 방법 안내/}).click();const detail=page.getByRole('region',{name:'요청 검토',exact:true});await expect(detail.getByRole('combobox',{name:'실행 포트',exact:true})).toHaveCount(0);await expect(detail.getByRole('button',{name:'개발 승인',exact:true})).toHaveCount(0);await expect(detail.getByRole('textbox',{name:'회신 내용',exact:true})).toHaveValue('설정 화면에서 기본 택배사를 선택해 주세요.');await detail.getByRole('textbox',{name:'회신 내용',exact:true}).fill('설정 화면에서 기본 택배사를 선택하고 저장해 주세요.');await page.screenshot({path:info.outputPath('ticket-direct-reply.png'),fullPage:true});await detail.getByRole('button',{name:'승인하고 보내기',exact:true}).click();expect(writes).toEqual([expect.objectContaining({action:'reply',requesterSlackUser:'UCUSTOMER',notice:'설정 화면에서 기본 택배사를 선택하고 저장해 주세요.'})]);await expect(detail.getByRole('status')).toContainText('회신 전송 중');await expect(detail.getByRole('list',{name:'티켓 진행 단계'})).not.toContainText('개발');
+  await page.route('**/api/ticket-automation*',async route=>{if(route.request().method()==='POST'){const body=route.request().postDataJSON();writes.push(body);r.state=body.action==='inspect'?'review':'publishing';if(body.action==='inspect')r.notice='설정 화면에서 기본 택배사를 선택해 주세요.';r.revision++;}return json(route,data);});
+  await page.goto('/?view=tickets&ticketAutomation=1');await page.getByRole('button',{name:/기본 택배사 설정 방법 안내/}).click();const detail=page.getByRole('region',{name:'요청 검토',exact:true});await expect(detail.getByRole('combobox',{name:'실행 포트',exact:true})).toHaveCount(0);await expect(detail.getByRole('button',{name:'개발 승인',exact:true})).toHaveCount(0);await expect(detail.getByRole('textbox',{name:'회신 내용',exact:true})).toHaveCount(0);await expect(detail.getByRole('button',{name:'승인하고 보내기',exact:true})).toHaveCount(0);await detail.getByRole('button',{name:'제품 확인',exact:true}).click();await expect(detail.getByRole('textbox',{name:'회신 내용',exact:true})).toHaveValue('설정 화면에서 기본 택배사를 선택해 주세요.');await detail.getByRole('textbox',{name:'회신 내용',exact:true}).fill('설정 화면에서 기본 택배사를 선택하고 저장해 주세요.');await page.screenshot({path:info.outputPath('ticket-direct-reply.png'),fullPage:true});await detail.getByRole('button',{name:'승인하고 보내기',exact:true}).click();expect(writes).toEqual([expect.objectContaining({action:'inspect'}),expect.objectContaining({action:'reply',requesterSlackUser:'UCUSTOMER',notice:'설정 화면에서 기본 택배사를 선택하고 저장해 주세요.'})]);await expect(detail.getByRole('status')).toContainText('회신 전송 중');await expect(detail.getByRole('list',{name:'티켓 진행 단계'})).not.toContainText('개발');
 });
 
 test("automation remains readable in dark mode and at 200% text zoom",async({page})=>{

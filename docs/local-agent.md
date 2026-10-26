@@ -1,6 +1,6 @@
 # OKRI Local Agent
 
-OKRI Local Agent lets an authorized user send a Task or Project from OKRI to the Codex CLI already signed in on that user's computer. The browser and OKRI server never receive the Codex login, OpenAI API key, local folder path, or Codex thread ID.
+OKRI Local Agent lets an authorized user send a Task or Project from OKRI to the Codex CLI already signed in on that user's computer. The browser and OKRI server never receive the Codex login, OpenAI API key, local folder path, or Codex thread ID. For isolated tickets, the runner refreshes the configured approved remote HEAD, makes a detached temporary checkout and builds the sanitized snapshot from it. It preserves the original dirty checkout; Git credentials stay in the trusted host Git process and are never mounted into the sandbox. Source-only evidence does not establish production deployment. A Codex chat used for setup is not the isolated execution session. Use the Slack ticket thread and OKRI execution-port screen for live assignment and progress; do not present a placeholder setup chat as a running worker.
 
 ## Connection flow
 

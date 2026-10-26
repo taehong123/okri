@@ -1,5 +1,36 @@
 # Slack ticket automation
 
+By default, every new actionable request with a product/repository starts a
+read-only preparation job before its recommendation. It returns a source-backed
+problem, concrete solution, acceptance criteria and remaining choices. Existing
+capabilities become guidance rather than unnecessary development. Preparation
+keeps ticket/task records in policy discussion and cannot edit code; approval starts a new writable
+job. Existing and recovered tickets do not acquire preparation jobs.
+
+The host runner verifies the configured approved origin, fetches its current HEAD
+and copies a detached temporary checkout into the sanitized sandbox. Dirty local
+checkouts are preserved. The exact source revision and supporting paths are
+audited. Repository evidence is not a claim that a version was deployed.
+
+
+New guidance inquiries automatically assign a product-bound read-only port.
+The runner inspects real UI, API, permissions and business rules and returns
+OKRI_GUIDANCE JSON with a customer-ready answer and exact source excerpts.
+Excerpts must match allowed files in the isolated snapshot. Unverified results
+never become reply drafts. Older runners cannot claim read-only work; they need
+the v1 read-only capability header. Customer sending still requires exact human
+approval. Existing and recovered tickets are not automatically restarted.
+
+
+Execution-port rows refresh every five seconds, retain assignments while waiting for
+operator answers or review, and obtain their current assignment independently of
+ticket-list pagination. Moving progress requires an online PC, running job and
+unexpired lease. Question, failure and stop transitions update the existing live
+progress reply rather than leaving it labeled as running. Codex setup chats and
+the isolated background execution sessions are distinct; setup instructions point
+to the canonical live Slack/OKRI status.
+
+
 Customer names, channels, assignees, execution slots and models are workspace
 configuration, never application constants.
 
