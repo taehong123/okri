@@ -458,6 +458,14 @@ test('pending preparation cannot skip recommendation review and caution approval
   await startSecurityReview(f,'warning',['dependency_network']);assert.equal(f.current().state,'security_review');await f.change('approve_warning');
   const context=JSON.parse(f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id).context_json);assert.equal(context.preparation,true);assert.equal(context.readOnly,true);assert.equal(f.db.prepare("SELECT count(*) n FROM items WHERE status='in_progress'").get().n,0);
 });
+
+test('operator questions before development approval return to the same read-only port and update the recommendation',async t=>{
+  const f=fixture(t,{sourceFirst:true,notifications:true});await f.intake();await startSecurityReview(f);const proposal={category:'feature',title:'정산 조회',problem:'고객이 계산 기준을 알고 싶어합니다.',solution:'현재 계산식을 유지하고 접수일 조회를 추가합니다.',acceptanceCriteria:['접수일 경계를 검증합니다.'],questions:['최초 접수일 유지를 권장합니다. 이 기준으로 진행할까요?'],evidence:[{path:'src/sales.ts',quote:'const acceptedAt = order.first_accepted_at;'}]};f.db.prepare("UPDATE local_agent_jobs SET status='completed',result_text=?").run('OKRI_PROPOSAL:'+JSON.stringify(proposal));await f.service.syncTicketJobs();await f.service.deliverTicketOutbox();
+  const previous=f.current(),root=f.db.prepare("SELECT message_ts FROM ticket_automation_outbox WHERE kind='source'").get().message_ts;
+  await f.service.handleTicketThreadReply('T1',{channel:'CMGMT',ts:'1793000000.123456',threadTs:root,user:'U1',text:'최종 화면 항목과 계산식을 표 형태로 먼저 보여줘.'});
+  assert.equal(f.current().state,'queued');assert.equal(f.current().port_id,previous.port_id);assert.notEqual(f.current().job_id,previous.job_id);const context=JSON.parse(f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id).context_json);assert.equal(context.readOnly,true);assert.equal(context.preparation,true);assert.match(context.answer,/표 형태/);assert.ok(context.sourceEvidence[0].text.includes('버튼 문구 오타'));
+  assert.equal(f.db.prepare("SELECT count(*) n FROM items WHERE status='in_progress'").get().n,0);assert.ok(f.writes.some(w=>w.body.text?.includes('최초 접수일 유지')));
+});
 test('migration preserves legacy requests, sent messages and immediate foreign-key enforcement',async t=>{
   const f=fixture(t,{legacy:true});assert.equal(f.current().id,'legacy');assert.equal(f.current().source_digest,'digest');assert.equal(f.db.prepare("SELECT state,message_ts FROM ticket_automation_outbox WHERE id='old-message'").get().message_ts,'55.000');assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(),[]);
   assert.throws(()=>f.db.exec("INSERT INTO ticket_automation_outbox(id,owner_id,request_id,kind,channel_id,body_json,created_at,updated_at) VALUES('bad','w1','missing','source','C1','{}','now','now')"),/FOREIGN KEY/);assert.doesNotMatch(coverageMigration,/\r|foreign_keys\s*=\s*(?:OFF|0)/i);
