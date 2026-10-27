@@ -25,6 +25,8 @@ export function ticketWarning(value:string){
 }
 export function ticketWorkflow(r:{state:TicketState;category?:string;security_json?:string;analysis_json?:string}){
   const guidance=r.category==='guidance',security=ticketWarning(r.security_json||'{}');
+  const conversation=JSON.parse(r.analysis_json||'{}').portConversation;
+  if(conversation&&!['publishing','published','dismissed','blocked','security_review','failed'].includes(r.state))return {step:0,label:conversation.error?'포트 연결 대기':r.state==='queued'?'포트 전달 대기':r.state==='running'?security.allow?'포트 응답 중':'포트 수신 완료 · 준비 중':conversation.nextAction==='develop'?'개발 승인 대기':r.state==='review'?'회신 검토 대기':'포트와 대화 중',next:conversation.error||'이 Slack 스레드에 답하면 배정된 포트의 같은 대화로 이어집니다.'};
   const preparing=JSON.parse(r.analysis_json||'{}').preparation;
   if(preparing&&preparing.stage!=='ready'&&['recommended','created','queued','running'].includes(r.state))return {step:0,label:r.state==='running'?'제품 확인 중':r.state==='queued'?'시작 준비 중':'제품 확인 대기',next:'현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.'};
   if(r.state==='security_review'&&(guidance||preparing?.stage==='reading'))return {step:0,label:'제품 확인 대기',next:'현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.'};
