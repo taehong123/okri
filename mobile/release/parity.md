@@ -1,5 +1,15 @@
 # Native parity ledger
 
+## 2026-10-27 · Direct assigned-port conversations
+
+- Slack/backend and local runner only: API intake assigns and transports without
+  server-side AI analysis. The assigned runner owns a persistent Codex conversation
+  and workspace. Only the active linked assignee may send operator comments.
+- Operator comments are captured before webhook acknowledgement; running turns
+  receive updates through steering, with durable turn-boundary fallback.
+- No native UI, mobile v1, authentication semantics or database schema change.
+
+
 ## 2026-10-26 · Windows ticket snapshot Git progress
 
 - Local runner 0.4.3 drains Git warning output and bounds local Git subprocesses

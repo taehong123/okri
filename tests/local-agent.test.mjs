@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { parseArgs, sanitizedCodexEnvironment, validateBaseUrl,verifyTicketGuidance,CodexAppServer,createCurrentTicketSnapshot,cleanupTicketSnapshot } from "../public/local-agent/okri-local-agent.mjs";
+import { parseArgs, sanitizedCodexEnvironment, validateBaseUrl,verifyTicketGuidance,CodexAppServer,createCurrentTicketSnapshot,cleanupTicketSnapshot,ticketConversationDirectory,prepareTicketConversationWorkspace } from "../public/local-agent/okri-local-agent.mjs";
 import {execFileSync} from 'node:child_process';
 import {mkdtemp,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
@@ -29,6 +29,9 @@ test('product inspection uses the latest approved remote commit and preserves a 
   await writeFile(join(author,'sales.ts'),'group by ordered_at');run(author,'add','.');run(author,'commit','-qm','current source');run(author,'push');await writeFile(join(stale,'sales.ts'),'preserve unrelated local edits');
   const before=run(stale,'status','--porcelain'),snapshot=await createCurrentTicketSnapshot(stale);t.after(()=>cleanupTicketSnapshot(snapshot.directory));
   assert.equal(await readFile(join(snapshot.directory,'sales.ts'),'utf8'),'group by ordered_at');assert.equal(snapshot.revision,run(author,'rev-parse','HEAD').trim());assert.equal(await readFile(join(stale,'sales.ts'),'utf8'),'preserve unrelated local edits');assert.equal(run(stale,'status','--porcelain'),before);
+  const conversation={scope:'a'.repeat(64),id:'same-issue'},work=await prepareTicketConversationWorkspace(conversation,stale,join(root,'port-data'));
+  await writeFile(join(work.directory,'sales.ts'),'retain the approved in-progress implementation');await writeFile(join(author,'sales.ts'),'a newer remote product revision');run(author,'add','.');run(author,'commit','-qm','new upstream source');run(author,'push');
+  const resumed=await prepareTicketConversationWorkspace(conversation,stale,join(root,'port-data'));assert.equal(resumed.directory,work.directory);assert.equal(resumed.retainedChanges,true);assert.equal(await readFile(join(resumed.directory,'sales.ts'),'utf8'),'retain the approved in-progress implementation');assert.notEqual(resumed.latestRevision,resumed.revision);
 });
 
 test('read-only guidance uses the read permission profile and validates quotes against real local files',async t=>{
@@ -42,6 +45,26 @@ test('read-only guidance uses the read permission profile and validates quotes a
   const result=server.run('guidance:1','Inspect actual product','gpt-6.1-sol',{readOnly:true});
   await new Promise(resolve=>setImmediate(resolve));server.receiveNotification({method:'item/completed',params:{turnId:'turn-1',item:{type:'agentMessage',text:'verified'}}});server.receiveNotification({method:'turn/completed',params:{turn:{id:'turn-1',status:'completed'}}});assert.equal(await result,'verified');
   assert.equal(calls[0].params.permissions,'okri_ticket_review');assert.equal(calls[0].params.config['permissions.okri_ticket_review.filesystem'][directory],'read');assert.equal(calls[1].params.permissions,'okri_ticket_review');
+});
+
+test('a port saves and resumes the same Codex conversation after the executor restarts',async t=>{
+  const directory=await mkdtemp(join(tmpdir(),'okri-port-conversation-test-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+  const first=new CodexAppServer(directory,{stateDirectory:directory}),calls=[];
+  const stub=server=>{server.request=async(method,params)=>{calls.push({method,params});return method==='turn/start'?{turn:{id:'turn-1'}}:{thread:{id:params.threadId||'thread-1'}};};};
+  const finish=async(server,pending)=>{for(let i=0;i<100&&!server.activeTurn;i++)await new Promise(resolve=>setTimeout(resolve,2));assert.ok(server.activeTurn);server.receiveNotification({method:'item/completed',params:{turnId:'turn-1',item:{type:'agentMessage',text:'첫 답변을 기억합니다.'}}});server.receiveNotification({method:'turn/completed',params:{turn:{id:'turn-1',status:'completed'}}});return pending;};
+  await first.loadConversationState();stub(first);await finish(first,first.run('task:one','첫 문의','gpt-6.1-sol',{readOnly:true}));
+  assert.equal(calls[0].method,'thread/start');assert.equal(calls[0].params.ephemeral,false);
+  const second=new CodexAppServer(directory,{stateDirectory:directory});await second.loadConversationState();stub(second);await finish(second,second.run('task:one','추가 설명','gpt-6.1-sol',{readOnly:true}));
+  assert.equal(calls[2].method,'thread/resume');assert.equal(calls[2].params.threadId,'thread-1');assert.equal(calls[3].params.threadId,'thread-1');assert.equal(calls[3].params.permissions,'okri_ticket_review');
+  const record=await readFile(join(directory,'okri-threads.json'),'utf8');assert.doesNotMatch(record,/첫 문의|추가 설명/);
+  assert.notEqual(ticketConversationDirectory({scope:'a'.repeat(64),id:'one'},directory),ticketConversationDirectory({scope:'b'.repeat(64),id:'one'},directory));
+  assert.throws(()=>ticketConversationDirectory({scope:'../outside',id:'one'},directory));
+});
+
+test('an active port receives a new operator message through turn steering without creating another thread',async()=>{
+  const server=new CodexAppServer('/workspace'),calls=[];server.activeTurn={threadId:'same-thread',turnId:'same-turn'};server.request=async(method,params)=>{calls.push({method,params});return {};};
+  assert.equal(await server.steer('추가 조건은 기존 계산식 유지입니다.'),true);assert.equal(calls[0].method,'turn/steer');assert.equal(calls[0].params.threadId,'same-thread');assert.equal(calls[0].params.expectedTurnId,'same-turn');assert.match(calls[0].params.input[0].text,/기존 계산식/);
+  server.activeTurn=null;assert.equal(await server.steer('늦게 도착한 댓글'),false);
 });
 
 test("runner only accepts HTTPS outside localhost", () => {

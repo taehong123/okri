@@ -1,3 +1,4 @@
+import {waitUntil} from 'cloudflare:workers';
 import {
   authorizeLocalAgentDevice,
   localAgentErrorResponse,
@@ -23,6 +24,7 @@ export async function POST(request: Request) {
     });
     const {ticketProblemChanges}=await import('@/lib/ticket-automation');
     const problemChanges=payload.status==='running'&&typeof payload.id==='string'?await ticketProblemChanges(payload.id,payload.appliedProblemChangeIds):[];
+    if(['completed','failed'].includes(String(payload.status)))waitUntil(import('@/lib/ticket-automation').then(async m=>{await m.syncTicketJobs();await m.deliverTicketOutbox();}).catch(()=>undefined));
     return Response.json({ job,problemChanges }, { headers: { "Cache-Control": "no-store" } });
   } catch (error) {
     return localAgentErrorResponse(error);

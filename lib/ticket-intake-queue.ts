@@ -1,6 +1,6 @@
 import {env} from 'cloudflare:workers';
 import {getSlackConnection,type RequestAuthorization,canManageTeam} from '@/lib/pace-data';
-import {slackApi,slackTokenForConnection} from '@/lib/slack-daily';
+import {slackApi,slackTokenForConnection,dailyMemberBySlack} from '@/lib/slack-daily';
 import {analyzeTicketEvent,handleTicketThreadReply,deliverTicketOutbox,type TicketIntakeEvent,type TicketAutomationConfig} from '@/lib/ticket-automation';
 import {redactTicketText,assessTicketText} from '@/lib/ticket-policy';
 const now=()=>new Date().toISOString();
@@ -39,8 +39,10 @@ async function notifyAnalysisPaused(owner:string,code:string,retryAt:string){
 /** This write finishes BEFORE Slack receives 200. No AI or remote read is required here. */
 export async function captureTicketManagementReply(connection:Connection,event:TicketIntakeEvent){
   if(!event.threadTs||event.user===connection.botUserId||event.isRelay)return null;
-  const r=await one<{id:string}>(`SELECT r.id FROM ticket_automation_requests r JOIN ticket_automation_outbox o ON o.request_id=r.id AND o.owner_id=r.owner_id JOIN ticket_automation_settings s ON s.owner_id=r.owner_id AND s.enabled=1 WHERE r.owner_id=? AND r.team_id=? AND o.channel_id=? AND o.channel_id=json_extract(s.config_json,'$.destination') AND o.message_ts=? AND o.kind IN ('source','recommendation') AND o.state='sent' LIMIT 1`,connection.ownerId,connection.teamId,event.channel,event.threadTs);
+  const r=await one<{id:string;member_id:string|null}>(`SELECT r.id,r.member_id FROM ticket_automation_requests r JOIN ticket_automation_outbox o ON o.request_id=r.id AND o.owner_id=r.owner_id JOIN ticket_automation_settings s ON s.owner_id=r.owner_id AND s.enabled=1 WHERE r.owner_id=? AND r.team_id=? AND o.channel_id=? AND o.channel_id=json_extract(s.config_json,'$.destination') AND o.message_ts=? AND o.kind IN ('source','recommendation') AND o.state='sent' LIMIT 1`,connection.ownerId,connection.teamId,event.channel,event.threadTs);
   if(!r)return null;
+  const linked=await dailyMemberBySlack(connection.teamId,event.user);
+  if(!linked||linked.authorization.ownerId!==connection.ownerId||!r.member_id||linked.memberId!==r.member_id)return null;
   const digest=await hash(JSON.stringify({channel:event.channel,ts:event.ts,user:event.user,text:event.text})),id=await hash(`operator_reply:${connection.ownerId}:${event.channel}:${event.ts}:${digest}`),time=now();
   await run(`INSERT OR IGNORE INTO ticket_intake_messages(id,owner_id,team_id,channel_id,root_ts,message_ts,user_id,event_json,digest,next_attempt_at,received_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,id,connection.ownerId,connection.teamId,event.channel,event.threadTs,event.ts,event.user,JSON.stringify({...event,text:safe(event.text),securityBlocked:assessTicketText(event.text).risk==='blocked',operatorReply:true,ticketRequestId:r.id}),digest,time,time,time);
   return id;

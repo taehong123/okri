@@ -34,7 +34,8 @@ function fixture(t, options={}) {
   db.prepare("INSERT INTO ticket_development_products(id,owner_id,name,specification,repositories_json,updated_at) VALUES('prod1','w1','Product','Reviewed product requirements',?,?)").run(JSON.stringify([{id:'repo1',name:'Web',remote:'https://github.com/example/product'}]),new Date().toISOString());
   db.prepare("INSERT INTO local_agent_devices VALUES('d1','w1','u1',NULL,?,'Computer')").run(new Date().toISOString());
   db.exec(`INSERT INTO ticket_execution_ports(id,owner_id,member_id,device_id,name,channel_ids_json,product_id,repository_id,verified_remote) VALUES('p1','w1','m1','d1','Operator 01','["C1"]','prod1','repo1','https://github.com/example/product'); INSERT INTO slack_member_links VALUES('w1','m1','T1','U1');`);
-  const config={sourceFirst:options.sourceFirst??false,destination:"CMGMT",prefix:"customer-",actorUserId:"u1",notificationsAuthorized:options.notifications??false,channels:[{id:"C1",name:"customer-one",enabled:true,autoApprove:options.auto?"low_risk":"manual",memberId:"m1",portId:"p1",productId:'prod1',repositoryId:'repo1'}]};
+  const config={portConversation:options.portConversation??false,sourceFirst:options.sourceFirst??false,destination:"CMGMT",prefix:"customer-",actorUserId:"u1",notificationsAuthorized:options.notifications??false,channels:[{id:"C1",name:"customer-one",enabled:true,autoApprove:options.auto?"low_risk":"manual",memberId:"m1",portId:"p1",productId:'prod1',repositoryId:'repo1'}]};
+  if(options.portConversation){config.defaultModel='gpt-6.1-sol';db.exec(`UPDATE ticket_execution_ports SET models_json='["gpt-6.1-sol"]'`);}
   db.prepare("INSERT INTO ticket_automation_settings VALUES('w1','T1',?,1,?)").run(JSON.stringify(config),new Date().toISOString());
   const statement=(sql,args=[])=>({bind:(...values)=>statement(sql,values),first:async()=>db.prepare(sql).get(...args)??null,all:async()=>({results:db.prepare(sql).all(...args)}),run:async()=>({meta:{changes:Number(db.prepare(sql).run(...args).changes)}}),_run:()=>({meta:{changes:Number(db.prepare(sql).run(...args).changes)}})});
   const d1={prepare:statement,batch:async commands=>{db.exec("BEGIN");try{const results=commands.map((c,i)=>{if(options.failAfter===i)throw new Error('simulated database interruption');return c._run();});db.exec("COMMIT");return results;}catch(e){db.exec("ROLLBACK");throw e;}}};
@@ -54,6 +55,31 @@ function fixture(t, options={}) {
   const editor=compile(editorSource,{'@/lib/ticket-workflow':workflow,"cloudflare:workers":{env:{DB:d1}},"@/lib/pace-data":{getSlackConnection:async owner=>owner==='w1'?connection:null},"@/lib/slack-daily":{dailyMemberBySlack:async(team,user)=>team==='T1'&&user==='U1'?{authorization:a,memberId:'m1'}:null,slackTokenForConnection:async()=>'mock',slackApi:async(_token,method,body)=>{writes.push({method,body});return{ok:true};}},"@/lib/ticket-automation":service,"@/lib/ticket-recommendation":recommendation,"@/lib/ticket-policy":policy});
   return{db,d1,service,editor,intake,current,change,writes,config,connection,contexts,setMessages:value=>{messages=value;}};
 }
+test('port-first intake performs no server AI analysis and sends original evidence to its assigned port',async t=>{
+  const f=fixture(t,{portConversation:true});await f.intake();const r=f.current(),job=f.db.prepare('SELECT * FROM local_agent_jobs').get(),context=JSON.parse(job.context_json);
+  assert.equal(f.contexts.length,0);assert.equal(r.port_id,'p1');assert.equal(r.member_id,'m1');assert.equal(r.state,'queued');assert.equal(context.conversation.id,r.id);assert.equal(context.readOnly,true);assert.equal(context.preparation,false);assert.match(context.sourceEvidence[0].text,/버튼 문구 오타/);assert.match(job.instruction,/ongoing product engineer/);
+  assert.equal(await f.service.validateTicketJobPickup(job.id,true,true),false,'an old runner cannot claim a persistent conversation');
+  assert.equal(await f.service.validateTicketJobPickup(job.id,true,true,true),true);
+});
+
+test('port replies remain direct discussion and the next operator message returns to the same conversation',async t=>{
+  const f=fixture(t,{portConversation:true,notifications:true});await f.intake();await f.service.deliverTicketOutbox();const original=f.current(),context=JSON.parse(f.db.prepare('SELECT context_json FROM local_agent_jobs').get().context_json);
+  await startSecurityReview(f);
+  const reply='현재 코드에서 이 계산은 배송완료일을 사용합니다. 접수일로 바꾸되 기존 금액 계산식은 유지하는 범위를 추천합니다.';
+  f.db.prepare("UPDATE local_agent_jobs SET status='completed',result_text=? WHERE id=?").run('OKRI_PORT:'+JSON.stringify({reply,title:'접수일 기준 검토',category:'improvement',nextAction:'discuss',evidence:[]}),original.job_id);await f.service.syncTicketJobs();
+  assert.equal(f.current().state,'waiting_answer');assert.equal(JSON.parse(f.current().analysis_json).portConversation.reply,reply);assert.equal(f.current().notice,'');
+  const root=f.db.prepare("SELECT message_ts FROM ticket_automation_outbox WHERE kind='source'").get().message_ts;
+  await f.service.handleTicketThreadReply('T1',{channel:'CMGMT',threadTs:root,ts:'200.001',user:'U1',text:'기존 금액은 유지하고 날짜 기준만 표로 설명해 주세요.'});
+  assert.equal(f.current().state,'queued');assert.equal(f.current().port_id,original.port_id);const next=JSON.parse(f.db.prepare('SELECT context_json FROM local_agent_jobs WHERE id=?').get(f.current().job_id).context_json);assert.deepEqual(next.conversation,context.conversation);assert.match(next.answer,/표로 설명/);assert.equal(f.contexts.length,0);
+  await f.service.handleTicketThreadReply('T1',{channel:'CMGMT',threadTs:root,ts:'200.001',user:'U1',text:'기존 금액은 유지하고 날짜 기준만 표로 설명해 주세요.'});assert.equal(f.db.prepare('SELECT count(*) n FROM local_agent_jobs').get().n,2,'Slack delivery retries do not create another turn');
+});
+
+test('ordinary append-only customer follow-ups do not become a false source-tampering block',async t=>{
+  const f=fixture(t,{portConversation:true});await f.intake();const job=f.current().job_id;
+  f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'버튼 문구 오타 수정해 주세요.'},{ts:'123.001',user:'UCUSTOMER',text:'확인 버튼입니다.'}]);assert.equal(await f.service.validateTicketJobPickup(job,true,true,true),true);
+  f.setMessages([{ts:'123.000',user:'UCUSTOMER',text:'다른 문제로 원문을 바꿉니다.'}]);assert.equal(await f.service.validateTicketJobPickup(job,true,true,true),false);
+});
+
 test('a waiting-answer card has unique Slack action IDs and keeps its current answer action',async t=>{
   const f=fixture(t,{notifications:true});await f.intake();
   f.db.prepare("UPDATE ticket_automation_requests SET state='waiting_answer',question='Which date should sales use?',revision=revision+1").run();
