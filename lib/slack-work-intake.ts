@@ -441,6 +441,9 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
           mimeType: file.mimetype || "",
           size: Number(file.size) || 0,
           urlPrivateDownload: file.url_private_download || file.url_private || "",
+          sourceUser: message.user,
+          sourceTs: message.ts,
+          sourceBotId: message.bot_id,
         });
       }
       const text = threadText(message.text ?? "");
@@ -482,6 +485,9 @@ export async function readSlackThread(token: string, event: SlackWorkIntakeEvent
             mimeType: file.mimetype || "",
             size: Number(file.size) || 0,
             urlPrivateDownload: file.url_private_download || file.url_private || "",
+            sourceUser: root.user,
+            sourceTs: root.ts,
+            sourceBotId: root.bot_id,
           });
         }
         const text = threadText(root.text ?? "");
