@@ -12,6 +12,9 @@ export type SlackImageFile = {
   mimeType: string;
   size: number;
   urlPrivateDownload: string;
+  sourceUser?: string;
+  sourceTs?: string;
+  sourceBotId?: string;
 };
 
 export type ProjectImage = {

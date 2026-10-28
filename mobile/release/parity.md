@@ -422,3 +422,8 @@ Server and Slack only: trusted active workspace/Slack member links distinguish t
 ## 2026-10-24 Clear ticket approvals
 
 Web/server and Slack only: direct reviewed development and caution approvals, recorded actor and exact validation scope, immediate processing feedback, current/next-step presentation and automatic web progress updates. Assignee/port changes and advanced controls remain available through disclosures. Customer replies still require exact-text approval; hard security blocks and snapshot/source/device/model boundaries remain enforced. Native v1 schemas and enum meanings are unchanged; native UI parity remains deferred, with no binary or OTA release claimed.
+
+
+## 2026-10-28 Ticket port snapshot and image inputs
+
+Server, Slack and local runner only: Windows long paths remain readable across persistent conversation turns; safe Git stage/reason diagnostics replace opaque failures. Source screenshots are verified and delivered transiently only to the leased authorized runner, with explicit omission metadata and image capability negotiation. System auto-assignment is audited separately from human action. Native v1 fields, authentication and business semantics are unchanged; native UI parity remains deferred, with no binary, OTA or device verification claimed.

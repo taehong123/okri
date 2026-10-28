@@ -343,7 +343,7 @@ User request:
 ${job.instruction}`;
 }
 
-export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization, isolatedTicketSupport = false,readOnlyTicketSupport=false,portConversationSupport=false) {
+export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorization, isolatedTicketSupport = false,readOnlyTicketSupport=false,portConversationSupport=false,portImageSupport=false) {
   const now = new Date();
   const nowIso = now.toISOString();
   await env.DB.prepare(`UPDATE local_agent_jobs SET status = 'queued', lease_id = NULL, lease_expires_at = NULL,
@@ -360,7 +360,7 @@ export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorizati
     )).orderBy(sql`COALESCE((SELECT CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 ELSE 3 END FROM ticket_automation_requests WHERE job_id=${localAgentJobs.id}),2)`,asc(localAgentJobs.createdAt)).limit(100);
   for (const job of candidates) {
     const { validateTicketJobPickup,ticketRuntimeContext,recordTicketPortReceived } = await import("@/lib/ticket-automation");
-    if (!await validateTicketJobPickup(job.id, isolatedTicketSupport,readOnlyTicketSupport,portConversationSupport)) continue;
+    if (!await validateTicketJobPickup(job.id, isolatedTicketSupport,readOnlyTicketSupport,portConversationSupport,portImageSupport)) continue;
     const context={...JSON.parse(job.contextJson||'{}'),...(await ticketRuntimeContext(job.id)||{})};
     job.contextJson=JSON.stringify(context);
     const leaseId = crypto.randomUUID();
@@ -371,7 +371,8 @@ export async function claimNextLocalAgentJob(device: LocalAgentDeviceAuthorizati
       .bind(leaseId, leaseExpiresAt, nowIso, nowIso, job.contextJson,job.id, device.id,device.id,device.workspaceId,device.userId,nowIso).run();
     if ((result.meta.changes ?? 0) === 1) {
         if(context.conversation)await recordTicketPortReceived(job.id);
-        return { ...serializeJob({ ...job, status: "running", leaseId, leaseExpiresAt, startedAt: job.startedAt ?? nowIso, updatedAt: nowIso }), leaseId, conversation:context.conversation,executionPolicy:context.executionPolicy,readOnly:context.readOnly===true,preparation:context.preparation===true,basisDigest:context.basisDigest,model:context.model??null,repository:context.repository,dependencies:context.dependencies,priority:context.priority,prompt:buildLocalAgentPrompt(job) };
+        const imageEvidence=context.conversation&&portImageSupport?await (await import('@/lib/ticket-automation')).ticketImagesForJob(device,job.id,leaseId):undefined;
+        return { ...serializeJob({ ...job, status: "running", leaseId, leaseExpiresAt, startedAt: job.startedAt ?? nowIso, updatedAt: nowIso }), leaseId, imageEvidence,conversation:context.conversation,executionPolicy:context.executionPolicy,readOnly:context.readOnly===true,preparation:context.preparation===true,basisDigest:context.basisDigest,model:context.model??null,repository:context.repository,dependencies:context.dependencies,priority:context.priority,prompt:buildLocalAgentPrompt(job) };
     }
   }
   return null;

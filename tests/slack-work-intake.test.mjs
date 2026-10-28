@@ -62,6 +62,7 @@ test("Slack thread reading keeps image-only messages as bounded Project attachme
   assert.equal(thread.imageFiles.length, 1);
   assert.deepEqual(thread.imageFiles[0], {
     id: "file-a", name: "error.png", mimeType: "image/png", size: 321, urlPrivateDownload: "https://files.slack.test/a",
+    sourceUser: "member-a", sourceTs: undefined, sourceBotId: undefined,
   });
   assert.equal(thread.messages.length, 1);
   assert.equal(thread.messages[0].text, "이 화면 오류 해결");

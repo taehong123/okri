@@ -3,12 +3,23 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { parseArgs, sanitizedCodexEnvironment, validateBaseUrl,verifyTicketGuidance,CodexAppServer,createCurrentTicketSnapshot,cleanupTicketSnapshot,ticketConversationDirectory,prepareTicketConversationWorkspace } from "../public/local-agent/okri-local-agent.mjs";
 import {execFileSync} from 'node:child_process';
-import {mkdtemp,writeFile,rm} from 'node:fs/promises';
+import {mkdtemp,mkdir,rename,writeFile,rm} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {pathToFileURL} from 'node:url';
 
 const read = (path) => readFile(new URL(path, import.meta.url), "utf8");
+
+test('a persistent conversation remains readable after moving its Git objects beyond Windows MAX_PATH',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'okri-long-path-'));t.after(()=>rm(root,{recursive:true,force:true,maxRetries:5}));
+  const short=join(root,'short'),parent=join(root,'port-'+'a'.repeat(64),'workspaces');await mkdir(short);await mkdir(parent,{recursive:true});
+  const run=(cwd,...args)=>execFileSync('git',['-c','core.hooksPath=','-c','core.longpaths=true',...args],{cwd,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+  run(short,'init','--quiet');await writeFile(join(short,'product.ts'),'export const optionName = "whole name";');run(short,'add','.');run(short,'-c','user.name=Test','-c','user.email=test@invalid','commit','-qm','baseline');
+  const long=join(parent,'conversation-'+'b'.repeat(90));await rename(short,long);assert.ok(join(long,'.git','objects','aa','b'.repeat(38)).length>260);
+  const {runTicketSnapshotGit}=await import('../public/local-agent/okri-local-agent.mjs');
+  assert.equal(await runTicketSnapshotGit(long,['status','--porcelain']),'');assert.match(await runTicketSnapshotGit(long,['rev-parse','HEAD']),/^[a-f0-9]{40}\s*$/);
+  await assert.rejects(runTicketSnapshotGit(long,['rev-parse','secret-not-an-existing-revision']),error=>!error.message.includes('secret-not-an-existing-revision')&&/Git rev-parse: failed/.test(error.message));
+});
 
 test('snapshot Git drains large warning output instead of hanging before product inspection',async t=>{
   const root=await mkdtemp(join(tmpdir(),'okri-git-warnings-test-'));t.after(()=>rm(root,{recursive:true,force:true}));
@@ -65,6 +76,17 @@ test('an active port receives a new operator message through turn steering witho
   const server=new CodexAppServer('/workspace'),calls=[];server.activeTurn={threadId:'same-thread',turnId:'same-turn'};server.request=async(method,params)=>{calls.push({method,params});return {};};
   assert.equal(await server.steer('추가 조건은 기존 계산식 유지입니다.'),true);assert.equal(calls[0].method,'turn/steer');assert.equal(calls[0].params.threadId,'same-thread');assert.equal(calls[0].params.expectedTurnId,'same-turn');assert.match(calls[0].params.input[0].text,/기존 계산식/);
   server.activeTurn=null;assert.equal(await server.steer('늦게 도착한 댓글'),false);
+});
+
+test('screenshots use verified inline image inputs rather than token-bearing Slack URLs',async()=>{
+  const {ticketImageInputs}=await import('../public/local-agent/okri-local-agent.mjs');
+  const png={mimeType:'image/png',data:'iVBORw0KGgo='};
+  assert.deepEqual(ticketImageInputs([png]),[{type:'image',url:'data:image/png;base64,iVBORw0KGgo='}]);
+  for(const images of [[{...png,data:'https://files.slack.com/private?token=secret'}],[{mimeType:'image/svg+xml',data:png.data}],[{...png,data:Buffer.from('not png').toString('base64')}],Array(4).fill(png)])assert.throws(()=>ticketImageInputs(images));
+  const server=new CodexAppServer('/workspace'),calls=[];server.request=async(method,params)=>{calls.push({method,params});return method==='turn/start'?{turn:{id:'image-turn'}}:{thread:{id:'image-thread'}};};
+  const pending=server.run('image-test','Inspect this screen','gpt-6.1-sol',{readOnly:true,images:[png]});for(let i=0;i<50&&!server.activeTurn;i++)await new Promise(resolve=>setTimeout(resolve,2));
+  assert.equal(calls[1].params.input[1].type,'image');assert.match(calls[1].params.input[1].url,/^data:image\/png;base64,/);assert.equal(calls[1].params.permissions,'okri_ticket_review');
+  server.receiveNotification({method:'item/completed',params:{turnId:'image-turn',item:{type:'agentMessage',text:'screen identified'}}});server.receiveNotification({method:'turn/completed',params:{turn:{id:'image-turn',status:'completed'}}});assert.equal(await pending,'screen identified');
 });
 
 test("runner only accepts HTTPS outside localhost", () => {
