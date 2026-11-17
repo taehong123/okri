@@ -195,6 +195,14 @@ test("restoring measured KR history records only the final restored total, prese
   assert.equal(f.sqlite.prepare("SELECT active FROM kr_data_connections WHERE id='dormant'").get().active,0);
   f.sqlite.close();
 });
+test("backup restoration preserves measurement order when timestamps tie",async()=>{
+  const f=fixture(),at="2026-11-01T09:00:00.000Z",insert=f.sqlite.prepare("INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at) VALUES(?,'w','kr','projects','completed',?,0,100,'건',?)");
+  for(const [id,value] of [["z-first",20],["a-second",28],["m-last",30]])insert.run(id,value,at);
+  const backup=await backups.createWorkspaceBackup(f.ctx,"w","manual","u");
+  await backups.restoreWorkspaceBackup(f.ctx,"w",backup.id,"u");
+  assert.deepEqual(f.sqlite.prepare("SELECT current_value FROM kr_metric_observations WHERE observed_at=? ORDER BY observed_at,rowid").all(at).map(r=>r.current_value),[20,28,30]);
+  f.sqlite.close();
+});
 
 test("concurrent business writes during backup abort restore without losing those writes", async () => {
   const f = fixture();

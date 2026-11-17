@@ -88,7 +88,7 @@ async function capture(ctx: Context, ownerId: string): Promise<Snapshot> {
   const results = await ctx.DB.batch<Row>([
     ctx.DB.prepare("SELECT id FROM workspaces WHERE id = ? AND scheduled_deletion_at IS NULL").bind(ownerId),
     ctx.DB.prepare("SELECT revision FROM workspace_backup_state WHERE owner_id = ?").bind(ownerId),
-    ...BACKUP_TABLES.map((table) => ctx.DB.prepare(`SELECT ${BACKUP_COLUMNS[table].join(",")} FROM ${table} WHERE owner_id = ? ORDER BY id LIMIT ?`).bind(ownerId, MAX_ROWS + 1)),
+    ...BACKUP_TABLES.map((table) => ctx.DB.prepare(`SELECT ${BACKUP_COLUMNS[table].join(",")} FROM ${table} WHERE owner_id = ? ORDER BY ${table === "kr_metric_observations" ? "observed_at,rowid" : "id"} LIMIT ?`).bind(ownerId, MAX_ROWS + 1)),
   ]);
   if (!results[0].results.length) throw new BackupError("workspace_unavailable", "사용할 수 없는 워크스페이스입니다.", 404);
   const tables = Object.fromEntries(BACKUP_TABLES.map((table, index) => [table, results[index + 2].results]));
