@@ -263,6 +263,8 @@ export async function installApiMocks(page: Page, options: { failItemCreate?: bo
       krDataConnections = krDataConnections.map((entry) => entry.id === payload.id ? updated : entry);
       return json(route, { connection: updated, progress, value: progress });
     }
+    if (url.pathname === "/api/kr-data-sources") return json(route, { metrics: [] });
+    if (url.pathname === "/api/kr-metric-history") return json(route, { observations: [], limited: false });
     if (url.pathname === "/api/project-contributions") {
       const projectId = url.searchParams.get("projectId");
       return json(route, projectId ? { projectId, projectStatus: "in_progress", keyResult: { id: "kr-1", title: "활성 사용자 20% 증가", progress: 45 }, contribution: null, metric: null, apiConnected: false } : { metrics: [] });

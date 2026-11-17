@@ -7,7 +7,7 @@ async function mocks(page:Page,options:{configured?:boolean;viewer?:boolean;api?
   const items=structuredClone(bootstrap.items),kr=items.find(i=>i.id==="kr-1")!,project=items.find(i=>i.id==="project-1")!;
   kr.progress=20;
   let c=options.configured===false?null:{id:"contribution",defaultValue:10,actualValue:null as number|null,applied:false,enabled:true,version:1};
-  let m=options.configured===false?null:{id:"metric",keyResultId:"kr-1",title:kr.title,startingValue:20,currentValue:20,targetValue:100,unit:"건",progress:20,version:1};
+  let m=options.configured===false?null:{id:"metric",keyResultId:"kr-1",title:kr.title,startingValue:20,currentValue:20,targetValue:100,unit:"건",progress:20,version:1,active:true};
   let requestId="",fail=false,lose=false,projectWrites=0,taskWrites=0,reads=0;
   const state=()=>({projectId:project.id,projectStatus:project.status,keyResult:{id:kr.id,title:kr.title,progress:kr.progress},contribution:c,metric:m,apiConnected:options.api??false});
   await page.route("**/api/**",async route=>{
@@ -21,7 +21,7 @@ async function mocks(page:Page,options:{configured?:boolean;viewer?:boolean;api?
       if(request.method()==="PUT"){
         const body=request.postDataJSON();
         c={id:"contribution",defaultValue:body.defaultValue,actualValue:null,applied:false,enabled:true,version:(c?.version??0)+1};
-        m??={id:"metric",keyResultId:kr.id,title:kr.title,startingValue:body.startingValue,currentValue:body.startingValue,targetValue:body.targetValue,unit:body.unit,progress:20,version:1};
+        m??={id:"metric",keyResultId:kr.id,title:kr.title,startingValue:body.startingValue,currentValue:body.startingValue,targetValue:body.targetValue,unit:body.unit,progress:20,version:1,active:true};
       }
       return json(route,url.searchParams.has("projectId")?state():{metrics:m?[m]:[]});
     }
@@ -92,14 +92,12 @@ test("failure retains actual input and a lost response can be retried without a 
   await dialog.getByRole("button",{name:"성과 반영하고 완료",exact:true}).click();
   await expect(dialog).not.toBeVisible();expect(mock.state().metric!.currentValue).toBe(28);
 });
-test("Project contribution and KR numeric basis can be configured without counting Tasks",async({page})=>{
-  const mock=await mocks(page,{configured:false});await page.goto(detail);
-  await page.getByRole("button",{name:"기여량 설정",exact:true}).click();
+test("Project detail edits its default while the KR basis is configured in Data",async({page})=>{
+  const mock=await mocks(page);await page.goto(detail);
+  await page.getByRole("button",{name:"기여량 변경",exact:true}).click();
   const dialog=page.getByRole("dialog",{name:"성과 쌓기 설정",exact:true});
   await dialog.getByLabel("기본 기여량",{exact:true}).fill("15.5");
-  await dialog.getByLabel("KR 현재값",{exact:true}).fill("50");
-  await dialog.getByLabel("KR 목표값",{exact:true}).fill("200");
-  await dialog.getByLabel("단위",{exact:true}).fill("명");
+  await expect(dialog.getByLabel("KR 현재값",{exact:true})).toHaveCount(0);
   await dialog.getByRole("button",{name:"저장",exact:true}).click();
   await expect(dialog).not.toBeVisible();expect(mock.state().contribution!.defaultValue).toBe(15.5);
   await expect(page.getByText("목표 Task 수",{exact:true})).toHaveCount(0);
@@ -113,7 +111,7 @@ test("Viewer cannot configure or complete Projects; API-linked KR cannot use a s
 test("KR data view displays Project contributions and target values",async({page})=>{
   await mocks(page);await page.goto("/?view=data");
   const card=page.locator(".kr-data-card").filter({has:page.getByRole("heading",{name:"활성 사용자 20% 증가",exact:true})});
-  await expect(card).toContainText("성과 쌓기");await expect(card).toContainText("20건");await expect(card).toContainText("100건");
+  await expect(card).toContainText("Project 성과 합산");await expect(card).toContainText("20건");await expect(card).toContainText("100건");
 });
 test("completion review preserves fonts, contrast, keyboard and larger text from 320px to 4K",async({page},info)=>{
   test.skip(info.project.name!=="desktop-chromium");test.setTimeout(150_000);

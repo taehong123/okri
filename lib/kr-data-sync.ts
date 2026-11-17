@@ -37,6 +37,7 @@ export async function syncDueKrDataConnectionsWithDb(d1: D1Database) {
   try {
     const result = await d1.prepare(`SELECT connection.* FROM kr_data_connections AS connection
       WHERE connection.active = 1 AND connection.next_sync_at IS NOT NULL AND connection.next_sync_at <= ?
+        AND NOT EXISTS(SELECT 1 FROM kr_project_metrics m WHERE m.owner_id=connection.owner_id AND m.kr_item_id=connection.kr_item_id AND m.active=1)
         AND EXISTS (
           SELECT 1 FROM items AS target
           WHERE target.owner_id = connection.owner_id
@@ -65,25 +66,37 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
       WHERE owner_id = ? AND id = ? AND kind IN ('key_result', 'project') AND archived_at IS NULL LIMIT 1`)
       .bind(connection.owner_id, connection.kr_item_id).first<{ id: string; kind: DataTargetKind }>();
     if (!target) throw new Error("Data target not found");
+    const projectSource=await d1.prepare("SELECT id FROM kr_project_metrics WHERE owner_id=? AND kr_item_id=? AND active=1").bind(connection.owner_id,connection.kr_item_id).first();
+    if(projectSource)throw new Error("KR uses Project contributions");
     const payload = await fetchMetric(connection.endpoint_url);
     const value = numericValueAtPath(payload, connection.value_path);
     const progress = metricProgress(value, connection.baseline_value, connection.target_value);
+    const guard=crypto.randomUUID();
     await d1.batch([
+      d1.prepare(`INSERT INTO project_contribution_guards(id,valid) SELECT ?,CASE WHEN
+        EXISTS(SELECT 1 FROM kr_data_connections WHERE owner_id=? AND id=? AND updated_at=?
+          AND endpoint_url=? AND value_path=? AND baseline_value=? AND target_value=? AND unit=? AND cadence=? AND active=?)
+        AND EXISTS(SELECT 1 FROM items WHERE owner_id=? AND id=? AND kind=? AND archived_at IS NULL)
+        AND NOT EXISTS(SELECT 1 FROM kr_project_metrics WHERE owner_id=? AND kr_item_id=? AND active=1)
+        THEN 1 ELSE 0 END`).bind(guard,connection.owner_id,connection.id,connection.updated_at,connection.endpoint_url,connection.value_path,connection.baseline_value,connection.target_value,connection.unit,connection.cadence,connection.active,connection.owner_id,target.id,target.kind,connection.owner_id,target.id),
       d1.prepare(`UPDATE kr_data_connections SET
         last_value = ?, last_sync_status = 'success', last_error = '', last_synced_at = ?, next_sync_at = ?, updated_at = ?
         WHERE owner_id = ? AND id = ?`).bind(value, timestamp, nextSyncAt, timestamp, connection.owner_id, connection.id),
       d1.prepare("UPDATE items SET progress = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND kind = ?")
         .bind(progress, timestamp, connection.owner_id, target.id, target.kind),
+      d1.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at)
+        SELECT ?,?,?, 'api','synced',?,?,?,?,? WHERE ?='key_result'`).bind(crypto.randomUUID(),connection.owner_id,target.id,value,connection.baseline_value,connection.target_value,connection.unit,timestamp,target.kind),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
         VALUES (?, ?, ?, 'data_synced', 'api', ?, ?)`)
         .bind(crypto.randomUUID(), connection.owner_id, target.id, JSON.stringify({ connectionId: connection.id, targetKind: target.kind, value, progress }), timestamp),
+      d1.prepare("DELETE FROM project_contribution_guards WHERE id=?").bind(guard),
     ]);
     return { connection: serialize({ ...connection, last_value: value, last_sync_status: "success", last_error: "", last_synced_at: timestamp, next_sync_at: nextSyncAt, updated_at: timestamp }, target.kind), progress, value };
   } catch (error) {
     const message = errorMessage(error);
     await d1.prepare(`UPDATE kr_data_connections SET
       last_sync_status = 'error', last_error = ?, next_sync_at = ?, updated_at = ?
-      WHERE owner_id = ? AND id = ?`).bind(message, nextSyncAt, timestamp, connection.owner_id, connection.id).run();
+      WHERE owner_id = ? AND id = ? AND updated_at=? AND NOT EXISTS(SELECT 1 FROM kr_project_metrics m WHERE m.owner_id=kr_data_connections.owner_id AND m.kr_item_id=kr_data_connections.kr_item_id AND m.active=1)`).bind(message, nextSyncAt, timestamp, connection.owner_id, connection.id,connection.updated_at).run();
     throw new Error(message);
   }
 }
@@ -112,7 +125,7 @@ function serialize(row: ConnectionRow, targetKind: DataTargetKind) {
   };
 }
 
-function normalizeEndpoint(value: string) {
+export function normalizeEndpoint(value: string) {
   let url: URL;
   try { url = new URL(value.trim()); } catch { throw new Error("A valid API URL is required"); }
   if (url.protocol !== "https:") throw new Error("Data APIs must use HTTPS");

@@ -6,6 +6,7 @@ import { OverlayDialog, useAppConfirm } from "./overlay-dialog";
 import { t , apiError , getClientLocale , messageValue } from "@/lib/client-language";
 
 import type { ProjectMetric } from "@/lib/project-contributions";
+import KrSourceSettingsDialog from "./kr-source-settings";
 
 type DataTargetKind = "key_result" | "project";
 export type DataItem = {
@@ -63,7 +64,7 @@ function markConnectionCacheFresh(key: string) {
   connectionCacheTimestamps.set(key, Date.now());
 }
 
-export default function DataView({ cacheKey, items, cycles, readOnly, onProgressChange, onNotice, onOpenProject }: {
+export default function DataView({ cacheKey, items, cycles, readOnly, onProgressChange, onNotice }: {
   cacheKey: string;
   items: DataItem[];
   cycles: DataCycle[];
@@ -86,6 +87,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
   const [initialDraft, setInitialDraft] = useState<Draft>(() => emptyDraft("key_result", ""));
   const [saving, setSaving] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const [configuringKr,setConfiguringKr] = useState<string|null>(null);
 
   useEffect(() => {
     let active = true;
@@ -132,7 +134,8 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
   const availableForKind = (kind: DataTargetKind) => targets.filter((item) => item.kind === kind && !byItem.has(item.id) && !metricByItem.has(item.id));
 
   function openCreate(item?: DataItem & { kind: DataTargetKind }) {
-    const targetKind = item?.kind ?? (targetFilter === "project" ? "project" : availableForKind("key_result").length ? "key_result" : "project");
+    if(item?.kind==="key_result"){setConfiguringKr(item.id);return;}
+    const targetKind = "project";
     const itemId = item?.id ?? availableForKind(targetKind)[0]?.id ?? "";
     const nextDraft = emptyDraft(targetKind, itemId);
     setDraft(nextDraft);
@@ -141,6 +144,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
   }
 
   function openEdit(connection: DataConnection) {
+    if(connection.targetKind==="key_result"){setConfiguringKr(connection.itemId);return;}
     const nextDraft = {
       targetKind: connection.targetKind,
       itemId: connection.itemId,
@@ -156,11 +160,6 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     setDraft(nextDraft);
     setInitialDraft(nextDraft);
     setEditing(connection);
-  }
-
-  function changeTargetKind(targetKind: DataTargetKind) {
-    if (editing !== "new") return;
-    setDraft((current) => ({ ...current, targetKind, itemId: availableForKind(targetKind)[0]?.id ?? "" }));
   }
 
   const draftDirty = Object.keys(draft).some((key) => draft[key as keyof Draft] !== initialDraft[key as keyof Draft]);
@@ -231,7 +230,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
   if (loadError || metricsError) return <DataState icon={AlertTriangle} title={t("데이터 연결을 불러오지 못했습니다")} action={t("다시 시도")} onAction={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
   if (connections === null || projectMetrics === null) return <DataState icon={LoaderCircle} title={t("데이터 연결을 불러오는 중입니다")} loading />;
 
-  const hasAvailableTarget = targets.some((item) => !byItem.has(item.id) && !metricByItem.has(item.id));
+  const hasAvailableTarget = targets.some((item) => item.kind==="project" && !byItem.has(item.id));
 
   return <>
     <section className="kr-data-toolbar">
@@ -240,7 +239,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
       </div>
       <label><Search size={14} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={t("항목 또는 데이터 소스 검색")} aria-label={t("데이터 검색")} /></label>
       <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} aria-label={t("데이터 정렬")}><option value="structure">{t("구조 순서")}</option><option value="cadence">{t("갱신 주기")}</option><option value="status">{t("연결 상태")}</option></select>
-      <button className="primary-action" disabled={readOnly || !hasAvailableTarget} onClick={() => openCreate()}><Plus size={14} />{t("API 연결")}</button>
+      <button className="primary-action" disabled={readOnly || !hasAvailableTarget} onClick={() => openCreate()}><Plus size={14} />{t("Project API 연결")}</button>
     </section>
     <aside className="kr-data-guide"><Database size={17} /><div><b>{t("KR과 Project를 각각 수치로 측정합니다")}</b><p>{t("API 데이터 또는 Project 완료 시 확인한 성과로 KR 수치를 관리합니다.")}</p></div></aside>
     {!targets.length ? <DataState icon={Database} title={t("연결할 KR 또는 Project가 없습니다")} detail={t("먼저 OKR이나 Project 화면에서 항목을 만들어 주세요.")} /> : (
@@ -253,13 +252,14 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
             <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{item.progress}%</strong></header>
             {metric ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${metric.progress}%` }} /></span><b>{formatDataMetric(metric.currentValue, metric.unit)} <em>/ {formatDataMetric(metric.targetValue, metric.unit)}</em></b></div>
-              <p>{t("성과 쌓기")} · {t("Project 완료 시 확인한 실제 기여량을 누적합니다.")}</p>
+              <p>{t("Project 성과 합산")} · {t("Project 완료 시 확인한 실제 기여량을 누적합니다.")}</p>
+              <footer><button disabled={readOnly} onClick={()=>setConfiguringKr(item.id)}><Pencil size={13}/>{t("KR 데이터 설정")}</button></footer>
             </> : connection ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${item.progress}%` }} /></span><b>{formatDataMetric(connection.lastValue, connection.unit)} <em>/ {formatDataMetric(connection.targetValue, connection.unit)}</em></b></div>
               <dl><div><dt>{t("데이터 소스")}</dt><dd><Link2 size={12} />{connection.name}</dd></div><div><dt>{t("값 경로")}</dt><dd>{connection.valuePath || t("응답 자체")}</dd></div><div><dt>{t("갱신")}</dt><dd>{cadenceLabels[connection.cadence]}{connection.active ? t(" · 활성") : t(" · 일시정지")}</dd></div><div><dt>{t("최근 결과")}</dt><dd className={`sync-${connection.lastSyncStatus}`}>{dataSyncStatusLabel(connection)}</dd></div></dl>
               {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{t("최근 데이터 갱신에 실패했습니다. 연결 설정을 확인해 주세요.")}</p>}
               <footer><button disabled={readOnly || syncingId === connection.id} onClick={() => void sync(connection)}><RefreshCw className={syncingId === connection.id ? "spinning" : ""} size={13} />{syncingId === connection.id ? t("업데이트 중") : t("지금 업데이트")}</button><button disabled={readOnly} onClick={() => openEdit(connection)}><Pencil size={13} />{t("설정")}</button><button className="danger" disabled={readOnly} onClick={() => void remove(connection)} aria-label={t("{value1} 데이터 연결 삭제", { value1: messageValue(item.title) })}><Trash2 size={13} /></button></footer>
-            </> : <div className="kr-data-unconnected"><p>{t("아직 연결된 데이터가 없습니다.")}</p><button disabled={readOnly} onClick={() => openCreate(item)}><Plus size={13} />{t("이 {kind}에 API 연결", { kind: targetLabels[item.kind] })}</button>{item.kind === "project" && onOpenProject && <button disabled={readOnly} onClick={() => onOpenProject(item.id)}>{t("성과 쌓기 설정")}</button>}</div>}
+            </> : <div className="kr-data-unconnected"><p>{t("아직 연결된 데이터가 없습니다.")}</p><button disabled={readOnly} onClick={() => openCreate(item)}><Plus size={13} />{item.kind==="key_result"?t("KR 데이터 설정"):t("이 {kind}에 API 연결", { kind: targetLabels[item.kind] })}</button>{item.kind === "project" && <button disabled={readOnly||!itemById.get(itemById.get(item.parentId??"")?.parentId??"")} onClick={() => {const kr=itemById.get(itemById.get(item.parentId??"")?.parentId??"");if(kr?.kind==="key_result")setConfiguringKr(kr.id);}}>{t("기본 기여량 설정")}</button>}</div>}
           </article>;
         })}
         {!filtered.length && <DataState icon={Search} title={t("검색 결과가 없습니다")} />}
@@ -267,7 +267,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     )}
     {editing && <OverlayDialog title={editing === "new" ? t("API 연결") : t("API 설정")} variant="drawer" dirty={draftDirty} onRequestClose={() => setEditing(null)}>
       {(requestClose) => <aside className="property-panel kr-data-panel"><header><div><h2>{editing === "new" ? t("API 연결") : t("API 설정")}</h2><p>{t("인증이 필요 없는 HTTPS JSON GET API를 연결할 수 있습니다.")}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("API 설정 닫기")}><X size={17} /></button></header><form className="property-form" onSubmit={(event) => void save(event)}>
-        <div className="view-tabs data-target-type-tabs" role="tablist" aria-label={t("연결 대상 유형")}>{([["key_result", "KR"], ["project", t("Project")]] as const).map(([value, label]) => <button type="button" role="tab" aria-selected={draft.targetKind === value} disabled={editing !== "new" || (!availableForKind(value).length && draft.targetKind !== value)} className={draft.targetKind === value ? "active" : ""} onClick={() => changeTargetKind(value)} key={value}>{label}</button>)}</div>
+        <p>{t("Project API 연결")}</p>
         <label><span>{t("연결 대상")}</span><select value={draft.itemId} disabled={editing !== "new"} onChange={(event) => setDraft({ ...draft, itemId: event.target.value })} aria-label={t("연결할 항목")}><option value="">{t("선택")}</option>{targets.filter((item) => item.kind === draft.targetKind && (!byItem.has(item.id) && !metricByItem.has(item.id) || item.id === draft.itemId)).map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
         <label><span>{t("데이터 소스 이름")}</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={t("예: Stripe 월간 매출")} /></label>
         <label><span>API URL</span><input type="url" value={draft.endpointUrl} onChange={(event) => setDraft({ ...draft, endpointUrl: event.target.value })} placeholder="https://api.example.com/metrics/revenue" /></label>
@@ -279,6 +279,9 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
         <button disabled={saving || !draft.itemId || !draft.name.trim() || !draft.endpointUrl.trim() || !draft.targetValue || draft.baselineValue === draft.targetValue}>{saving ? t("저장 중") : <><Check size={14} />{t("연결 저장")}</>}</button>
       </form></aside>}
     </OverlayDialog>}
+    {configuringKr&&<KrSourceSettingsDialog keyResultId={configuringKr} onClose={()=>setConfiguringKr(null)} onSaved={next=>{
+      onProgressChange(next.keyResult.id,next.keyResult.progress);connectionMemoryCache.delete(cacheKey);connectionCacheTimestamps.delete(cacheKey);setLoadAttempt(v=>v+1);onNotice(t("KR 데이터 설정을 저장했습니다."));
+    }}/>}
   </>;
 }
 

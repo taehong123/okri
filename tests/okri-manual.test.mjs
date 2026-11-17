@@ -28,6 +28,11 @@ test("manual index, topic lookup and bounded search distinguish missing topics",
   }
   assert.ok(JSON.stringify(manual.readOkriManual({ topic: "all" })).length < 24_000);
 });
+test("KR manual explains source selection, independent Project APIs and factual measured history",()=>{
+  const data=manual.readOkriManual({topic:"data"}).articles[0].content;
+  for(const text of ["데이터 탭","Project 성과 합산","Project별 기본 기여량","같은 수치라도","실패한 호출","시계열","최근 100개","과거 값은 자동 생성·추정하지","Viewer"])assert.ok(data.includes(text),text);
+  assert.match(manual.readOkriManual({topic:"projects"}).articles[0].content,/실제 8이면 KR에 8/);
+});
 
 test("usage questions do not swallow live data requests or actions with manual titles", () => {
   for (const query of ["매뉴얼", "!도움말", "프로젝트 생성 방법 알려줘", "Task를 어떻게 만들어?", "OKRI 기능 모두 알려줘", "느낌표 명령어가 뭐야?", "How do I create a Project?", "What is a Routine?", "Canvas 사용 방법", "OKR과 프로젝트 차이"]) {

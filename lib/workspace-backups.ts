@@ -10,8 +10,9 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   ticket_client_products: "id,owner_id,ticket_id,product_id,created_at",
   property_definitions: "id,owner_id,name,type,options,default_value,system_key,active,sort_order,created_at,updated_at",
   project_templates: "id,owner_id,name,description,content,plain_text,created_by_user_id,created_at,updated_at",
-  kr_project_metrics: "id,owner_id,kr_item_id,starting_value,target_value,unit,version,created_at,updated_at",
+  kr_project_metrics: "id,owner_id,kr_item_id,starting_value,target_value,unit,active,version,created_at,updated_at",
   project_contributions: "id,owner_id,project_id,kr_item_id,default_value,actual_value,applied,enabled,last_request_id,version,created_at,updated_at",
+  kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at",
   project_task_goals: "id,owner_id,project_id,target_count,version,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
   item_property_values: "id,owner_id,item_id,property_id,value,legacy_value,updated_at",
@@ -175,7 +176,9 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   // Older snapshots predate optional completion-goal settings.
   data.tables.project_task_goals ??= [];
   data.tables.kr_project_metrics ??= [];
+  if(Array.isArray(data.tables.kr_project_metrics)) data.tables.kr_project_metrics=data.tables.kr_project_metrics.map(row=>({active:1,...row}));
   data.tables.project_contributions ??= [];
+  data.tables.kr_metric_observations ??= [];
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");
@@ -312,6 +315,10 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
       // Live rows win over detached copies; never rewind external messages or sync state.
       for (const row of liveRows) if (validIds.has(row[link.ref])) rowsById.set(row.id, row);
       const rows = [...rowsById.values()];
+      if(link.table==="kr_data_connections"){
+        const projectKrs=new Set(tables.kr_project_metrics.filter(r=>r.active===1).map(r=>r.kr_item_id));
+        for(const row of rows)if(projectKrs.has(row.kr_item_id)){row.active=0;row.next_sync_at=null;row.updated_at=new Date().toISOString();}
+      }
       if (link.table === "slack_automation_deliveries") {
         for (let offset = 0; offset < rows.length; offset += 100) {
           const chunk = JSON.stringify(rows.slice(offset, offset + 100).map((r) => ({ id: r.id, item_id: r.item_id })));
@@ -323,6 +330,12 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
       const attachedIds = JSON.stringify([...rows.map((r) => r.id), ...discardedIds]);
       statements.push(ctx.DB.prepare("DELETE FROM workspace_restore_links WHERE owner_id = ? AND table_name = ? AND row_id IN (SELECT value FROM json_each(?))").bind(ownerId, link.table, attachedIds));
     }
+    // Record the final restored total once, after the complete hierarchy is back.
+    // Observation triggers skip intermediate restore states inside the guarded batch.
+    statements.push(ctx.DB.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at)
+      SELECT lower(hex(randomblob(16))),m.owner_id,m.kr_item_id,'projects','restored',
+        m.starting_value+coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=m.owner_id AND c.kr_item_id=m.kr_item_id AND c.applied=1),0),
+        0,m.target_value,m.unit,? FROM kr_project_metrics m WHERE m.owner_id=? AND m.active=1`).bind(new Date().toISOString(),ownerId));
     statements.push(ctx.DB.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload)
       VALUES (?, ?, ?, 'workspace_restored', 'web', ?)`)
       .bind(crypto.randomUUID(), ownerId, ownerId, JSON.stringify({ backupId: id, rollbackBackupId: rollback.id, restoredBy: userId, removedAssignments })));

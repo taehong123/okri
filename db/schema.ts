@@ -1909,12 +1909,29 @@ export const krProjectMetrics = sqliteTable("kr_project_metrics", {
   startingValue: real("starting_value").notNull(),
   targetValue: real("target_value").notNull(),
   unit: text("unit").notNull().default("%"),
+  active: integer("active", { mode: "boolean" }).notNull().default(true),
   version: integer("version").notNull().default(1),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 }, table => [
   uniqueIndex("idx_kr_project_metrics_owner_kr").on(table.ownerId, table.keyResultId),
   check("kr_project_metric_values", sql`${table.startingValue} BETWEEN 0 AND 1000000000000 AND ${table.targetValue} > 0 AND ${table.targetValue} <= 1000000000000`),
+]);
+
+export const krMetricObservations = sqliteTable("kr_metric_observations", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  keyResultId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  source: text("source").notNull(),
+  eventKind: text("event_kind").notNull(),
+  currentValue: real("current_value"),
+  baselineValue: real("baseline_value").notNull().default(0),
+  targetValue: real("target_value").notNull(),
+  unit: text("unit").notNull().default(""),
+  observedAt: text("observed_at").notNull(),
+}, table => [
+  index("idx_kr_metric_observations_owner_kr_time").on(table.ownerId, table.keyResultId, table.observedAt),
+  check("kr_metric_observation_source", sql`${table.source} IN ('api','projects')`),
 ]);
 
 export const projectContributions = sqliteTable("project_contributions", {
