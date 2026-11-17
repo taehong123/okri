@@ -3050,6 +3050,7 @@ const messages = {
 "최신 설정 불러오기": "Load latest settings",
 "데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.": "In Data, set the parent KR's source to Project contributions.",
 
+"이 기간의 최근 측정 10,000개를 표시합니다. 나머지 이력도 보관됩니다.": "Showing the latest 10,000 measurements in this period. Additional history is retained.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

@@ -53,6 +53,12 @@ test("historical lines stop at a measurement source change",async({page})=>{
   await expect(page.locator(".kr-history-point")).toHaveCount(5);
   await expect(page.locator(".kr-history-line")).toHaveCount(2);
 });
+test("a bounded history response explicitly reports that additional measurements are retained",async({page})=>{
+  await installApiMocks(page);const mock=await installKrDataMocks(page,{configured:true});
+  await page.route("**/api/kr-metric-history?**",route=>route.fulfill({status:200,contentType:"application/json",body:JSON.stringify({observations:mock.observations,limited:true})}));
+  await page.goto("/?view=okr");
+  await expect(page.locator(".kr-history").getByRole("status")).toContainText("나머지 이력도 보관됩니다.");
+});
 test("KR source form and graph preserve fonts, keyboard, contrast and long-title layouts from 320px to 4K",async({page},info)=>{
   test.skip(info.project.name!=="desktop-chromium");test.setTimeout(180_000);
   await installApiMocks(page);await installKrDataMocks(page,{configured:true,long:true});await page.goto("/?view=okr");

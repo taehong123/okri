@@ -243,3 +243,15 @@ test("KR source and history routes enforce identity, Viewer reads and workspace 
   assert.equal((await routes[0].PUT(put())).status,403);
   auth={ownerId:"other",userId:"user",role:"owner"};for(const [i,name] of ["kr-data-sources","kr-metric-history"].entries())assert.equal((await routes[i].GET(request(name))).status,404);
 });
+test("annual history includes every hourly sample, and higher-volume reads are bounded without deleting records",async t=>{
+  const f=fixture(t),now=new Date(),insert=f.sql.prepare("INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at) VALUES(?,'w','kr','api','synced',20,0,100,'건',?)");
+  f.sql.exec("BEGIN");
+  for(let i=0;i<8760;i++)insert.run("hour-"+i,new Date(now.getTime()-i*3_600_000).toISOString());
+  f.sql.exec("COMMIT");
+  const annual=await history.readKrHistory(f.db,"w","kr",365,now);
+  assert.equal(annual.observations.length,8760);assert.equal(annual.limited,false);
+  f.sql.exec("BEGIN");for(let i=0;i<2000;i++)insert.run("manual-"+i,now.toISOString());f.sql.exec("COMMIT");
+  const bounded=await history.readKrHistory(f.db,"w","kr",365,now);
+  assert.equal(bounded.observations.length,10000);assert.equal(bounded.limited,true);
+  assert.equal(f.sql.prepare("SELECT count(*) n FROM kr_metric_observations").get().n,10760);
+});

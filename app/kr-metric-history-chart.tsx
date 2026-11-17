@@ -48,6 +48,7 @@ export default function KrMetricHistoryChart({keyResultId,unit,refreshToken}:{ke
       <div className="kr-history-dates"><span>{day(new Date(start).toISOString())}</span><span>{day(new Date(end).toISOString())}</span></div>
       <figcaption>{points.length===1?t("첫 측정값입니다. 다음 기록부터 변화를 볼 수 있습니다."):t("날짜별 마지막 측정값입니다. 측정 방식·단위·목표가 바뀌면 선을 구분합니다.")}</figcaption>
     </figure>}
+    {data?.limited&&<p className="kr-metric-state" role="status">{t("이 기간의 최근 측정 10,000개를 표시합니다. 나머지 이력도 보관됩니다.")}</p>}
     {data&&observations.length>0&&<details className="kr-history-records"><summary>{t("측정 기록 보기")} · {observations.length}{data.limited?" +":""}</summary><div className="kr-history-table"><table><caption>{t("KR 측정 이력")}</caption><thead><tr><th scope="col">{t("측정 시각")}</th><th scope="col">{t("현재값")}</th><th scope="col">{t("목표값")}</th><th scope="col">{t("측정 방식")}</th></tr></thead><tbody>{observations.slice(-100).reverse().map(p=><tr key={p.id}><td>{new Date(p.observedAt).toLocaleString(getClientLocale())}</td><td>{p.currentValue===null?t("설정 변경"):formatContribution(p.currentValue,p.unit)}</td><td>{formatContribution(p.targetValue,p.unit)}</td><td>{p.source==="api"?t("API 연동"):t("Project 성과 합산")}</td></tr>)}</tbody></table></div><p>{t("최근 측정 기록 100개까지 표시합니다. 과거 값은 자동으로 추정하지 않습니다.")}</p></details>}
   </div>;
 }

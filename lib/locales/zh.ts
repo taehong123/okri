@@ -3050,5 +3050,6 @@ const messages = {
 "Project 기본값과 기존 성과는 보존됩니다. API 방식에서는 새 Project 성과를 합산하지 않습니다.": "保留 Project 默认值及已有成果。API 方式下不汇总新的 Project 成果。",
 "최신 설정 불러오기": "加载最新设置",
 "데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.": "请在数据选项卡中将上级 KR 的测量方式设为 Project 成果汇总。",
+"이 기간의 최근 측정 10,000개를 표시합니다. 나머지 이력도 보관됩니다.": "显示此期间最近的 10,000 次测量。其余历史记录也会保留。",
 } satisfies Catalog;
 export default messages;
