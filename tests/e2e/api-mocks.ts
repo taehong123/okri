@@ -279,6 +279,7 @@ export async function installApiMocks(page: Page, options: { withRoutine?: boole
       krDataConnections = krDataConnections.map((entry) => entry.id === payload.id ? updated : entry);
       return json(route, { connection: updated, progress, value: progress });
     }
+    if (url.pathname === "/api/project-task-goals") return json(route, { goal: null, apiConnected: false, progress: 40 });
     if (url.pathname === "/api/data-connections") {
       if (request.method() === "GET") {
         const itemId = url.searchParams.get("itemId");

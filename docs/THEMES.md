@@ -43,7 +43,9 @@ and [sidebar navigation](https://www.notion.com/help/guides/navigating-with-the-
   typography/field/focus roles. One conversational question is shown at a time:
   personal/team, workspace, Objective, KR, optional Initiative, review, feature guide.
 - Examples are placeholders, never persisted sample data. The final review
-  contains the user's answers; edits clear its confirmation checkbox.
+  contains the user's answers; its explicit save button confirms and saves them
+  without an additional checkbox. The feature-guide shortcut has its own spacing
+  after the fields and stays visually secondary to the next/save action.
 - `app/first-run-setup.css` is a focused form surface, not another theme.
   No viewport font scaling, decorative banner, nested cards or new palette.
 - Close saves and pauses while preserving the underlying business route.

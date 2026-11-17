@@ -477,6 +477,13 @@
       "when": 1792645200000,
       "tag": "0075_ticket_problem_followups",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "6",
+      "when": 1794897260972,
+      "tag": "0076_project_task_goals",
+      "breakpoints": true
     }
   ]
 }

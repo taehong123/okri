@@ -53,13 +53,13 @@ test("personal setup explains and saves a whole OKR only after final confirmatio
   await dialog.getByRole("textbox").fill("주 2회 회화 연습하기");
   await dialog.getByRole("button", { name: "다음", exact: true }).click();
   expect(mock.saves()).toBe(0);
-  await dialog.getByRole("checkbox").check();
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
   await dialog.getByRole("button", { name: "이전", exact: true }).click();
   await dialog.getByRole("textbox").fill("주 3회 회화 연습하기");
   await dialog.getByRole("button", { name: "다음", exact: true }).click();
-  await expect(dialog.getByRole("checkbox")).not.toBeChecked();
-  await dialog.getByRole("checkbox").check();
-  await dialog.getByRole("button", { name: "확인한 OKR 저장", exact: true }).click();
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "확인하고 저장", exact: true }).click();
   await expect(dialog.getByRole("heading", { name: "첫 OKR을 저장했어요" })).toBeVisible();
   expect(mock.saves()).toBe(1);
   expect(mock.creates()).toBe(0);
@@ -83,6 +83,8 @@ test("team setup saves progress, pauses, and resumes without another workspace",
   await dialog.getByLabel("팀 이름", { exact: true }).fill("고객경험팀");
   await dialog.getByRole("button", { name: "워크스페이스 만들고 계속" }).click();
   await dialog.getByLabel("이루고 싶은 목표", { exact: true }).fill("고객이 다시 찾는 서비스를 만들기");
+  const spacing = await dialog.locator(".setup-explore").evaluate(el => el.getBoundingClientRect().top - el.previousElementSibling!.getBoundingClientRect().bottom);
+  expect(spacing).toBeGreaterThanOrEqual(24);
   await dialog.getByRole("button", { name: "저장하고 나중에 계속", exact: true }).click();
   await expect(dialog).not.toBeVisible();
   await page.reload();
@@ -102,8 +104,8 @@ test("lost save response is recovered from saved state, never by duplicating the
   mock.loseResponse();
   await page.goto("/");
   const dialog = page.getByRole("dialog", { name: "처음 시작하기", exact: true });
-  await dialog.getByRole("checkbox").check();
-  await dialog.getByRole("button", { name: "확인한 OKR 저장" }).click();
+  await expect(dialog.getByRole("checkbox")).toHaveCount(0);
+  await dialog.getByRole("button", { name: "확인하고 저장" }).click();
   await expect(dialog.getByRole("button", { name: "저장 상태 확인" })).toBeVisible();
   await dialog.getByRole("button", { name: "저장 상태 확인" }).click();
   await expect(dialog.getByRole("heading", { name: "첫 OKR을 저장했어요" })).toBeVisible();

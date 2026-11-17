@@ -10,6 +10,7 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   ticket_client_products: "id,owner_id,ticket_id,product_id,created_at",
   property_definitions: "id,owner_id,name,type,options,default_value,system_key,active,sort_order,created_at,updated_at",
   project_templates: "id,owner_id,name,description,content,plain_text,created_by_user_id,created_at,updated_at",
+  project_task_goals: "id,owner_id,project_id,target_count,version,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
   item_property_values: "id,owner_id,item_id,property_id,value,legacy_value,updated_at",
   project_hidden_properties: "id,owner_id,project_id,property_id,created_at",
@@ -169,6 +170,8 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   }
   if (Array.isArray(data.tables.daily_scrums)) data.tables.daily_scrums = data.tables.daily_scrums.map((row) => ({ work_selection_json: "[]", yesterday_work_selection_json: "[]", calendar_events_json: "[]", work_status: "office", ...row }));
   if (Array.isArray(data.tables.daily_submissions)) data.tables.daily_submissions = data.tables.daily_submissions.map((row) => ({ work_snapshot_json: "[]", yesterday_work_snapshot_json: "[]", calendar_events_json: "[]", request_id: null, work_status: "office", ...row }));
+  // Older snapshots predate optional completion-goal settings.
+  data.tables.project_task_goals ??= [];
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");
@@ -252,6 +255,8 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
     tables.daily_scrum_task_selections = tables.daily_scrum_task_selections.filter((r) => scrumIds.has(r.daily_scrum_id));
     for (const row of tables.daily_submissions) if (!members.has(row.member_id)) row.member_id = null;
     for (const row of tables.routines) if (!members.has(row.assignee_member_id)) row.assignee_member_id = null;
+    const goalVersions = new Map(current.tables.project_task_goals.map((r) => [r.project_id, Number(r.version)]));
+    for (const row of tables.project_task_goals) row.version = Math.max(Number(row.version), goalVersions.get(row.project_id) ?? 0) + 1;
     const versions = new Map(current.tables.project_documents.map((r) => [r.project_id, Number(r.version)]));
     for (const row of tables.project_documents) row.version = Math.max(Number(row.version), versions.get(row.project_id) ?? 0) + 1;
     const routineDocumentVersions = new Map(current.tables.routines.map((r) => [r.id, Number(r.document_version)]));

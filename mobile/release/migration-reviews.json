@@ -75,5 +75,12 @@
     "rollbackPlan": "Pause ticket automation on code rollback and retain all additive tables and pending deltas for a forward fix.",
     "dataPreservation": "Only new tables and indexes are added. Existing requests, jobs, sources, native records and customer data are preserved.",
     "reviewedBy": "Codex ticket correlation and installed-client compatibility review, 2026-10-22"
+  },
+  "drizzle/0076_project_task_goals.sql": {
+    "sha256": "a483ef636bebf95e0f45d2feab7509256b5684491125ecea81082974a6fd40e6",
+    "v1Compatibility": "Only Projects explicitly opting into completion goals derive progress from their direct, active completed Tasks. No native payload, enums, authentication or Task completion semantics change. Existing Projects keep their current behavior.",
+    "rollbackPlan": "Retain the additive goal table and triggers on application rollback. Existing web and native Task writes remain valid; restore a forward-compatible web configuration screen before changing goals.",
+    "dataPreservation": "No existing data is backfilled, dropped, or renamed. Triggers affect only opted-in Projects, recalculate counts without duplicate accumulation, and reject conflicting API connections. Completion undo, reparenting, soft-delete and restore are covered by real SQLite tests.",
+    "reviewedBy": "Codex source-bound SQLite and installed mobile v1 compatibility review, 2026-11-17"
   }
 }

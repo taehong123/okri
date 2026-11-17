@@ -19,6 +19,8 @@ const dailyCalendarMigration = await readFile(new URL("../drizzle/0072_daily_cal
 const workDocumentsMigration = await readFile(new URL("../drizzle/0057_work_documents.sql", import.meta.url), "utf8");
 const clientDirectoryMigration = await readFile(new URL("../drizzle/0065_client_directory.sql", import.meta.url), "utf8");
 
+const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
+
 function fixture() {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("PRAGMA foreign_keys=ON");
@@ -38,6 +40,7 @@ function fixture() {
   sqlite.exec(dailyCalendarMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(workDocumentsMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(clientDirectoryMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec((awaitTaskGoalMigration).replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -97,6 +100,7 @@ function fixture() {
     INSERT INTO workspace_groups (id,workspace_id,name,handle) VALUES ('group','w','Team group','team');
     INSERT INTO workspace_group_members (id,group_id,member_id) VALUES ('group-member','group','member');
     INSERT INTO activity_log (id,owner_id,item_id,action) VALUES ('old-log','w','project','created');`);
+  sqlite.exec("INSERT INTO project_task_goals(id,owner_id,project_id,target_count) VALUES ('project','w','project',10)");
   return { sqlite, ctx, objects, bucket };
 }
 
@@ -285,13 +289,14 @@ test("leases prevent duplicate work and invalid payloads are rejected", async ()
 test("revision triggers cover all restored tables and business changes do not alter other workspace revisions", () => {
   const f = fixture();
   const clientColumns = {
+    project_task_goals: ["id", "owner_id", "project_id", "target_count", "version", "created_at", "updated_at"],
     clients: ["id", "owner_id", "external_customer_id", "name", "phone", "email", "source_type", "source_name", "source_url", "source_updated_at", "created_by_user_id", "created_at", "updated_at"],
     client_products: ["id", "owner_id", "client_id", "external_product_id", "name", "source", "created_at", "updated_at"],
     ticket_clients: ["id", "owner_id", "ticket_id", "client_id", "created_at", "updated_at"],
     ticket_client_products: ["id", "owner_id", "ticket_id", "product_id", "created_at"],
   };
   for (const name of backups.BACKUP_TABLES) {
-    assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=?").get(name).n, 3, name);
+    assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=? AND name LIKE 'backup_revision_%'").get(name).n, 3, name);
     const expectedColumns = clientColumns[name] ? [...clientColumns[name]] : Object.keys(currentSchema.tables[name].columns);
     if (name === "daily_scrums") {
       expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");

@@ -11,7 +11,7 @@
 .first-run-setup fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
 .first-run-setup button { min-height: 2.75rem; display: inline-flex; justify-content: center; align-items: center; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--bg-surface); border: 1px solid var(--border-control); border-radius: var(--radius-control); color: var(--text-primary); font: inherit; font-size: var(--type-label); cursor: pointer; white-space: normal; }
 .first-run-setup button:hover { background: var(--bg-hover); }
-.first-run-setup button:disabled { opacity: .55; cursor: default; }
+.first-run-setup button:disabled { background: var(--button-disabled-bg); color: var(--button-disabled-fg); border-color: var(--border-default); cursor: default; }
 .first-run-setup :is(button,input,textarea,select):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
 .first-run-setup .setup-icon { width: 2.75rem; padding: 0; border: 0; flex-shrink: 0; }
 .setup-fields, .setup-choices { display: grid; gap: var(--space-4); }
@@ -33,7 +33,9 @@
 .setup-review dt, .setup-initiative > span { display: block; font-size: var(--type-label); color: var(--text-secondary); }
 .setup-review dd { margin: var(--space-1) 0 0; font-size: var(--type-body); }
 .setup-initiative { margin-top: var(--space-3); padding-left: var(--space-4); border-left: 2px solid var(--initiative-rail); }
-.setup-confirm { display: flex; align-items: center; gap: var(--space-3); min-height: 2.75rem; font-size: var(--type-label); cursor: pointer; }
+.setup-explore { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border-default); }
+.setup-explore > button { padding-inline: 0; border-color: transparent; text-align: left; justify-content: flex-start; }
+.setup-explore + .setup-actions { margin-top: var(--space-4); }
 .setup-features { display: grid; margin-bottom: var(--space-4); }
 .setup-features > button { text-align: left; justify-content: space-between; padding: var(--space-4) 0; border: 0; border-radius: 0; border-bottom: 1px solid var(--border-default); }
 .setup-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-6); }

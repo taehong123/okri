@@ -14,7 +14,8 @@ test("native and store-feedback tables are created after the deployed 0062 migra
   db.exec(`CREATE TABLE users (id TEXT PRIMARY KEY);
     CREATE TABLE workspaces (id TEXT PRIMARY KEY);
     CREATE TABLE workspace_members (id TEXT PRIMARY KEY);
-    CREATE TABLE items (id TEXT PRIMARY KEY);
+    CREATE TABLE items (id TEXT PRIMARY KEY, owner_id TEXT, parent_id TEXT, kind TEXT, status TEXT, progress INTEGER, archived_at TEXT, updated_at TEXT);
+    CREATE TABLE kr_data_connections (id TEXT PRIMARY KEY, owner_id TEXT, kr_item_id TEXT);
     CREATE TABLE local_agent_jobs (id TEXT PRIMARY KEY);
     CREATE TABLE local_agent_devices (id TEXT PRIMARY KEY);
     CREATE TABLE local_agent_pairings (id TEXT PRIMARY KEY);

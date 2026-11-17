@@ -427,3 +427,5 @@ Web/server and Slack only: direct reviewed development and caution approvals, re
 ## 2026-10-28 Ticket port snapshot and image inputs
 
 Server, Slack and local runner only: Windows long paths remain readable across persistent conversation turns; safe Git stage/reason diagnostics replace opaque failures. Source screenshots are verified and delivered transiently only to the leased authorized runner, with explicit omission metadata and image capability negotiation. System auto-assignment is audited separately from human action. Native v1 fields, authentication and business semantics are unchanged; native UI parity remains deferred, with no binary, OTA or device verification claimed.
+
+- 2026-11-17: Project 완료 쌓기의 목표 설정과 온보딩 간격/단일 저장 버튼은 web-only입니다. 기존 native v1 Task 완료·취소는 변경 없이 작동하며, 웹에서 명시적으로 설정한 Project의 진행률은 서버에서 집계됩니다. 네이티브 목표 설정 UI는 후속 바이너리로 연기합니다. frozen fixtures 및 기존 enum/페이로드는 그대로 유지합니다.
