@@ -380,3 +380,7 @@ font-size override.
 ## Project contribution review
 
 Project contribution settings use the existing unframed progress section and shared form/dialog tokens. Completion review pre-fills the Project default, keeps an editable actual amount and a KR before/after preview, and persists only after the explicit completion button. Task completion is independent. Use one-worker mocked browser verification for defaults, actual overrides, cancellation, retry, permission, real fonts, all themes and larger text.
+
+## KR data sources and measured history
+
+The main signed-in OKR document may lead with one unframed KR metric section for the selected cycle. Use a KR selector, current/target values, semantic progress colors and a compact factual time-series chart. Do not fabricate past samples or bridge source/unit/target boundaries. Keep chart labels in HTML at shared type sizes, with an accessible measurement table. KR source selection and per-Project defaults live in the Data tab. Project API connections remain independent. Preserve source drafts on errors and require refresh after a revision conflict. Verify one-worker mocked interactions, real Pretendard fonts, all palettes, keyboard focus, 320–3840px widths and 200% text.

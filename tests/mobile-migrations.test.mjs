@@ -15,11 +15,12 @@ test("native and store-feedback tables are created after the deployed 0062 migra
     CREATE TABLE workspaces (id TEXT PRIMARY KEY);
     CREATE TABLE workspace_members (id TEXT PRIMARY KEY);
     CREATE TABLE items (id TEXT PRIMARY KEY, owner_id TEXT, parent_id TEXT, kind TEXT, status TEXT, progress INTEGER, archived_at TEXT, updated_at TEXT);
-    CREATE TABLE kr_data_connections (id TEXT PRIMARY KEY, owner_id TEXT, kr_item_id TEXT);
+    CREATE TABLE kr_data_connections (id TEXT PRIMARY KEY, owner_id TEXT, kr_item_id TEXT,active INTEGER DEFAULT 1);
     CREATE TABLE local_agent_jobs (id TEXT PRIMARY KEY);
     CREATE TABLE local_agent_devices (id TEXT PRIMARY KEY);
     CREATE TABLE local_agent_pairings (id TEXT PRIMARY KEY);
     CREATE TABLE workspace_backup_state (owner_id TEXT PRIMARY KEY,revision INTEGER NOT NULL DEFAULT 0);
+    CREATE TABLE workspace_backup_guards (id TEXT PRIMARY KEY,verified INTEGER);
     CREATE TABLE slack_connections (id TEXT PRIMARY KEY);
     CREATE TABLE daily_scrums (id TEXT PRIMARY KEY);
     CREATE TABLE daily_submissions (id TEXT PRIMARY KEY);

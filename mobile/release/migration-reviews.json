@@ -89,5 +89,19 @@
     "rollbackPlan": "Retain migration 0076 and its historical setting rows. Keep additive Project contribution tables and their accounting triggers when rolling application code back; existing clients can still complete or reopen Projects. No historical migration is edited and no customer data is deleted.",
     "dataPreservation": "DROP statements remove only the ten retired Task-count feature triggers; historical table rows and backup revision triggers remain. New per-Project accounting is transactionally guarded, deduplicated, and undone on Project reopening. Task writes have no accounting side effects. Real SQLite fixtures verify defaults, overrides, retries, scope, rollback and backup restoration.",
     "reviewedBy": "Codex source-bound product correction and native v1 compatibility review, 2026-11-17"
+  },
+  "drizzle/0078_kr_data_sources.sql": {
+    "sha256": "d254d7fbe5e7f5eeec6fed8ddf0d5f399bafe691b3caa836d82d70a2484fd754",
+    "v1Compatibility": "Additive KR source selection and observation storage preserve frozen mobile v1 payloads and Task semantics. Only explicitly selected Project mode credits Project completions; native completion uses the configured default, as before.",
+    "rollbackPlan": "Keep additive active flags, observation rows and accounting triggers on code rollback. Pause affected KR syncs before using older configuration UI; forward-fix source selection. No historical migration is modified.",
+    "dataPreservation": "Source switches retain API configuration, Project defaults and applied credits. Replaced triggers enforce exclusivity for active sources, preserve completion undo, and block stale API overwrites. Observation triggers append factual snapshots without synthesizing past values; workspace backups include history.",
+    "reviewedBy": "Codex source-bound SQLite accounting, observation and installed-client compatibility review, 2026-11-17"
+  },
+  "drizzle/0079_kr_metric_history.sql": {
+    "sha256": "f5808bda9e1d8e6774d4dfb0705100a43e113a3fc804f1e7ac8c7961f3c0f0f1",
+    "v1Compatibility": "Additive KR source selection and observation storage preserve frozen mobile v1 payloads and Task semantics. Only explicitly selected Project mode credits Project completions; native completion uses the configured default, as before.",
+    "rollbackPlan": "Keep additive active flags, observation rows and accounting triggers on code rollback. Pause affected KR syncs before using older configuration UI; forward-fix source selection. No historical migration is modified.",
+    "dataPreservation": "Source switches retain API configuration, Project defaults and applied credits. Replaced triggers enforce exclusivity for active sources, preserve completion undo, and block stale API overwrites. Observation triggers append factual snapshots without synthesizing past values; workspace backups include history.",
+    "reviewedBy": "Codex source-bound SQLite accounting, observation and installed-client compatibility review, 2026-11-17"
   }
 }

@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "@playwright/test";
 import { installApiMocks, json } from "./api-mocks";
+import { installKrDataMocks } from "./kr-data-mocks";
 
 
 test("Google 인증 이메일 사용자는 전화 인증 없이 바로 시작한다", async ({ page }) => {
@@ -730,6 +731,7 @@ test("Viewer는 OKR 파일 전체 편집을 열 수 없다", async ({ page }) =>
 
 test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({ page }) => {
   await installApiMocks(page);
+  await installKrDataMocks(page);
   await page.goto("/?view=okr");
   const objectiveSurface = page.locator(".okr-file-read-objective");
   const keyResultSurface = page.locator(".okr-file-read-kr").first();
@@ -753,17 +755,18 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   const krCard = page.locator(".kr-data-card").filter({ hasText: "활성 사용자 20% 증가" });
   const projectCard = page.locator(".kr-data-card").filter({ hasText: "모바일 사용성 개선" });
   await expect(krCard).toContainText("아직 연결된 데이터가 없습니다.");
-  await krCard.getByRole("button", { name: "이 KR에 API 연결" }).click();
-  let panel = page.getByRole("dialog", { name: "API 연결" });
+  await krCard.getByRole("button", { name: "KR 데이터 설정" }).click();
+  let panel = page.getByRole("dialog", { name: "KR 데이터 설정", exact: true });
   await page.keyboard.press("Escape");
   await expect(panel).toBeHidden();
-  await krCard.getByRole("button", { name: "이 KR에 API 연결" }).click();
-  panel = page.getByRole("dialog", { name: "API 연결" });
+  await krCard.getByRole("button", { name: "KR 데이터 설정" }).click();
+  panel = page.getByRole("dialog", { name: "KR 데이터 설정", exact: true });
+  await panel.getByRole("radio", { name: /API 연동/ }).check();
   await panel.getByLabel("데이터 소스 이름").fill("활성 사용자 API");
   await panel.getByLabel("API URL").fill("https://api.example.com/metrics/active-users");
   await panel.getByLabel("숫자 값 경로").fill("data.value");
   await panel.getByLabel("목표값").fill("1000");
-  await panel.getByRole("button", { name: "연결 저장" }).click();
+  await panel.getByRole("button", { name: "설정 저장" }).click();
   await expect(krCard).toContainText("활성 사용자 API");
   await krCard.getByRole("button", { name: "지금 업데이트" }).click();
   await expect(krCard).toContainText("60%");

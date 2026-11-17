@@ -32,7 +32,7 @@ export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
   },
   {
     label: "조회와 관리",
-    description: "기존 Project와 Task를 Slack에서 확인하고 변경합니다. 성과 쌓기를 설정한 Project는 Project 완료 시 기본 기여량을 상위 KR에 반영합니다. 기본값 설정과 실제 증가량 확인·수정은 웹 Project 상세에서 합니다. Task 완료는 수치를 바꾸지 않습니다.",
+    description: "기존 Project와 Task를 Slack에서 확인하고 변경합니다. 성과 쌓기를 설정한 Project는 Project 완료 시 기본 기여량을 상위 KR에 반영합니다. 측정 방식과 Project별 기본 기여량은 웹 데이터 탭에서 설정하고 실제 증가량은 웹 완료 화면에서 확인·수정합니다. API·성과 반영 이력은 웹 메인 KR 그래프에서 확인합니다. Task 완료는 수치를 바꾸지 않습니다.",
     entries: [
       { command: "!내업무", label: "내 업무" },
       { command: "/okri ticket [검색어] · !티켓관리", label: "Slack 티켓 운영", fields: "원문·분류·해결안 · 담당자·포트 · 승인·완료 안내 · 수집 점검" },

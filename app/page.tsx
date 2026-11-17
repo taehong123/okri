@@ -81,6 +81,7 @@ import WorkspaceBackups from "./workspace-backups";
 import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
 import { ProjectContributionProvider, ProjectContributionSettings, useProjectCompletionReview } from "./project-contributions";
+import KrMetricGraph from "./kr-metric-graph";
 import type { CompletionContributionInput } from "@/lib/project-contributions";
 import { FirstRunSetup } from "./first-run-setup";
 import { canAutoOpenSetup, type OnboardingState } from "@/lib/onboarding";
@@ -2632,6 +2633,7 @@ function WorkspaceApp() {
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
+                {!okrCreating&&selectedOkrCycle&&<KrMetricGraph key={currentWorkspace?.id??""} workspaceId={currentWorkspace?.id??""} items={activeItems.filter(item=>item.kind==="key_result"&&item.cycleId===selectedOkrCycle.id)} onOpenData={()=>navigateView("data")}/>}
                 {okrCreating || selectedOkrCycle ? <OkrFileSurface
                   focusId={searchFocusId}
                   key={`${currentWorkspace?.id ?? ""}:${okrCreating ? "new" : selectedOkrCycle?.id}:${searchNavigationId}`}

@@ -20,6 +20,8 @@ const workDocumentsMigration = await readFile(new URL("../drizzle/0057_work_docu
 const clientDirectoryMigration = await readFile(new URL("../drizzle/0065_client_directory.sql", import.meta.url), "utf8");
 
 const contributionMigration = await readFile(new URL("../drizzle/0077_project_contributions.sql", import.meta.url), "utf8");
+const sourceMigration = await readFile(new URL("../drizzle/0078_kr_data_sources.sql", import.meta.url), "utf8");
+const historyMigration = await readFile(new URL("../drizzle/0079_kr_metric_history.sql", import.meta.url), "utf8");
 const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
 
 function fixture() {
@@ -43,6 +45,8 @@ function fixture() {
   sqlite.exec(clientDirectoryMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec((awaitTaskGoalMigration).replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(contributionMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(sourceMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(historyMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -180,6 +184,25 @@ test("restore replaces all business tables atomically, preserves live links, per
   assert.equal(f.sqlite.prepare("SELECT title FROM items WHERE id='new-task'").get().title, "New task");
   f.sqlite.close();
 });
+test("restoring measured KR history records only the final restored total, preserving paused KR API configuration",async()=>{
+  const f=fixture();
+  f.sqlite.exec("UPDATE items SET status='done' WHERE id='project';INSERT INTO kr_data_connections(id,owner_id,kr_item_id,name,endpoint_url,target_value,active) VALUES('dormant','w','kr','Saved API','https://metrics.example.com',100,0)");
+  const before=f.sqlite.prepare("SELECT id FROM kr_metric_observations").all().map(r=>r.id),backup=await backups.createWorkspaceBackup(f.ctx,"w","manual","u");
+  f.sqlite.exec("UPDATE items SET status='todo' WHERE id='project'");
+  await backups.restoreWorkspaceBackup(f.ctx,"w",backup.id,"u");
+  const rows=f.sqlite.prepare("SELECT * FROM kr_metric_observations").all(),newRows=rows.filter(r=>!before.includes(r.id));
+  assert.equal(newRows.length,1);assert.equal(newRows[0].event_kind,"restored");assert.equal(newRows[0].current_value,30);
+  assert.equal(f.sqlite.prepare("SELECT active FROM kr_data_connections WHERE id='dormant'").get().active,0);
+  f.sqlite.close();
+});
+test("backup restoration preserves measurement order when timestamps tie",async()=>{
+  const f=fixture(),at="2026-11-01T09:00:00.000Z",insert=f.sqlite.prepare("INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at) VALUES(?,'w','kr','projects','completed',?,0,100,'건',?)");
+  for(const [id,value] of [["z-first",20],["a-second",28],["m-last",30]])insert.run(id,value,at);
+  const backup=await backups.createWorkspaceBackup(f.ctx,"w","manual","u");
+  await backups.restoreWorkspaceBackup(f.ctx,"w",backup.id,"u");
+  assert.deepEqual(f.sqlite.prepare("SELECT current_value FROM kr_metric_observations WHERE observed_at=? ORDER BY observed_at,rowid").all(at).map(r=>r.current_value),[20,28,30]);
+  f.sqlite.close();
+});
 
 test("concurrent business writes during backup abort restore without losing those writes", async () => {
   const f = fixture();
@@ -292,7 +315,8 @@ test("leases prevent duplicate work and invalid payloads are rejected", async ()
 test("revision triggers cover all restored tables and business changes do not alter other workspace revisions", () => {
   const f = fixture();
   const clientColumns = {
-    kr_project_metrics: ["id","owner_id","kr_item_id","starting_value","target_value","unit","version","created_at","updated_at"],
+    kr_project_metrics: ["id","owner_id","kr_item_id","starting_value","target_value","unit","active","version","created_at","updated_at"],
+    kr_metric_observations: ["id","owner_id","kr_item_id","source","event_kind","current_value","baseline_value","target_value","unit","observed_at"],
     project_contributions: ["id","owner_id","project_id","kr_item_id","default_value","actual_value","applied","enabled","last_request_id","version","created_at","updated_at"],
     project_task_goals: ["id", "owner_id", "project_id", "target_count", "version", "created_at", "updated_at"],
     clients: ["id", "owner_id", "external_customer_id", "name", "phone", "email", "source_type", "source_name", "source_url", "source_updated_at", "created_by_user_id", "created_at", "updated_at"],

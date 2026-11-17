@@ -91,10 +91,10 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
   return <div className="project-contribution">
     {loadError?<p role="alert">{t("성과 설정을 불러오지 못했습니다.")} <button className="secondary" onClick={()=>setAttempt(v=>v+1)}>{t("다시 시도")}</button></p>:!state?<span role="status">{t("데이터를 불러오는 중")}</span>:<>
       <div className="contribution-summary"><b>{t("성과 쌓기")}</b>{c?.enabled&&<span>{c.applied?t("반영한 성과 {value}",{value:formatContribution(c.actualValue??0,m?.unit??"")}):t("기본 기여량 {value}",{value:formatContribution(c.defaultValue,m?.unit??"")})}</span>}</div>
-      {!readOnly&&<button className="secondary" type="button" disabled={!state.keyResult||state.apiConnected} onClick={edit}>{c?.enabled?t("기여량 변경"):t("기여량 설정")}</button>}
+      {!readOnly&&m?.active&&<button className="secondary" type="button" disabled={!state.keyResult} onClick={edit}>{c?.enabled?t("기여량 변경"):t("기여량 설정")}</button>}
       {!state.keyResult&&<small>{t("상위 Initiative와 KR을 연결한 뒤 기여량을 설정해 주세요.")}</small>}
-      {state.apiConnected&&<small>{t("성과 쌓기를 사용하려면 상위 KR의 API 연결을 먼저 해제해 주세요.")}</small>}
-      {m&&<small>{m.title} · {formatContribution(m.currentValue,m.unit)} / {formatContribution(m.targetValue,m.unit)}</small>}
+      {!m?.active&&<small>{t("데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.")}</small>}
+      {m?.active&&<small>{m.title} · {formatContribution(m.currentValue,m.unit)} / {formatContribution(m.targetValue,m.unit)}</small>}
     </>}
     {open&&state&&<OverlayDialog title={t("성과 쌓기 설정")} initialFocus='input[name="defaultContribution"]' onRequestClose={()=>{if(!saveRef.current)setOpen(false);}}>
       <section className="contribution-dialog"><header><h2>{t("성과 쌓기 설정")}</h2><button className="icon-button" type="button" aria-label={t("닫기")} disabled={saving} onClick={()=>setOpen(false)}><X size={18}/></button></header>
