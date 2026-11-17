@@ -80,7 +80,8 @@ import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
 import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
-import { ProjectCompletionGoal } from "./project-completion-goal";
+import { ProjectContributionProvider, ProjectContributionSettings, useProjectCompletionReview } from "./project-contributions";
+import type { CompletionContributionInput } from "@/lib/project-contributions";
 import { FirstRunSetup } from "./first-run-setup";
 import { canAutoOpenSetup, type OnboardingState } from "@/lib/onboarding";
 import { OkrFileSurface, type OkrExecutionItem, type OkrFileCycleSummary } from "./okr-file-surface";
@@ -223,6 +224,7 @@ type DataViewProps = {
   readOnly: boolean;
   onProgressChange: (id: string, progress: number) => void;
   onNotice: (message: string) => void;
+  onOpenProject?: (id: string) => void;
 };
 
 type PropertyDefinition = {
@@ -901,7 +903,7 @@ const viewTitles: Record<View, string> = {
 
 export default function Home() {
   useLanguage();
-  return <ConfirmationProvider><WorkspaceApp /></ConfirmationProvider>;
+  return <ConfirmationProvider><ProjectContributionProvider><WorkspaceApp /></ProjectContributionProvider></ConfirmationProvider>;
 }
 
 function ClientDataView(props: DataViewProps) {
@@ -915,6 +917,7 @@ function ClientDataView(props: DataViewProps) {
 }
 
 function WorkspaceApp() {
+  const reviewProjectCompletion = useProjectCompletionReview();
   const language = useLanguage();
   const [languageFailure, setLanguageFailure] = useState<{ userId: string; preferences: LanguagePreferences } | null>(null);
   const confirmAction = useAppConfirm();
@@ -1713,34 +1716,40 @@ function WorkspaceApp() {
   }
 
   async function patchItem(id: string, patch: Partial<OkriItem>) {
-    const previous = items;
-    setItems((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
-    try {
-      const response = await fetch("/api/items", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id, ...patch }),
-      });
-      if (!response.ok) throw new Error("update failed");
-      const data = (await response.json()) as { item: OkriItem };
-      setItems((current) => current.map((entry) => (entry.id === id ? data.item : entry)));
-      // The server counts completions from every surface, including Task detail and My Work.
-      // A failed refresh must never roll back a Task write that already succeeded.
-      if (data.item.kind === "task") {
-        const parents = [...new Set([previous.find((entry) => entry.id === id)?.parentId, data.item.parentId].filter((value): value is string => Boolean(value)))];
-        void Promise.allSettled(parents.map(async (projectId) => {
-          const response = await fetch(`/api/project-task-goals?projectId=${encodeURIComponent(projectId)}`, { cache: "no-store" });
-          if (!response.ok) return;
-          const result = await response.json() as { goal: unknown; progress: number };
-          if (result.goal) setItems((current) => current.map((entry) => entry.id === projectId ? { ...entry, progress: result.progress } : entry));
-        }));
+    const previous = items.find((entry) => entry.id === id);
+    async function save(contribution?: CompletionContributionInput) {
+      setItems((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry));
+      try {
+        const response = await fetch("/api/items", { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id, ...patch, contribution }) });
+        if (!response.ok) throw new Error("update failed");
+        const data = await response.json() as { item: OkriItem };
+        setItems((current) => current.map((entry) => entry.id === id ? data.item : entry));
+        if (data.item.kind === "project") {
+          clearCachedBootstrap();
+          // This read cannot turn a committed completion into a failed write.
+          try {
+            const result = await fetch(`/api/project-contributions?projectId=${encodeURIComponent(id)}`, { cache: "no-store" });
+            if (result.ok) {
+              const state = await result.json() as { metric: { keyResultId: string; progress: number } | null };
+              if (state.metric) setItems((current) => current.map((entry) => entry.id === state.metric!.keyResultId ? { ...entry, progress: state.metric!.progress } : entry));
+            }
+          } catch { /* Refresh on the next workspace read. */ }
+          window.dispatchEvent(new Event("okri:project-contributions"));
+        }
+        return true;
+      } catch (error) {
+        if (previous) setItems((current) => current.map((entry) => entry.id === id ? previous : entry));
+        throw error;
       }
-      return true;
-    } catch {
-      setItems(previous);
-      showNotice(t("변경사항을 저장하지 못했습니다."));
-      return false;
     }
+    try {
+      if (previous?.kind === "project" && patch.status && isCompletedStatus(patch.status) && !isCompletedStatus(previous.status)) {
+        const completed = await reviewProjectCompletion(id, save);
+        if (!completed) { clearCachedBootstrap(); setWorkspaceDataAttempt((attempt) => attempt + 1); }
+        return completed;
+      }
+      return await save();
+    } catch { showNotice(t("변경사항을 저장하지 못했습니다.")); return false; }
   }
 
   async function setPropertyValue(itemId: string, propertyId: string, value: PropertyValue) {
@@ -2619,7 +2628,7 @@ function WorkspaceApp() {
           )}
           {activeView === "gantt" && <GanttView items={activeItems} onOpenProject={openProjectPage} onOpenTask={openTaskDetail} />}
           {activeView === "routines" && <RoutineView key={`${currentWorkspace?.id}:${searchNavigationId}`} focusId={searchFocusId} onDirtyChange={setRoutineEditorDirty} workspaceId={currentWorkspace?.id ?? ""} readOnly={!canWriteWorkspace} canManageProperties={currentWorkspace?.role === "owner" || currentWorkspace?.role === "admin"} initialRoutines={routines} teamMembers={teamMembers} onNotice={showNotice} onRoutinesChange={setRoutines} createOpen={routineCreateOpen} onCreateClose={() => setRoutineCreateOpen(false)} onCreateWithChat={openRoutineCreationChat} />}
-          {activeView === "data" && <ClientDataView key={currentWorkspace?.id ?? ""} cacheKey={currentWorkspace?.id ?? ""} items={activeItems} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
+          {activeView === "data" && <ClientDataView key={currentWorkspace?.id ?? ""} onOpenProject={openProjectPage} cacheKey={currentWorkspace?.id ?? ""} items={activeItems} cycles={okrCycles} readOnly={currentWorkspace?.role === "viewer"} onProgressChange={(id, progress) => setItems((current) => current.map((entry) => entry.id === id ? { ...entry, progress } : entry))} onNotice={showNotice} />}
           {activeView === "okr" && (
             <section className="okr-workbench">
               <section className="okr-document">
@@ -3572,7 +3581,7 @@ function ProjectPageView({ project, docked = false, onPropertiesSaved, allItems,
             <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
             <ProjectProgressSection
               project={project}
-              onGoalProgressChange={(progress) => onItemsRefresh([{ ...project, progress }])}
+              onMetricChange={(metric) => { const kr = allItems.find((item) => item.id === metric.keyResultId); if (kr) onItemsRefresh([{ ...kr, progress: metric.progress }]); }}
               tasks={linkedTasks}
               teamMembers={teamMembers}
               botEnabled={progressBotEnabled}
@@ -3611,9 +3620,9 @@ function ProjectPageView({ project, docked = false, onPropertiesSaved, allItems,
   );
 }
 
-function ProjectProgressSection({ project, onGoalProgressChange, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
+function ProjectProgressSection({ project, onMetricChange, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
   project: OkriItem;
-  onGoalProgressChange: (progress: number) => void;
+  onMetricChange: (metric: import("@/lib/project-contributions").ProjectMetric) => void;
   tasks: OkriItem[];
   teamMembers: TeamMember[];
   botEnabled: boolean;
@@ -3625,7 +3634,7 @@ function ProjectProgressSection({ project, onGoalProgressChange, tasks, teamMemb
   onSaveTaskAssignee: (task: OkriItem, memberId: string) => Promise<void>;
   onOpenTask: (id: string) => void;
 }) {
-  const [completionGoalEnabled, setCompletionGoalEnabled] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const today = new Date().toLocaleDateString("sv-SE");
   const completed = tasks.filter((task) => isCompletedStatus(task.status));
   const blocked = tasks.filter((task) => task.status === "blocked");
@@ -3633,15 +3642,16 @@ function ProjectProgressSection({ project, onGoalProgressChange, tasks, teamMemb
   const needsOwner = tasks.filter((task) => !isCompletedStatus(task.status) && !task.assignments.some((assignment) => assignment.role === "task_assignee"));
   const needsDueDate = tasks.filter((task) => !isCompletedStatus(task.status) && !task.dueDate);
   const overdue = tasks.filter((task) => !isCompletedStatus(task.status) && Boolean(task.dueDate && task.dueDate < today));
-  const progressDiffers = !completionGoalEnabled && tasks.length > 0 && project.progress !== taskProgress;
+  const progressDiffers = tasks.length > 0 && project.progress !== taskProgress;
   const reviewCount = needsOwner.length + needsDueDate.length + overdue.length + (progressDiffers ? 1 : 0);
   const recent = [...tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
 
   return <section className="project-progress-section" aria-labelledby="project-progress-heading">
     <header className="project-progress-header">
       <div><h3 id="project-progress-heading">{t("진행 상황")}</h3></div>
+      {!readOnly && <button type="button" className={isCompletedStatus(project.status) ? "secondary" : "primary-action"} disabled={completing} aria-busy={completing} onClick={async () => { if (completing) return; setCompleting(true); try { await onPatch(project.id, { status: isCompletedStatus(project.status) ? "todo" : "done", progress: isCompletedStatus(project.status) ? 0 : 100 }); } finally { setCompleting(false); } }}><Check size={14} />{isCompletedStatus(project.status) ? t("완료 취소") : t("Project 완료")}</button>}
     </header>
-    <ProjectCompletionGoal projectId={project.id} completedCount={completed.length} progress={project.progress} readOnly={readOnly} onChange={(progress, enabled) => { setCompletionGoalEnabled(enabled); if (progress !== project.progress) onGoalProgressChange(progress); }} />
+    <ProjectContributionSettings projectId={project.id} status={project.status} readOnly={readOnly} onMetricChange={onMetricChange} />
     <div className="project-progress-overview">
       <div className="project-progress-value"><strong>{project.progress}%</strong><span>{t("Project 진행률")}</span></div>
       <div className="project-progress-track" aria-label={t("Project 진행률")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={project.progress} role="progressbar"><i style={{ width: `${project.progress}%` }} /></div>
