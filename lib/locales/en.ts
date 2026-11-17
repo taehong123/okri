@@ -2961,6 +2961,22 @@ const messages = {
   "현재 구현과 제한 사항을 확인해 회신을 준비합니다.": "Preparing a reply by checking the current implementation and restrictions.",
   "검사를 통과하면 제품 코드를 읽습니다.": "Product code is read after the checks pass.",
   "현재 제품 코드를 확인해 구체적인 해결안을 추천합니다.": "Reads the current product code and recommends a concrete solution.",
+"확인하고 저장": "Confirm and save",
+"완료 쌓기": "Completion goal",
+"직접 조절": "Manual progress",
+"진행 방식": "Progress tracking",
+"진행 방식 변경": "Change progress tracking",
+"완료 쌓기 설정": "Set completion goal",
+"목표 Task 수": "Target Task count",
+"{completed} / {target}개 완료": "{completed} / {target} completed",
+"Task 하나를 완료할 때마다 1개씩 쌓입니다. 완료를 취소하면 다시 빠집니다.": "Each completed Task adds one. Reopening a Task subtracts one.",
+"이미 완료한 Task도 포함합니다. 목표를 채우면 진행률이 100%가 됩니다.": "Includes Tasks already completed. Reaching the target sets progress to 100%.",
+"현재 진행률을 유지하고 직접 조절합니다.": "Keep the current progress and adjust it manually.",
+"완료 쌓기를 사용하려면 데이터 화면에서 API 연결을 먼저 해제해 주세요.": "Remove the API connection on the Data page before setting a completion goal.",
+"목표 Task 수를 1부터 1,000,000 사이의 정수로 입력해 주세요.": "Enter a whole-number target between 1 and 1,000,000.",
+"진행 방식을 불러오지 못했습니다.": "Could not load progress tracking.",
+"설정이 바뀌었습니다. 창을 닫고 최신 설정을 불러온 뒤 다시 저장해 주세요.": "Settings have changed. Close this dialog to load the latest settings, then save again.",
+"저장하지 못했습니다. 입력한 내용을 확인하고 다시 시도해 주세요.": "Could not save. Check your entries and try again.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

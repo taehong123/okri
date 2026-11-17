@@ -1,0 +1,14 @@
+.completion-goal { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-block: var(--space-4); font-size: var(--type-label); }
+.completion-goal-summary { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); margin-right: auto; }
+.completion-goal-summary b { color: var(--text-primary); font-weight: 500; }
+.completion-goal-summary span, .completion-goal small { color: var(--text-secondary); }
+.completion-goal small { flex-basis: 100%; font-size: var(--type-label); }
+.completion-goal-dialog { width: min(100%, 32rem); max-height: calc(100dvh - 2rem); overflow-y: auto; border: 1px solid var(--border-default); border-radius: var(--radius-overlay); padding: var(--space-6); overflow-wrap: anywhere; font-family: var(--font-ui); color: var(--text-primary); background: var(--bg-surface); }
+.completion-goal-dialog > header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); margin-bottom: var(--space-4); }
+.completion-goal-dialog h2 { margin: 0; font-size: var(--type-section); line-height: 1.25; }
+.completion-goal-dialog .property-form { padding: 0; }
+.completion-goal-dialog p { margin: 0; line-height: 1.6; font-size: var(--type-body); }
+.completion-goal-dialog small { color: var(--text-secondary); font-size: var(--type-label); line-height: 1.6; }
+.completion-goal-dialog footer { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-2); margin-top: var(--space-4); }
+.completion-goal-dialog .completion-goal-error { color: var(--danger-fg); }
+@media (max-width: 600px) { .completion-goal-dialog { padding: var(--space-4); } }

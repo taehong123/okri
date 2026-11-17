@@ -80,6 +80,7 @@ import AIConnectionsDialog from "./ai-connections";
 import WorkspaceBackups from "./workspace-backups";
 import WorkspaceIdentity from "./workspace-identity";
 import { MarketingConsentPrompt, MarketingConsentSettings } from "./marketing-consent";
+import { ProjectCompletionGoal } from "./project-completion-goal";
 import { FirstRunSetup } from "./first-run-setup";
 import { canAutoOpenSetup, type OnboardingState } from "@/lib/onboarding";
 import { OkrFileSurface, type OkrExecutionItem, type OkrFileCycleSummary } from "./okr-file-surface";
@@ -1723,6 +1724,17 @@ function WorkspaceApp() {
       if (!response.ok) throw new Error("update failed");
       const data = (await response.json()) as { item: OkriItem };
       setItems((current) => current.map((entry) => (entry.id === id ? data.item : entry)));
+      // The server counts completions from every surface, including Task detail and My Work.
+      // A failed refresh must never roll back a Task write that already succeeded.
+      if (data.item.kind === "task") {
+        const parents = [...new Set([previous.find((entry) => entry.id === id)?.parentId, data.item.parentId].filter((value): value is string => Boolean(value)))];
+        void Promise.allSettled(parents.map(async (projectId) => {
+          const response = await fetch(`/api/project-task-goals?projectId=${encodeURIComponent(projectId)}`, { cache: "no-store" });
+          if (!response.ok) return;
+          const result = await response.json() as { goal: unknown; progress: number };
+          if (result.goal) setItems((current) => current.map((entry) => entry.id === projectId ? { ...entry, progress: result.progress } : entry));
+        }));
+      }
       return true;
     } catch {
       setItems(previous);
@@ -3560,6 +3572,7 @@ function ProjectPageView({ project, docked = false, onPropertiesSaved, allItems,
             <ProjectDocumentSection key={`document:${project.id}`} projectId={project.id} readOnly={readOnly} onNotice={onNotice} />
             <ProjectProgressSection
               project={project}
+              onGoalProgressChange={(progress) => onItemsRefresh([{ ...project, progress }])}
               tasks={linkedTasks}
               teamMembers={teamMembers}
               botEnabled={progressBotEnabled}
@@ -3598,8 +3611,9 @@ function ProjectPageView({ project, docked = false, onPropertiesSaved, allItems,
   );
 }
 
-function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
+function ProjectProgressSection({ project, onGoalProgressChange, tasks, teamMembers, botEnabled, botRefreshing, botCheckedAt, readOnly, onRefresh, onPatch, onSaveTaskAssignee, onOpenTask }: {
   project: OkriItem;
+  onGoalProgressChange: (progress: number) => void;
   tasks: OkriItem[];
   teamMembers: TeamMember[];
   botEnabled: boolean;
@@ -3611,6 +3625,7 @@ function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRe
   onSaveTaskAssignee: (task: OkriItem, memberId: string) => Promise<void>;
   onOpenTask: (id: string) => void;
 }) {
+  const [completionGoalEnabled, setCompletionGoalEnabled] = useState(false);
   const today = new Date().toLocaleDateString("sv-SE");
   const completed = tasks.filter((task) => isCompletedStatus(task.status));
   const blocked = tasks.filter((task) => task.status === "blocked");
@@ -3618,7 +3633,7 @@ function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRe
   const needsOwner = tasks.filter((task) => !isCompletedStatus(task.status) && !task.assignments.some((assignment) => assignment.role === "task_assignee"));
   const needsDueDate = tasks.filter((task) => !isCompletedStatus(task.status) && !task.dueDate);
   const overdue = tasks.filter((task) => !isCompletedStatus(task.status) && Boolean(task.dueDate && task.dueDate < today));
-  const progressDiffers = tasks.length > 0 && project.progress !== taskProgress;
+  const progressDiffers = !completionGoalEnabled && tasks.length > 0 && project.progress !== taskProgress;
   const reviewCount = needsOwner.length + needsDueDate.length + overdue.length + (progressDiffers ? 1 : 0);
   const recent = [...tasks].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 6);
 
@@ -3626,6 +3641,7 @@ function ProjectProgressSection({ project, tasks, teamMembers, botEnabled, botRe
     <header className="project-progress-header">
       <div><h3 id="project-progress-heading">{t("진행 상황")}</h3></div>
     </header>
+    <ProjectCompletionGoal projectId={project.id} completedCount={completed.length} progress={project.progress} readOnly={readOnly} onChange={(progress, enabled) => { setCompletionGoalEnabled(enabled); if (progress !== project.progress) onGoalProgressChange(progress); }} />
     <div className="project-progress-overview">
       <div className="project-progress-value"><strong>{project.progress}%</strong><span>{t("Project 진행률")}</span></div>
       <div className="project-progress-track" aria-label={t("Project 진행률")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={project.progress} role="progressbar"><i style={{ width: `${project.progress}%` }} /></div>

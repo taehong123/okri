@@ -4568,6 +4568,8 @@ export async function updateItem(
   } else {
     [updated] = await updateQuery;
   }
+  // Completion-goal triggers can replace the UPDATE RETURNING progress.
+  if (current.kind === "project") updated = (await getItem(ownerId, id))!;
 
   await logActivity(ownerId, id, "updated", normalizedPatch.source ?? "web", normalizedPatch);
   if (current.status !== updated.status) {

@@ -1888,3 +1888,16 @@ export type TrashRecord = typeof trashRecords.$inferSelect;
 export type LocalAgentDevice = typeof localAgentDevices.$inferSelect;
 export type LocalAgentPairing = typeof localAgentPairings.$inferSelect;
 export type LocalAgentJob = typeof localAgentJobs.$inferSelect;
+
+export const projectTaskGoals = sqliteTable("project_task_goals", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  targetCount: integer("target_count").notNull(),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, (table) => [
+  uniqueIndex("idx_project_task_goals_owner_project").on(table.ownerId, table.projectId),
+  check("project_task_goal_target", sql`${table.targetCount} BETWEEN 1 AND 1000000 AND typeof(${table.targetCount}) = 'integer'`),
+]);
