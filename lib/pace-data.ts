@@ -4495,6 +4495,7 @@ export async function updateItem(
     routineId: string | null;
     source: string;
   }>,
+  contribution?: import("@/lib/project-contributions").CompletionContributionInput,
 ) {
   await ensureWorkspace(ownerId);
   const current = await getItem(ownerId, id);
@@ -4556,7 +4557,12 @@ export async function updateItem(
     .where(and(eq(items.ownerId, ownerId), eq(items.id, id)))
     .returning();
   let updated: PaceItem;
-  if (current.kind === "project" && values.cycleId !== undefined && values.cycleId !== current.cycleId) {
+  if (contribution !== undefined) {
+    const { completeWithContribution, ContributionError } = await import("@/lib/project-contributions");
+    if (current.kind !== "project" || normalizedPatch.parentId !== undefined || normalizedPatch.cycleId !== undefined) throw new ContributionError("invalid_contribution", 400);
+    await completeWithContribution((env as RuntimeEnv).DB, ownerId, id, contribution, updateQuery.toSQL(), nextStatus);
+    updated = (await getItem(ownerId, id))!;
+  } else if (current.kind === "project" && values.cycleId !== undefined && values.cycleId !== current.cycleId) {
     const statement = updateQuery.toSQL();
     const d1 = (env as RuntimeEnv).DB;
     await d1.batch([
@@ -4568,8 +4574,6 @@ export async function updateItem(
   } else {
     [updated] = await updateQuery;
   }
-  // Completion-goal triggers can replace the UPDATE RETURNING progress.
-  if (current.kind === "project") updated = (await getItem(ownerId, id))!;
 
   await logActivity(ownerId, id, "updated", normalizedPatch.source ?? "web", normalizedPatch);
   if (current.status !== updated.status) {

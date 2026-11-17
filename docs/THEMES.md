@@ -376,3 +376,7 @@ font-size override.
 - `tests/guide.test.mjs` checks all five catalogs, example topology and draft
   bounds/expiry. `tests/e2e/guide.spec.ts` uses mocked APIs for guest/auth handoff,
   keyboard access, all themes, font diagnostics and 320–3840px text-zoom layouts.
+
+## Project contribution review
+
+Project contribution settings use the existing unframed progress section and shared form/dialog tokens. Completion review pre-fills the Project default, keeps an editable actual amount and a KR before/after preview, and persists only after the explicit completion button. Task completion is independent. Use one-worker mocked browser verification for defaults, actual overrides, cancellation, retry, permission, real fonts, all themes and larger text.

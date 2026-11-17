@@ -19,6 +19,7 @@ const dailyCalendarMigration = await readFile(new URL("../drizzle/0072_daily_cal
 const workDocumentsMigration = await readFile(new URL("../drizzle/0057_work_documents.sql", import.meta.url), "utf8");
 const clientDirectoryMigration = await readFile(new URL("../drizzle/0065_client_directory.sql", import.meta.url), "utf8");
 
+const contributionMigration = await readFile(new URL("../drizzle/0077_project_contributions.sql", import.meta.url), "utf8");
 const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
 
 function fixture() {
@@ -41,6 +42,7 @@ function fixture() {
   sqlite.exec(workDocumentsMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(clientDirectoryMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec((awaitTaskGoalMigration).replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(contributionMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -94,13 +96,14 @@ function fixture() {
     INSERT INTO daily_task_snapshots (id,owner_id,submission_id,task_title) VALUES ('daily-task','w','submission','Old title');
     INSERT INTO google_connections (id,owner_id,user_id,encrypted_refresh_token) VALUES ('google','w','u','secret-refresh-token');
     INSERT INTO google_calendar_events (id,owner_id,user_id,item_id,google_event_id) VALUES ('event','w','u','task','gcal-event');
-    INSERT INTO kr_data_connections (id,owner_id,kr_item_id,name,endpoint_url,target_value) VALUES ('kr-link','w','kr','Metric','https://metrics.example.com/?key=secret',100);
+    INSERT INTO kr_data_connections (id,owner_id,kr_item_id,name,endpoint_url,target_value) VALUES ('kr-link','w','project','Metric','https://metrics.example.com/?key=secret',100);
     INSERT INTO slack_daily_publications (id,owner_id,member_id,submission_id,scrum_date,channel_id,slack_message_ts) VALUES ('publication','w','member','submission','2026-09-01','channel','original-ts');
     INSERT INTO integration_tokens (id,workspace_id,user_id,name,token_hash,token_prefix) VALUES ('token','w','u','MCP','secret-hash','prefix');
     INSERT INTO workspace_groups (id,workspace_id,name,handle) VALUES ('group','w','Team group','team');
     INSERT INTO workspace_group_members (id,group_id,member_id) VALUES ('group-member','group','member');
     INSERT INTO activity_log (id,owner_id,item_id,action) VALUES ('old-log','w','project','created');`);
   sqlite.exec("INSERT INTO project_task_goals(id,owner_id,project_id,target_count) VALUES ('project','w','project',10)");
+  sqlite.exec("INSERT INTO kr_project_metrics(id,owner_id,kr_item_id,starting_value,target_value) VALUES ('metric','w','kr',20,100);INSERT INTO project_contributions(id,owner_id,project_id,kr_item_id,default_value) VALUES ('contribution','w','project','kr',10)");
   return { sqlite, ctx, objects, bucket };
 }
 
@@ -289,6 +292,8 @@ test("leases prevent duplicate work and invalid payloads are rejected", async ()
 test("revision triggers cover all restored tables and business changes do not alter other workspace revisions", () => {
   const f = fixture();
   const clientColumns = {
+    kr_project_metrics: ["id","owner_id","kr_item_id","starting_value","target_value","unit","version","created_at","updated_at"],
+    project_contributions: ["id","owner_id","project_id","kr_item_id","default_value","actual_value","applied","enabled","last_request_id","version","created_at","updated_at"],
     project_task_goals: ["id", "owner_id", "project_id", "target_count", "version", "created_at", "updated_at"],
     clients: ["id", "owner_id", "external_customer_id", "name", "phone", "email", "source_type", "source_name", "source_url", "source_updated_at", "created_by_user_id", "created_at", "updated_at"],
     client_products: ["id", "owner_id", "client_id", "external_product_id", "name", "source", "created_at", "updated_at"],

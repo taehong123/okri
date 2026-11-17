@@ -163,6 +163,7 @@ export async function PATCH(request: Request) {
       return Response.json({ error: "unsupported status" }, { status: 400 });
     }
 
+    const contribution = payload.contribution === undefined ? undefined : (await import("@/lib/project-contributions")).completionInput(payload.contribution);
     const item = await updateItem(authorization.ownerId, id, {
       title: asOptionalString(payload.title),
       description: asOptionalString(payload.description),
@@ -175,7 +176,7 @@ export async function PATCH(request: Request) {
       parentId: payload.parentId === undefined ? undefined : asNullableString(payload.parentId),
       routineId: payload.routineId === undefined ? undefined : asNullableString(payload.routineId),
       source: asOptionalString(payload.source) || "web",
-    });
+    }, contribution);
     await saveAssignments(authorization.ownerId, item.id, item.kind as ItemKind, payload, authorization.userId);
     const assignments = await getItemAssignmentMap(authorization.ownerId, [item.id]);
     const creators = await getItemCreatorMap(authorization.ownerId, [item]);
@@ -240,6 +241,7 @@ function asNullableString(value: unknown) {
 
 function routeError(error: unknown) {
   const message = error instanceof Error ? error.message : "Unexpected error";
+  if (error instanceof Error && error.name === "ContributionError" && "code" in error && "status" in error && typeof error.code === "string" && typeof error.status === "number") return Response.json({ code: error.code }, { status: error.status });
   if (error instanceof BillingLimitError) return Response.json({ error: message, code: error.code, ...error.details }, { status: 409 });
   const status = /required|requires|must be|cannot have|not found|only an|archive|restore|active workspace|assignment/i.test(
     message,

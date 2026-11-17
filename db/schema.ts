@@ -1901,3 +1901,42 @@ export const projectTaskGoals = sqliteTable("project_task_goals", {
   uniqueIndex("idx_project_task_goals_owner_project").on(table.ownerId, table.projectId),
   check("project_task_goal_target", sql`${table.targetCount} BETWEEN 1 AND 1000000 AND typeof(${table.targetCount}) = 'integer'`),
 ]);
+
+export const krProjectMetrics = sqliteTable("kr_project_metrics", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  keyResultId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  startingValue: real("starting_value").notNull(),
+  targetValue: real("target_value").notNull(),
+  unit: text("unit").notNull().default("%"),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  uniqueIndex("idx_kr_project_metrics_owner_kr").on(table.ownerId, table.keyResultId),
+  check("kr_project_metric_values", sql`${table.startingValue} BETWEEN 0 AND 1000000000000 AND ${table.targetValue} > 0 AND ${table.targetValue} <= 1000000000000`),
+]);
+
+export const projectContributions = sqliteTable("project_contributions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  keyResultId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  defaultValue: real("default_value").notNull(),
+  actualValue: real("actual_value"),
+  applied: integer("applied", { mode: "boolean" }).notNull().default(false),
+  enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
+  lastRequestId: text("last_request_id"),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+}, table => [
+  uniqueIndex("idx_project_contributions_owner_project").on(table.ownerId, table.projectId),
+  index("idx_project_contributions_owner_kr").on(table.ownerId, table.keyResultId),
+  check("project_contribution_values", sql`${table.defaultValue} BETWEEN 0 AND 1000000000000 AND (${table.actualValue} IS NULL OR ${table.actualValue} BETWEEN 0 AND 1000000000000)`),
+]);
+
+export const projectContributionGuards = sqliteTable("project_contribution_guards", {
+  id: text("id").primaryKey(),
+  valid: integer("valid").notNull(),
+}, table => [check("project_contribution_guard_valid", sql`${table.valid} = 1`)]);

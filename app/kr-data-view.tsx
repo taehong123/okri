@@ -5,6 +5,8 @@ import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { OverlayDialog, useAppConfirm } from "./overlay-dialog";
 import { t , apiError , getClientLocale , messageValue } from "@/lib/client-language";
 
+import type { ProjectMetric } from "@/lib/project-contributions";
+
 type DataTargetKind = "key_result" | "project";
 export type DataItem = {
   id: string;
@@ -61,18 +63,21 @@ function markConnectionCacheFresh(key: string) {
   connectionCacheTimestamps.set(key, Date.now());
 }
 
-export default function DataView({ cacheKey, items, cycles, readOnly, onProgressChange, onNotice }: {
+export default function DataView({ cacheKey, items, cycles, readOnly, onProgressChange, onNotice, onOpenProject }: {
   cacheKey: string;
   items: DataItem[];
   cycles: DataCycle[];
   readOnly: boolean;
   onProgressChange: (id: string, progress: number) => void;
   onNotice: (message: string) => void;
+  onOpenProject?: (id: string) => void;
 }) {
   const confirmAction = useAppConfirm();
   const [connections, setConnections] = useState<DataConnection[] | null>(() => connectionMemoryCache.get(cacheKey) ?? null);
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
+  const [projectMetrics, setProjectMetrics] = useState<ProjectMetric[] | null>(null);
+  const [metricsError, setMetricsError] = useState(false);
   const [search, setSearch] = useState("");
   const [targetFilter, setTargetFilter] = useState<"all" | DataTargetKind>("all");
   const [sort, setSort] = useState<"structure" | "cadence" | "status">("structure");
@@ -99,6 +104,17 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     return () => { active = false; };
   }, [cacheKey, loadAttempt]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => { void fetch("/api/project-contributions", { cache: "no-store", signal: controller.signal })
+      .then(async response => { if (!response.ok) throw new Error(); return response.json() as Promise<{ metrics: ProjectMetric[] }>; })
+      .then(data => { setProjectMetrics(data.metrics); setMetricsError(false); })
+      .catch(() => { if (!controller.signal.aborted) setMetricsError(true); }); };
+    refresh(); window.addEventListener("okri:project-contributions", refresh);
+    return () => { controller.abort(); window.removeEventListener("okri:project-contributions", refresh); };
+  }, [cacheKey, loadAttempt]);
+  const metricByItem = useMemo(() => new Map((projectMetrics ?? []).map(metric => [metric.keyResultId, metric])), [projectMetrics]);
+
   const targets = useMemo(() => items.filter((item): item is DataItem & { kind: DataTargetKind } => item.kind === "key_result" || item.kind === "project"), [items]);
   const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
   const byItem = useMemo(() => new Map((connections ?? []).map((connection) => [connection.itemId, connection])), [connections]);
@@ -113,7 +129,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     return rows;
   }, [byItem, search, sort, targetFilter, targets]);
 
-  const availableForKind = (kind: DataTargetKind) => targets.filter((item) => item.kind === kind && !byItem.has(item.id));
+  const availableForKind = (kind: DataTargetKind) => targets.filter((item) => item.kind === kind && !byItem.has(item.id) && !metricByItem.has(item.id));
 
   function openCreate(item?: DataItem & { kind: DataTargetKind }) {
     const targetKind = item?.kind ?? (targetFilter === "project" ? "project" : availableForKind("key_result").length ? "key_result" : "project");
@@ -212,10 +228,10 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     onNotice(t("{value1}의 데이터 연결을 삭제했습니다.", { value1: messageValue(target?.title ?? targetLabels[connection.targetKind]) }));
   }
 
-  if (loadError) return <DataState icon={AlertTriangle} title={t("데이터 연결을 불러오지 못했습니다")} action={t("다시 시도")} onAction={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
-  if (connections === null) return <DataState icon={LoaderCircle} title={t("데이터 연결을 불러오는 중입니다")} loading />;
+  if (loadError || metricsError) return <DataState icon={AlertTriangle} title={t("데이터 연결을 불러오지 못했습니다")} action={t("다시 시도")} onAction={() => { setLoadError(false); setLoadAttempt((attempt) => attempt + 1); }} />;
+  if (connections === null || projectMetrics === null) return <DataState icon={LoaderCircle} title={t("데이터 연결을 불러오는 중입니다")} loading />;
 
-  const hasAvailableTarget = targets.some((item) => !byItem.has(item.id));
+  const hasAvailableTarget = targets.some((item) => !byItem.has(item.id) && !metricByItem.has(item.id));
 
   return <>
     <section className="kr-data-toolbar">
@@ -226,20 +242,24 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
       <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} aria-label={t("데이터 정렬")}><option value="structure">{t("구조 순서")}</option><option value="cadence">{t("갱신 주기")}</option><option value="status">{t("연결 상태")}</option></select>
       <button className="primary-action" disabled={readOnly || !hasAvailableTarget} onClick={() => openCreate()}><Plus size={14} />{t("API 연결")}</button>
     </section>
-    <aside className="kr-data-guide"><Database size={17} /><div><b>{t("KR과 Project를 각각 수치로 측정합니다")}</b><p>{t("공개 HTTPS JSON API의 숫자를 기준값·목표값 사이의 진행률로 변환합니다. 연결한 항목 하나만 갱신하며 다른 항목과 수치를 섞지 않습니다.")}</p></div></aside>
+    <aside className="kr-data-guide"><Database size={17} /><div><b>{t("KR과 Project를 각각 수치로 측정합니다")}</b><p>{t("API 데이터 또는 Project 완료 시 확인한 성과로 KR 수치를 관리합니다.")}</p></div></aside>
     {!targets.length ? <DataState icon={Database} title={t("연결할 KR 또는 Project가 없습니다")} detail={t("먼저 OKR이나 Project 화면에서 항목을 만들어 주세요.")} /> : (
       <section className="kr-data-list" aria-label={t("데이터 연결 목록")}>
         {filtered.map((item) => {
           const connection = byItem.get(item.id);
+          const metric = metricByItem.get(item.id);
           const contextLabel = item.kind === "project" ? itemById.get(item.parentId ?? "")?.title ?? t("상위 Initiative 미연결") : cycleById.get(item.cycleId ?? "") ?? t("OKR 파일");
           return <article className={`kr-data-card ${connection ? "connected" : "unconnected"}`} key={item.id}>
             <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{item.progress}%</strong></header>
-            {connection ? <>
+            {metric ? <>
+              <div className="kr-data-progress"><span><i style={{ width: `${metric.progress}%` }} /></span><b>{formatDataMetric(metric.currentValue, metric.unit)} <em>/ {formatDataMetric(metric.targetValue, metric.unit)}</em></b></div>
+              <p>{t("성과 쌓기")} · {t("Project 완료 시 확인한 실제 기여량을 누적합니다.")}</p>
+            </> : connection ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${item.progress}%` }} /></span><b>{formatDataMetric(connection.lastValue, connection.unit)} <em>/ {formatDataMetric(connection.targetValue, connection.unit)}</em></b></div>
               <dl><div><dt>{t("데이터 소스")}</dt><dd><Link2 size={12} />{connection.name}</dd></div><div><dt>{t("값 경로")}</dt><dd>{connection.valuePath || t("응답 자체")}</dd></div><div><dt>{t("갱신")}</dt><dd>{cadenceLabels[connection.cadence]}{connection.active ? t(" · 활성") : t(" · 일시정지")}</dd></div><div><dt>{t("최근 결과")}</dt><dd className={`sync-${connection.lastSyncStatus}`}>{dataSyncStatusLabel(connection)}</dd></div></dl>
               {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{t("최근 데이터 갱신에 실패했습니다. 연결 설정을 확인해 주세요.")}</p>}
               <footer><button disabled={readOnly || syncingId === connection.id} onClick={() => void sync(connection)}><RefreshCw className={syncingId === connection.id ? "spinning" : ""} size={13} />{syncingId === connection.id ? t("업데이트 중") : t("지금 업데이트")}</button><button disabled={readOnly} onClick={() => openEdit(connection)}><Pencil size={13} />{t("설정")}</button><button className="danger" disabled={readOnly} onClick={() => void remove(connection)} aria-label={t("{value1} 데이터 연결 삭제", { value1: messageValue(item.title) })}><Trash2 size={13} /></button></footer>
-            </> : <div className="kr-data-unconnected"><p>{t("아직 연결된 데이터가 없습니다.")}</p><button disabled={readOnly} onClick={() => openCreate(item)}><Plus size={13} />{t("이 {kind}에 API 연결", { kind: targetLabels[item.kind] })}</button></div>}
+            </> : <div className="kr-data-unconnected"><p>{t("아직 연결된 데이터가 없습니다.")}</p><button disabled={readOnly} onClick={() => openCreate(item)}><Plus size={13} />{t("이 {kind}에 API 연결", { kind: targetLabels[item.kind] })}</button>{item.kind === "project" && onOpenProject && <button disabled={readOnly} onClick={() => onOpenProject(item.id)}>{t("성과 쌓기 설정")}</button>}</div>}
           </article>;
         })}
         {!filtered.length && <DataState icon={Search} title={t("검색 결과가 없습니다")} />}
@@ -248,7 +268,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     {editing && <OverlayDialog title={editing === "new" ? t("API 연결") : t("API 설정")} variant="drawer" dirty={draftDirty} onRequestClose={() => setEditing(null)}>
       {(requestClose) => <aside className="property-panel kr-data-panel"><header><div><h2>{editing === "new" ? t("API 연결") : t("API 설정")}</h2><p>{t("인증이 필요 없는 HTTPS JSON GET API를 연결할 수 있습니다.")}</p></div><button className="icon-button" onClick={() => requestClose("close-button")} aria-label={t("API 설정 닫기")}><X size={17} /></button></header><form className="property-form" onSubmit={(event) => void save(event)}>
         <div className="view-tabs data-target-type-tabs" role="tablist" aria-label={t("연결 대상 유형")}>{([["key_result", "KR"], ["project", t("Project")]] as const).map(([value, label]) => <button type="button" role="tab" aria-selected={draft.targetKind === value} disabled={editing !== "new" || (!availableForKind(value).length && draft.targetKind !== value)} className={draft.targetKind === value ? "active" : ""} onClick={() => changeTargetKind(value)} key={value}>{label}</button>)}</div>
-        <label><span>{t("연결 대상")}</span><select value={draft.itemId} disabled={editing !== "new"} onChange={(event) => setDraft({ ...draft, itemId: event.target.value })} aria-label={t("연결할 항목")}><option value="">{t("선택")}</option>{targets.filter((item) => item.kind === draft.targetKind && (!byItem.has(item.id) || item.id === draft.itemId)).map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
+        <label><span>{t("연결 대상")}</span><select value={draft.itemId} disabled={editing !== "new"} onChange={(event) => setDraft({ ...draft, itemId: event.target.value })} aria-label={t("연결할 항목")}><option value="">{t("선택")}</option>{targets.filter((item) => item.kind === draft.targetKind && (!byItem.has(item.id) && !metricByItem.has(item.id) || item.id === draft.itemId)).map((item) => <option value={item.id} key={item.id}>{item.title}</option>)}</select></label>
         <label><span>{t("데이터 소스 이름")}</span><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={t("예: Stripe 월간 매출")} /></label>
         <label><span>API URL</span><input type="url" value={draft.endpointUrl} onChange={(event) => setDraft({ ...draft, endpointUrl: event.target.value })} placeholder="https://api.example.com/metrics/revenue" /></label>
         <label><span>{t("숫자 값 경로")}</span><input value={draft.valuePath} onChange={(event) => setDraft({ ...draft, valuePath: event.target.value })} placeholder={t("예: data.monthlyRevenue")} /><small>{t("응답 자체가 숫자면 비워두세요. 배열은 data.items[0].value처럼 입력합니다.")}</small></label>

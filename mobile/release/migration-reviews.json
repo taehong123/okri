@@ -82,5 +82,12 @@
     "rollbackPlan": "Retain the additive goal table and triggers on application rollback. Existing web and native Task writes remain valid; restore a forward-compatible web configuration screen before changing goals.",
     "dataPreservation": "No existing data is backfilled, dropped, or renamed. Triggers affect only opted-in Projects, recalculate counts without duplicate accumulation, and reject conflicting API connections. Completion undo, reparenting, soft-delete and restore are covered by real SQLite tests.",
     "reviewedBy": "Codex source-bound SQLite and installed mobile v1 compatibility review, 2026-11-17"
+  },
+  "drizzle/0077_project_contributions.sql": {
+    "sha256": "75c65d92138473a45b3f44cffdcac09cc4c883f6465517b3331b19b8896890b1",
+    "v1Compatibility": "Retires only the mistakenly introduced Task-count triggers. Tasks retain their frozen completion semantics and no longer change Project or KR metrics. Only Projects explicitly configured on the web apply their default contribution on completion through legacy clients; existing fields and payloads remain intact.",
+    "rollbackPlan": "Retain migration 0076 and its historical setting rows. Keep additive Project contribution tables and their accounting triggers when rolling application code back; existing clients can still complete or reopen Projects. No historical migration is edited and no customer data is deleted.",
+    "dataPreservation": "DROP statements remove only the ten retired Task-count feature triggers; historical table rows and backup revision triggers remain. New per-Project accounting is transactionally guarded, deduplicated, and undone on Project reopening. Task writes have no accounting side effects. Real SQLite fixtures verify defaults, overrides, retries, scope, rollback and backup restoration.",
+    "reviewedBy": "Codex source-bound product correction and native v1 compatibility review, 2026-11-17"
   }
 }
