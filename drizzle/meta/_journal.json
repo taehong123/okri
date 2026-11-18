@@ -519,6 +519,13 @@
       "when": 1794990472310,
       "tag": "0081_daily_report_review",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "6",
+      "when": 1794991645409,
+      "tag": "0082_workspace_invite_links",
+      "breakpoints": true
     }
   ]
 }

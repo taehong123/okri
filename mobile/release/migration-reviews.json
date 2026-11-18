@@ -117,5 +117,12 @@
     "rollbackPlan": "Keep additive tables and approval guards on code rollback. Disable the affected report policy to stop reporting; never resume unapproved legacy channel posts. Forward-fix UI or scheduler without deleting receipts or saved instructions.",
     "dataPreservation": "No customer rows are migrated or activated. Exact approved pages and destinations are immutable. Actor, connection, policy version, per-page receipts and source freshness guard publication. Preferences and approval integration state persist in full database backups but are deliberately excluded from business-data workspace import/restore so approvals cannot be resurrected.",
     "reviewedBy": "Codex source-bound SQLite, signed-action identity, queue idempotency and frozen-client review, 2026-11-18"
+  },
+  "drizzle/0082_workspace_invite_links.sql": {
+    "sha256": "4dec999faaa3234cbedc7601de72f176747228055a757302b9bf20e138986cbf",
+    "v1Compatibility": "Additive shared workspace invite link storage and web/external MCP entry points do not change frozen native v1 APIs, existing email-specific invitations, auth or member roles. Native invite-link UI/deep link handling is deferred; web acceptance supports existing verified sessions.",
+    "rollbackPlan": "Keep new link tables on code rollback; no customer records are rewritten or activated by migration. Forward-fix web handlers and rotate a shared link explicitly when needed. Do not edit historical migrations or drop joined memberships.",
+    "dataPreservation": "Only token hashes are stored. Read-only lookup has no writes or email delivery. Admin creation verifies current tenant and membership transactionally. Signed-in acceptance checks link validity, editor seat limits and email/user conflicts without demoting existing members or changing assignments. Full DB backups retain integration credentials; business data imports do not restore live invitation credentials.",
+    "reviewedBy": "Codex source-bound SQLite, member isolation, join/rotation/seat/idempotency and frozen-client review, 2026-11-18"
   }
 }

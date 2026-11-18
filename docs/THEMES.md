@@ -390,3 +390,7 @@ Date-based Project contributions use the same Data settings and unframed drawer 
 ## Daily report settings
 
 `app/daily-report-settings.tsx` uses unframed sections and semantic controls in the existing Slack daily settings. All three timing choices, approver, destinations and scope are editable. Report text is editable before the signed Slack DM approval; the web has no approval shortcut. Keep Pretendard, fixed semantic type sizes, keyboard focus, mobile wrapping and 200% text access. Browser checks mock all writes and messages.
+
+## Shared workspace invite links
+
+The existing invitation dialog distinguishes an email-specific invitation from a shared workspace link. Shared links show the workspace, role and expiration with an explicit join button, without an email-matching label. Existing dialog geometry, theme tokens, focus and authenticated route are preserved. MCP lookup never creates a link or sends email.

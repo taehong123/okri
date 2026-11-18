@@ -1,5 +1,7 @@
 import type { Catalog } from "./en";
 const messages = {
+  "외부 MCP에서 get_workspace_invite_link로 현재 워크스페이스의 유효한 공동 초대링크만 조회합니다. 없으면 없다고 반환하며 조회·생성 모두 메일을 보내지 않습니다. create_workspace_invite_link는 관리자만 실행하고 기본 가입 역할은 일반 멤버입니다. Slack AI에는 초대링크 관리 도구를 제공하지 않습니다.": "外部MCP通过get_workspace_invite_link只读取当前工作区已有的有效共享邀请链接。没有时返回不存在，读取和创建都不会发送邮件。仅管理员可运行create_workspace_invite_link，默认加入角色为成员。Slack AI不提供邀请链接管理工具。",
+  "로그인한 계정으로 이 워크스페이스에 가입합니다.": "使用当前登录账号加入此工作区。",
   "보고 스레드는 웹·외부 MCP에서 설정합니다. Project 아래 Task와 담당자를 모으며, 지정 시각·전원 작성 또는 마감·수동 요청을 선택합니다. 저장한 지침은 MCP 초안 작성 시 다시 읽고, 공유 전 지정한 팀장의 Slack DM 승인을 받습니다. Slack AI에는 보고 설정 도구를 제공하지 않습니다.": "报告线程通过网页或外部MCP设置。在Project下汇总Task和负责人，可选择定时、全员提交或截止时间、手动请求。MCP起草时读取保存的指引，分享前须经指定负责人的Slack私信批准。Slack AI不提供报告设置工具。",
   "수정 요청": "请求修改",
   "DM 승인 대기": "等待私信批准",

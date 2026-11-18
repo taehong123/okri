@@ -1,4 +1,6 @@
 const messages = {
+  "외부 MCP에서 get_workspace_invite_link로 현재 워크스페이스의 유효한 공동 초대링크만 조회합니다. 없으면 없다고 반환하며 조회·생성 모두 메일을 보내지 않습니다. create_workspace_invite_link는 관리자만 실행하고 기본 가입 역할은 일반 멤버입니다. Slack AI에는 초대링크 관리 도구를 제공하지 않습니다.": "External MCP reads only an existing valid shared invite link for the current workspace with get_workspace_invite_link. Missing links return not found. Neither lookup nor creation sends email. Only administrators can run create_workspace_invite_link; the default join role is Member. Slack AI has no invite-link management tools.",
+  "로그인한 계정으로 이 워크스페이스에 가입합니다.": "Join this workspace with your signed-in account.",
   "보고 스레드는 웹·외부 MCP에서 설정합니다. Project 아래 Task와 담당자를 모으며, 지정 시각·전원 작성 또는 마감·수동 요청을 선택합니다. 저장한 지침은 MCP 초안 작성 시 다시 읽고, 공유 전 지정한 팀장의 Slack DM 승인을 받습니다. Slack AI에는 보고 설정 도구를 제공하지 않습니다.": "Configure report threads on the web or external MCP. Group Tasks and assignees under Projects; choose a set time, all submitted or deadline, or manual request. MCP reads saved instructions when drafting. The designated leader must approve in Slack DM before sharing. Slack AI has no reporting setup tools.",
   "수정 요청": "Changes requested",
   "DM 승인 대기": "Awaiting DM approval",
