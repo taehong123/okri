@@ -780,6 +780,11 @@ export async function handleDeliveredDailyReminder(input: { teamId: string; chan
 }
 
 export async function publishDailySubmission(ownerId: string, submissionId: string) {
+  const managed=await env.DB.prepare("SELECT id FROM daily_report_policies WHERE owner_id=?").bind(ownerId).first();
+  if(managed){
+    await env.DB.prepare("UPDATE slack_daily_publications SET status='superseded',error='',updated_at=? WHERE owner_id=? AND submission_id=? AND status IN ('pending','failed')").bind(new Date().toISOString(),ownerId,submissionId).run();
+    await (await import("./daily-report-slack")).runDueDailyReports(env.DB,new Date(),ownerId);return;
+  }
   const connection = await getSlackConnection(ownerId);
   if (!connection) return;
   const submission = await loadSubmission(submissionId, ownerId);

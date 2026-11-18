@@ -36,7 +36,7 @@ jobs:
       - run: npm run typecheck --prefix mobile
       - run: npx tsc --noEmit
       - name: Check MCP data connections and permission dispatch
-        run: node --test --test-concurrency=1 tests/mcp-data-connections.test.mjs tests/project-metric-schedules.test.mjs tests/project-contributions.test.mjs tests/workspace-backups.test.mjs tests/work-intake.test.mjs tests/okri-manual.test.mjs tests/slack-change-and-manual.test.mjs
+        run: node --test --test-concurrency=1 tests/daily-report.test.mjs tests/daily-report-delivery.test.mjs tests/mcp-daily-reports.test.mjs tests/slack-bot-delivery.test.mjs tests/daily-team-digest.test.mjs tests/mcp-data-connections.test.mjs tests/project-metric-schedules.test.mjs tests/project-contributions.test.mjs tests/workspace-backups.test.mjs tests/work-intake.test.mjs tests/okri-manual.test.mjs tests/slack-change-and-manual.test.mjs
       - run: npm run build
       - run: npm run preview:export --prefix mobile
       - run: npx playwright install --with-deps chromium

@@ -10,6 +10,8 @@ export type SlackWorkGuideGroup = {
   entries: readonly SlackWorkGuideEntry[];
 };
 
+export const SLACK_DAILY_REPORT_GUIDE = "보고 스레드는 웹·외부 MCP에서 설정합니다. Project 아래 Task와 담당자를 모으며, 지정 시각·전원 작성 또는 마감·수동 요청을 선택합니다. 저장한 지침은 MCP 초안 작성 시 다시 읽고, 공유 전 지정한 팀장의 Slack DM 승인을 받습니다. Slack AI에는 보고 설정 도구를 제공하지 않습니다.";
+
 export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
   {label: "티켓 포트 대화",description: "고객 메시지가 오면 API는 담당자·포트만 배정합니다. 분석과 후속 대화는 같은 포트가 맡습니다. 배정된 활성 담당자의 검증된 Slack 댓글만 즉시 저장하고 전달합니다. 작업 중에도 약 3초 간격으로 추가 내용을 확인하며, 다음 답변은 기존 Codex 대화를 재개합니다. 포트 답변을 같은 스레드에 그대로 표시하고 꼭 필요한 개발·고객 발신 승인만 별도로 받습니다.",entries: [{command: "!티켓관리",label: "티켓 상태·배정 확인"}]},
   {
@@ -59,6 +61,7 @@ export function slackWorkGuideText(t: GuideTranslator) {
     t(SLACK_TICKET_AUTOMATION_GUIDE),
     t(SLACK_TICKET_SETUP_GUIDE),
     t(SLACK_TICKET_CLASSIFICATION_GUIDE),
+    t(SLACK_DAILY_REPORT_GUIDE),
   ];
   for (const group of SLACK_WORK_GUIDE_GROUPS) {
     lines.push("", `*${t(group.label)}*`, t(group.description));
@@ -80,6 +83,7 @@ export function slackWorkGuideBlocks(t: GuideTranslator) {
       type: "section",
       text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}\n${t("!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다.")}\n${t("느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요.")}` },
     },
+    {type:"section",text:{type:"mrkdwn",text:t(SLACK_DAILY_REPORT_GUIDE)}},
     ...SLACK_WORK_GUIDE_GROUPS.map((group) => ({
       type: "section",
       text: {

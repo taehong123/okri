@@ -40,6 +40,12 @@ export async function POST(request: Request) {
   let payload: SlackInteraction;
   try { payload = JSON.parse(encoded) as SlackInteraction; } catch { return new Response("invalid payload", { status: 400 }); }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return new Response("invalid payload", { status: 400 });
+  const reportAction=payload.type==="block_actions"&&payload.actions?.length===1?payload.actions[0]:undefined;
+  if(reportAction&&["daily_report_approve","daily_report_reject"].includes(reportAction.action_id??"")){
+    if(!payload.team?.id||!payload.user?.id||!reportAction.value||!(payload.container?.channel_id??payload.channel?.id)||!(payload.container?.message_ts??payload.message?.ts))return new Response("invalid report action",{status:400});
+    waitUntil(import("@/lib/daily-report-slack").then(({handleReportSlackAction})=>handleReportSlackAction(env.DB,{value:reportAction.value!,teamId:payload.team!.id!,slackUserId:payload.user!.id!,channelId:payload.container?.channel_id??payload.channel!.id!,messageTs:payload.container?.message_ts??payload.message!.ts!,action:reportAction.action_id!})).catch(()=>{console.error("daily_report_action_failed");}));
+    return new Response(null,{status:200});
+  }
   if (payload?.type === "block_actions" && payload.actions?.length === 1
     && ["okri_summon_link", "okri_summon_open", "okrptr_summon_link", "okrptr_summon_open", "daily_calendar_connect"].includes(payload.actions[0].action_id ?? "")) {
     return new Response(null, { status: 200 });

@@ -110,5 +110,12 @@
     "rollbackPlan": "Retain additive tables, dated estimates and forward accounting/history guards on application rollback. Stop schedule jobs if needed and forward-fix editors; do not drop customer schedules or edit historical migrations. Old clients continue reading the stored KR progress.",
     "dataPreservation": "The forward migration replaces only calculation/history triggers to add independently stored scheduled estimates while preserving existing actual completion credits and active API source isolation. Unique per-Project/KR schedules and validated unique credit dates prevent duplicate accrual. Workspace-scoped target guards and transactional revisions reject stale writes. Calendar/schedules and estimate metadata are included in backups and restores.",
     "reviewedBy": "Codex source-bound SQLite accounting, calendar, idempotency, source isolation, backup and compatibility review, 2026-11-18"
+  },
+  "drizzle/0081_daily_report_review.sql": {
+    "sha256": "9b2b62938c275550eda28579a281da7ec7273e43e2ef43282b54585aa1505ebe",
+    "v1Compatibility": "Additive opt-in daily reporting preferences, immutable drafts and delivery receipts preserve all frozen mobile v1 requests and responses, personal DM reminders and submission semantics. Only explicitly configured workspaces replace legacy publication with mandatory leader DM approval.",
+    "rollbackPlan": "Keep additive tables and approval guards on code rollback. Disable the affected report policy to stop reporting; never resume unapproved legacy channel posts. Forward-fix UI or scheduler without deleting receipts or saved instructions.",
+    "dataPreservation": "No customer rows are migrated or activated. Exact approved pages and destinations are immutable. Actor, connection, policy version, per-page receipts and source freshness guard publication. Preferences and approval integration state persist in full database backups but are deliberately excluded from business-data workspace import/restore so approvals cannot be resurrected.",
+    "reviewedBy": "Codex source-bound SQLite, signed-action identity, queue idempotency and frozen-client review, 2026-11-18"
   }
 }

@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers";
 import { decryptSlackSecret, type SlackRuntimeEnv } from "@/lib/slack-oauth";
 import { postSlackEphemeral, postSlackMessage, SlackMessageError } from "@/lib/slack-automation";
 
-type BotKind = "management" | "automation" | "daily_publication" | "daily_manual" | "daily_digest";
+type BotKind = "management" | "automation" | "daily_publication" | "daily_manual" | "daily_digest" | "daily_report_review" | "daily_report_publication";
 type Payload = { channel: string; text: string; blocks?: unknown[]; test?: boolean; streamKey?: string;
   reportKey?: string; pageIndex?: number; pageCount?: number;
   privateControl?: { user: string; text: string; blocks?: unknown[] } };
@@ -62,13 +62,13 @@ export async function queueDailyDigest(db: D1Database, input: {
 // recoverable when a Worker is interrupted or Slack rate-limits a continuation
 // message, without risking a duplicate of a page whose outcome is uncertain.
 export async function deliverSlackBotMessages(db: D1Database, input: {
-  ownerId: string; botKind: BotKind; subjectId: string; eventKey: string; payloads: Payload[]; expiresAt: string;
+  ownerId: string; botKind: BotKind; subjectId: string; eventKey: string; payloads: Payload[]; expiresAt: string; defer?:boolean;
 }, now = new Date()): Promise<Row[]> {
   if (!input.payloads.length) throw new Error("발송할 Slack 메시지가 없습니다.");
-  if (input.payloads.length === 1) return [await deliverSlackBotMessage(db, { ...input, payload: input.payloads[0] }, now)];
+  if (input.payloads.length === 1&&!input.botKind.startsWith("daily_report_")&&!input.defer) return [await deliverSlackBotMessage(db, { ...input, payload: input.payloads[0] }, now)];
   const connection = await readConnection(db, input.ownerId);
   if (!connection) throw new Error("워크스페이스 Slack 연결이 필요합니다.");
-  const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payloads[0].test));
+  const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payloads[0].test),input.payloads[0].channel);
   if (!policy || policy.channel !== input.payloads[0].channel) throw new Error("봇이 중지되었거나 발송 대상이 변경되었습니다.");
   const stamp = now.toISOString();
   const reportKey = `${input.botKind}:${input.eventKey}`;
@@ -94,7 +94,7 @@ export async function deliverSlackBotMessages(db: D1Database, input: {
   // Preserve the queued report snapshot, but allow a confirmed rejection to
   // resume after the administrator repairs the connection or bot settings.
   const currentConnection = await readConnection(db, input.ownerId);
-  const currentPolicy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payloads[0].test));
+  const currentPolicy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payloads[0].test),input.payloads[0].channel);
   if (currentConnection && currentPolicy) {
     const currentConnectionKey = connectionKey(currentConnection), currentPolicyJson = JSON.stringify(currentPolicy);
     for (const row of stored.results) {
@@ -109,6 +109,7 @@ export async function deliverSlackBotMessages(db: D1Database, input: {
       .bind(input.ownerId, input.botKind, reportKey).all<Row>();
   }
   const results: Row[] = [];
+  if(input.defer)return stored.results;
   for (const row of stored.results) results.push(await processDelivery(db, row.id, now));
   return results;
 }
@@ -124,7 +125,7 @@ export async function deliverSlackBotMessage(db: D1Database, input: {
     // connection/settings. Never revive a sent or ambiguous request this way.
     if (input.botKind === "management" && ["failed", "cancelled"].includes(existing.status)) {
       const connection = await readConnection(db, input.ownerId);
-      const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payload.test));
+      const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payload.test),input.payload.channel);
       if (connection && policy && policy.channel === input.payload.channel &&
           (connectionKey(connection) !== existing.connection_key || JSON.stringify(policy) !== existing.policy)) {
         await db.prepare(`UPDATE slack_bot_deliveries SET status = 'pending', attempts = 0, connection_key = ?, policy = ?,
@@ -136,7 +137,7 @@ export async function deliverSlackBotMessage(db: D1Database, input: {
   }
   const connection = await readConnection(db, input.ownerId);
   if (!connection) throw new Error("워크스페이스 Slack 연결이 필요합니다.");
-  const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payload.test));
+  const policy = await readPolicy(db, input.ownerId, input.botKind, input.subjectId, Boolean(input.payload.test),input.payload.channel);
   if (!policy || policy.channel !== input.payload.channel) throw new Error("봇이 중지되었거나 발송 대상이 변경되었습니다.");
   const id = crypto.randomUUID(), stamp = now.toISOString();
   await db.prepare(`INSERT INTO slack_bot_deliveries
@@ -170,6 +171,19 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
   let row = (await db.prepare("SELECT * FROM slack_bot_deliveries WHERE id = ?").bind(id).first<Row>())!;
   if (!row) throw new Error("발송 기록을 찾을 수 없습니다.");
   const stamp = now.toISOString();
+  if(row.bot_kind.startsWith("daily_report_")&&["pending","retry","preparing"].includes(row.status)) {
+    const reportPayload=JSON.parse(row.payload) as Payload;
+    if((reportPayload.pageIndex??0)>0) {
+      const root=await db.prepare(`SELECT status,message_ts,retry_at FROM slack_bot_deliveries WHERE owner_id=? AND bot_kind=? AND json_extract(payload,'$.reportKey')=? AND json_extract(payload,'$.pageIndex')=0`).bind(row.owner_id,row.bot_kind,reportPayload.reportKey).first<{status:string;message_ts:string|null;retry_at:string}>();
+      if(!root||["failed","cancelled","uncertain"].includes(root.status)) {
+        await db.prepare("UPDATE slack_bot_deliveries SET status='cancelled',last_error='report_root_unavailable',updated_at=? WHERE id=? AND status IN ('pending','retry','preparing')").bind(stamp,id).run();
+        row=(await db.prepare("SELECT * FROM slack_bot_deliveries WHERE id=?").bind(id).first<Row>())!;await mirrorDelivery(db,row);return row;
+      }
+      if(root.status!=="sent"||!root.message_ts) {
+        await db.prepare("UPDATE slack_bot_deliveries SET retry_at=? WHERE id=? AND status IN ('pending','retry','preparing')").bind([root.retry_at,new Date(now.getTime()+60000).toISOString()].sort().at(-1),id).run();return row;
+      }
+    }
+  }
   if (row.status === "sending" && row.retry_at <= stamp) {
     await db.prepare("UPDATE slack_bot_deliveries SET status = 'uncertain', last_error = ?, updated_at = ? WHERE id = ? AND status = 'sending' AND retry_at <= ?")
       .bind("Slack 전송 결과 확인 필요 · 중복 방지를 위해 자동 재발송하지 않습니다.", stamp, id, stamp).run();
@@ -197,6 +211,16 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
     if (!key) throw new Error("Slack 암호화 설정이 없습니다.");
     const token = await decryptSlackSecret(connection.encrypted_bot_token, key);
     let previousTimestamp: string | undefined = row.bot_kind === "daily_digest" ? row.message_ts ?? undefined : undefined;
+    let threadTimestamp:string|undefined;
+    if(row.bot_kind.startsWith("daily_report_")) {
+      if((payload.pageIndex??0)>0) {
+        const root=await db.prepare(`SELECT message_ts FROM slack_bot_deliveries WHERE owner_id=? AND bot_kind=? AND json_extract(payload,'$.reportKey')=? AND json_extract(payload,'$.pageIndex')=0 AND status='sent'`).bind(row.owner_id,row.bot_kind,payload.reportKey).first<{message_ts:string}>();
+        if(!root?.message_ts)throw new CancelledDelivery("보고 스레드의 첫 메시지를 확인할 수 없습니다.");threadTimestamp=root.message_ts;
+      } else if(row.bot_kind==="daily_report_publication") {
+        const root=await db.prepare(`SELECT t.root_message_ts FROM daily_report_threads t JOIN daily_report_drafts d ON d.owner_id=t.owner_id AND d.report_date=t.report_date WHERE d.owner_id=? AND d.id=? AND t.channel_id=? AND t.connection_key=?`).bind(row.owner_id,row.subject_id,payload.channel,row.connection_key).first<{root_message_ts:string}>();
+        previousTimestamp=root?.root_message_ts;
+      }
+    }
     if (row.bot_kind === "daily_publication") {
       const previous = await db.prepare(`SELECT old.slack_message_ts FROM slack_daily_publications old
         JOIN slack_daily_publications current ON current.owner_id = old.owner_id AND current.member_id = old.member_id
@@ -224,12 +248,12 @@ async function processDelivery(db: D1Database, id: string, now: Date): Promise<R
     requestStarted = true;
     let receipt;
     try {
-      receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id, messageTs: previousTimestamp });
+      receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id, messageTs: previousTimestamp,threadTs:threadTimestamp });
     } catch (failure) {
       // A deleted Daily card is a confirmed update rejection, so posting its
       // replacement cannot duplicate the missing message. Other failures keep
       // the normal no-duplicate safeguards.
-      if (!["daily_publication", "daily_digest"].includes(row.bot_kind) || !previousTimestamp || !(failure instanceof SlackMessageError)
+      if (!["daily_publication", "daily_digest","daily_report_publication"].includes(row.bot_kind) || !previousTimestamp || !(failure instanceof SlackMessageError)
         || failure.outcome !== "rejected" || failure.code !== "message_not_found") throw failure;
       receipt = await postSlackMessage(token, payload.channel, payload.text, { blocks: payload.blocks, clientMsgId: id });
     }
@@ -272,7 +296,8 @@ async function readConnection(db: D1Database, ownerId: string) {
     .bind(ownerId).first<Connection>();
 }
 
-async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjectId: string, test: boolean) {
+async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjectId: string, test: boolean,channel?:string) {
+  if(kind==="daily_report_review"||kind==="daily_report_publication")return (await import("./daily-report")).dailyReportDeliveryPolicy(db,ownerId,kind,subjectId,channel);
   if (kind === "daily_digest") {
     const settings = await db.prepare(`SELECT s.summary_time, s.timezone, s.weekdays, c.channel_id
       FROM slack_daily_settings s JOIN slack_daily_channels c ON c.owner_id = s.owner_id
@@ -333,7 +358,7 @@ async function readPolicy(db: D1Database, ownerId: string, kind: BotKind, subjec
 
 async function validatePolicy(db: D1Database, row: Row, payload: Payload) {
   const connection = await readConnection(db, row.owner_id);
-  const policy = await readPolicy(db, row.owner_id, row.bot_kind, row.subject_id, Boolean(payload.test));
+  const policy = await readPolicy(db, row.owner_id, row.bot_kind, row.subject_id, Boolean(payload.test),payload.channel);
   if (!connection || connectionKey(connection) !== row.connection_key || !policy || JSON.stringify(policy) !== row.policy) {
     throw new CancelledDelivery("연결·봇 설정·업무 상태가 변경되어 이전 알림을 취소했습니다.");
   }
@@ -341,6 +366,7 @@ async function validatePolicy(db: D1Database, row: Row, payload: Payload) {
 }
 
 async function mirrorDelivery(db: D1Database, row: Row) {
+  if(row.bot_kind==="daily_report_review"||row.bot_kind==="daily_report_publication"){await (await import("./daily-report")).syncDailyReportDelivery(db,row);return;}
   const payload = JSON.parse(row.payload) as Payload;
   const pending = ["pending", "preparing", "sending", "retry"].includes(row.status);
   if (row.bot_kind === "daily_publication") {

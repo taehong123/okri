@@ -26,6 +26,7 @@ test("native and store-feedback tables are created after the deployed 0062 migra
     CREATE TABLE daily_submissions (id TEXT PRIMARY KEY);
     CREATE TABLE __drizzle_migrations (id INTEGER PRIMARY KEY, hash TEXT NOT NULL, created_at INTEGER);`);
   db.prepare("INSERT INTO __drizzle_migrations (hash,created_at) VALUES (?,?)").run("already-published-0062", 1789012386612);
+  db.exec(await read("drizzle/0040_slack_bot_deliveries.sql"));
   const statement = (sql, args = []) => ({
     bind: (...values) => statement(sql, values),
     // The self-host migrator executes historical multi-statement chunks in full.

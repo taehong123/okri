@@ -27,6 +27,7 @@ function harness(t) {
   const db = new DatabaseSync(":memory:");
   t.after(() => db.close());
   db.exec(`PRAGMA foreign_keys=ON;
+    CREATE TABLE daily_report_policies(id TEXT,owner_id TEXT);
     CREATE TABLE workspaces(id TEXT PRIMARY KEY, scheduled_deletion_at TEXT, message_language TEXT DEFAULT 'ko');
     CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, connected_at TEXT, encrypted_bot_token TEXT);
     CREATE TABLE slack_daily_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, timezone TEXT, onboarding_completed_at TEXT, install_status TEXT);

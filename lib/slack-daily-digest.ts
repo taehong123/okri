@@ -153,6 +153,7 @@ export async function runDueDailyDigests(db: D1Database, now = new Date(), owner
     JOIN workspaces w ON w.id = s.owner_id AND w.scheduled_deletion_at IS NULL
     JOIN slack_connections c ON c.owner_id = s.owner_id
     WHERE s.enabled = 1 AND s.summary_enabled = 1 AND s.onboarding_completed_at IS NOT NULL
+      AND NOT EXISTS(SELECT 1 FROM daily_report_policies p WHERE p.owner_id=s.owner_id)
       AND s.install_status = 'connected' AND EXISTS (SELECT 1 FROM slack_daily_channels ch WHERE ch.owner_id = s.owner_id)
       ${ownerId ? "AND s.owner_id = ?" : ""}`).bind(...(ownerId ? [ownerId] : [])).all<Settings>();
   let checked = 0;

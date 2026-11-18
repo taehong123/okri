@@ -32,6 +32,7 @@ function harness(t) {
   t.mock.timers.enable({ apis: ["Date"], now: NOW.getTime() });
   const db = new DatabaseSync(":memory:");
   db.exec(`PRAGMA foreign_keys=ON;
+    CREATE TABLE daily_report_policies(id TEXT,owner_id TEXT);
     CREATE TABLE workspaces(id TEXT PRIMARY KEY, name TEXT, scheduled_deletion_at TEXT);
     CREATE TABLE slack_connections(id TEXT PRIMARY KEY, owner_id TEXT, team_id TEXT, connected_at TEXT, encrypted_bot_token TEXT);
     CREATE TABLE workspace_management_bot_settings(owner_id TEXT PRIMARY KEY, enabled INTEGER, weekdays TEXT, report_time TEXT, timezone TEXT,
