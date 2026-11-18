@@ -136,6 +136,19 @@ test("Project upsert reuses ID and optional compare-and-swap rejects stale setti
   assert.equal((await f.data.listDataConnections("w", "p"))[0].targetValue, 60000);
 });
 
+test("a source change during collection cannot overwrite Project progress or report API mode", async t => {
+  const f = fixture(t); await f.upsert();
+  const original = globalThis.fetch; t.after(() => {globalThis.fetch = original;});
+  globalThis.fetch = async () => {
+    const state = await sources.readKrSource(f.db, "w", "kr");
+    await sources.saveKrSource(f.db, "w", "u", "kr", {revision: state.revision, mode: "projects", startingValue: 20, targetValue: 100, unit: "건", projects: [{id: "p", defaultValue: 10}, {id: "q", defaultValue: null}]});
+    return new Response("50000");
+  };
+  const result = await f.api.syncMcpDataConnection(f.db, auth, {item_id: "kr"});
+  assert.equal(result.success, false); assert.equal(result.progress, 20); assert.equal(result.connection.sourceMode, "projects");
+  assert.equal(f.rows().filter(row => row.source === "api" && row.current_value !== null).length, 0);
+});
+
 test("scope, Viewer/OAuth write policy, target kind, archive and endpoint validation hold", async t => {
   const f = fixture(t);
   for (const actor of [{...auth, role: "viewer"}, {...auth, oauthScopes: "okri:read"}]) {

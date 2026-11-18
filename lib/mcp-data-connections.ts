@@ -124,8 +124,8 @@ export async function syncMcpDataConnection(db: D1Database, auth: RequestAuthori
     const result = await syncDataConnection(auth.ownerId, connection.id);
     return {success: true, value: result.value, progress: result.progress, connection: publicConnection(result.connection as DataConnectionSummary, "api")};
   } catch {
-    const [latest] = await listDataConnections(auth.ownerId, item.id), current = await getItem(auth.ownerId, item.id);
-    return {success: false, value: null, progress: current?.progress ?? item.progress, connection: publicConnection(latest ?? connection, "api")};
+    const [latest] = await listMcpDataConnections(db, auth, {item_id: item.id}), current = await getItem(auth.ownerId, item.id);
+    return {success: false, value: null, progress: current?.progress ?? item.progress, connection: latest ?? publicConnection(connection, "api")};
   }
 }
 function failure(error: unknown) {
