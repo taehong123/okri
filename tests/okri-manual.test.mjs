@@ -31,6 +31,7 @@ test("manual index, topic lookup and bounded search distinguish missing topics",
 test("KR manual explains source selection, independent Project APIs and factual measured history",()=>{
   const data=manual.readOkriManual({topic:"data"}).articles[0].content;
   for(const text of ["데이터 탭","Project 성과 합산","Project별 기본 기여량","같은 수치라도","실패한 호출","시계열","최근 100개","과거 값은 자동 생성·추정하지","Viewer"])assert.ok(data.includes(text),text);
+  for(const text of ["list_data_connections","upsert_data_connection","sync_data_connection","value_path","0%","생략한 설정은 보존"])assert.ok(data.includes(text),text);
   assert.match(manual.readOkriManual({topic:"projects"}).articles[0].content,/실제 8이면 KR에 8/);
 });
 

@@ -16,6 +16,7 @@ function compile(source, dependencies = {}) {
 }
 const intake = compile(await readFile(new URL("../lib/work-intake.ts", import.meta.url), "utf8"));
 const mcpSource = await readFile(new URL("../app/mcp/route.ts", import.meta.url), "utf8");
+const dataConnectionMcpSource = await readFile(new URL("../lib/mcp-data-connections.ts", import.meta.url), "utf8");
 const reviewCore = compile(await readFile(new URL("../lib/project-review.ts", import.meta.url), "utf8"));
 const reviewMcpSource = await readFile(new URL("../lib/project-review-mcp.ts", import.meta.url), "utf8");
 const routineProperties = compile(await readFile(new URL("../lib/routine-properties.ts", import.meta.url), "utf8"));
@@ -257,6 +258,9 @@ function mcpFixture() {
   const serverModule = compile(`${mcpSource}\nexport { createOkriServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
+    "@/lib/mcp-data-connections": compile(dataConnectionMcpSource, {
+      "./pace-data": data, "./kr-data-sources": {}, "./kr-data-sync": {},
+    }),
     "@/lib/daily-bot": {
       getDailyDashboard: async (_authorization, date) => {
         const availableWork = [
