@@ -5,6 +5,7 @@ import { OverlayDialog } from "./overlay-dialog";
 import { getClientLocale, t } from "@/lib/client-language";
 import type { CompletionContributionInput, ContributionState, ProjectMetric } from "@/lib/project-contributions";
 import "./project-contribution.css";
+import ProjectContributionScheduleDialog from "./project-contribution-schedule";
 type Save = (input?: CompletionContributionInput) => Promise<boolean>;
 const Review = createContext<(id:string,save:Save)=>Promise<boolean>>(async (_id,save)=>save());
 const changed = () => window.dispatchEvent(new Event("okri:project-contributions"));
@@ -63,6 +64,7 @@ export function ProjectContributionProvider({children}:{children:ReactNode}){
 }
 
 export function ProjectContributionSettings({projectId,status,readOnly,onMetricChange}:{projectId:string;status:string;readOnly:boolean;onMetricChange:(metric:ProjectMetric)=>void}){
+  const [scheduleOpen,setScheduleOpen]=useState(false);
   const [state,setState]=useState<ContributionState|null>(null),[attempt,setAttempt]=useState(0),[loadError,setLoadError]=useState(false);
   const [open,setOpen]=useState(false),[saving,setSaving]=useState(false),[error,setError]=useState("");
   const [amount,setAmount]=useState(""),[starting,setStarting]=useState(""),[target,setTarget]=useState("100"),[unit,setUnit]=useState("%");
@@ -91,7 +93,8 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
   return <div className="project-contribution">
     {loadError?<p role="alert">{t("성과 설정을 불러오지 못했습니다.")} <button className="secondary" onClick={()=>setAttempt(v=>v+1)}>{t("다시 시도")}</button></p>:!state?<span role="status">{t("데이터를 불러오는 중")}</span>:<>
       <div className="contribution-summary"><b>{t("성과 쌓기")}</b>{c?.enabled&&<span>{c.applied?t("반영한 성과 {value}",{value:formatContribution(c.actualValue??0,m?.unit??"")}):t("기본 기여량 {value}",{value:formatContribution(c.defaultValue,m?.unit??"")})}</span>}</div>
-      {!readOnly&&m?.active&&<button className="secondary" type="button" disabled={!state.keyResult} onClick={edit}>{c?.enabled?t("기여량 변경"):t("기여량 설정")}</button>}
+      {state.schedule&&<small>{state.schedule.mode==="daily"?t("매일"):state.schedule.mode==="business_days"?t("영업일마다"):t("1회성")} · {t("누적 추정 기여")} {formatContribution(state.schedule.accruedValue,m?.unit??"")}{!state.schedule.active&&" · "+t("운영 중지")}</small>}
+      {!readOnly&&m?.active&&<>{!state.schedule&&<button className="secondary" type="button" disabled={!state.keyResult} onClick={edit}>{c?.enabled?t("기여량 변경"):t("기여량 설정")}</button>}<button className="secondary" type="button" onClick={()=>setScheduleOpen(true)}>{t("KR 기여 방식")}</button></>}
       {!state.keyResult&&<small>{t("상위 Initiative와 KR을 연결한 뒤 기여량을 설정해 주세요.")}</small>}
       {!m?.active&&<small>{t("데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.")}</small>}
       {m?.active&&<small>{m.title} · {formatContribution(m.currentValue,m.unit)} / {formatContribution(m.targetValue,m.unit)}</small>}
@@ -109,5 +112,6 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
         </form>
       </section>
     </OverlayDialog>}
+    {scheduleOpen&&<ProjectContributionScheduleDialog projectId={projectId} onClose={()=>setScheduleOpen(false)} onSaved={()=>{setAttempt(v=>v+1);void load(projectId).then(s=>{if(s.metric)onMetricChange(s.metric);}).catch(()=>{});}}/>}
   </div>;
 }

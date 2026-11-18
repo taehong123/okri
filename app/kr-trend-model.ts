@@ -1,5 +1,5 @@
 import type { KrObservation } from "@/lib/kr-metric-history";
-const definition = (p: KrObservation) => JSON.stringify([p.source, p.unit, p.baselineValue, p.targetValue]);
+const definition = (p: KrObservation) => JSON.stringify([p.source, p.unit, p.baselineValue, p.targetValue, Boolean(p.isEstimate)]);
 const day = (iso: string) => { const d = new Date(iso); return d.getFullYear() + "-" + d.getMonth() + "-" + d.getDate(); };
 export function krTrendSegments(observations: KrObservation[], unit: string, daily = false) {
   const segments: KrObservation[][] = [];

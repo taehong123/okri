@@ -64,7 +64,7 @@ function SignalIcon({signal}: {signal: KrSignal}) {
 }
 export function KrTrendSummary({data}: {data: KrMetricData}) {
   const {points, signal, unit, history} = data;
-  const label = !history ? t("측정 이력을 불러오는 중입니다.") : signalLabel(signal);
+  const label = (!history ? t("측정 이력을 불러오는 중입니다.") : signalLabel(signal))+(data.metric?.isEstimate?" · "+t("추정 포함"):"");
   const title = points.length > 1 ? t("최근 30일") + " · " + label + " · " + formatContribution(points[0].currentValue!, unit) + " → " + formatContribution(points.at(-1)!.currentValue!, unit) : label;
   const values = points.map(p => p.currentValue!), low = Math.min(...values), high = Math.max(...values), span = high - low;
   const start = Date.parse(points[0]?.observedAt ?? ""), end = Date.parse(points.at(-1)?.observedAt ?? "");
@@ -85,6 +85,7 @@ export function KrMetricDetails({data, keyResultId}: {data: KrMetricData; keyRes
   return <div className="kr-inline-metric">
     <KrMetricHistoryChart keyResultId={keyResultId} unit={unit} refreshToken={revision} initialHistory={history} onRetry={retry} summary={<div className="kr-inline-values">
       <span>{current != null ? <><b>{formatContribution(current, unit)}</b>{target != null && <span className="kr-inline-target"> / {formatContribution(target, unit)}</span>}</> : t("업데이트 전")}</span>
+      {(metric?.isEstimate??latest?.isEstimate)&&<small>{t("추정 포함")}</small>}
       {history && <span className={"kr-inline-signal signal-" + signal}><SignalIcon signal={signal}/>{signalLabel(signal)}</span>}
     </div>}/>
   </div>;

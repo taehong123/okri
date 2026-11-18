@@ -34,13 +34,13 @@ export default function KrMetricHistoryChart({keyResultId,unit,refreshToken,init
         {[10,90,170].map(v=><line key={v} className="kr-history-grid" x1="8" x2="692" y1={v} y2={v}/>)}
         {segments.map((segment,index)=><g key={index}>
           {segment.length>1&&<><path className="kr-history-target" d={segment.map((p,i)=>(i?"L":"M")+x(p)+","+y(p.targetValue)).join(" ")}/><path className="kr-history-line" d={segment.map((p,i)=>(i?"L":"M")+x(p)+","+y(p.currentValue!)).join(" ")}/></>}
-          {segment.map(p=><circle key={p.id} cx={x(p)} cy={y(p.currentValue!)} r="3.5" className="kr-history-point"><title>{day(p.observedAt)} · {formatContribution(p.currentValue!,p.unit)}</title></circle>)}
+          {segment.map(p=><circle key={p.id} cx={x(p)} cy={y(p.currentValue!)} r="3.5" className="kr-history-point"><title>{day(p.observedAt)} · {formatContribution(p.currentValue!,p.unit)}{p.isEstimate?" · "+t("추정 포함"):""}</title></circle>)}
         </g>)}
       </svg>
       <div className="kr-history-dates"><span>{day(new Date(start).toISOString())}</span><span>{day(new Date(end).toISOString())}</span></div>
       {points.length===1&&<figcaption>{t("첫 측정값입니다. 다음 기록부터 변화를 볼 수 있습니다.")}</figcaption>}
     </figure>}
     {data?.limited&&<p className="kr-metric-state" role="status">{t("이 기간의 최근 측정 10,000개를 표시합니다. 나머지 이력도 보관됩니다.")}</p>}
-    {data&&observations.length>0&&<details className="kr-history-records"><summary>{t("측정 기록 보기")}</summary><div className="kr-history-table"><table><caption>{t("KR 측정 이력")}</caption><thead><tr><th scope="col">{t("측정 시각")}</th><th scope="col">{t("현재값")}</th><th scope="col">{t("목표값")}</th><th scope="col">{t("측정 방식")}</th></tr></thead><tbody>{observations.slice(-100).reverse().map(p=><tr key={p.id}><td>{new Date(p.observedAt).toLocaleString(getClientLocale())}</td><td>{p.currentValue===null?t("설정 변경"):formatContribution(p.currentValue,p.unit)}</td><td>{formatContribution(p.targetValue,p.unit)}</td><td>{p.source==="api"?t("API 연동"):t("Project 성과 합산")}</td></tr>)}</tbody></table></div></details>}
+    {data&&observations.length>0&&<details className="kr-history-records"><summary>{t("측정 기록 보기")}</summary><div className="kr-history-table"><table><caption>{t("KR 측정 이력")}</caption><thead><tr><th scope="col">{t("측정 시각")}</th><th scope="col">{t("현재값")}</th><th scope="col">{t("목표값")}</th><th scope="col">{t("측정 방식")}</th></tr></thead><tbody>{observations.slice(-100).reverse().map(p=><tr key={p.id}><td>{new Date(p.observedAt).toLocaleString(getClientLocale())}</td><td>{p.currentValue===null?t("설정 변경"):formatContribution(p.currentValue,p.unit)}</td><td>{formatContribution(p.targetValue,p.unit)}</td><td>{p.source==="api"?t("API 연동"):t("Project 성과 합산")}{p.isEstimate?" · "+t("추정 포함"):""}</td></tr>)}</tbody></table></div></details>}
   </div>;
 }

@@ -12,7 +12,9 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   project_templates: "id,owner_id,name,description,content,plain_text,created_by_user_id,created_at,updated_at",
   kr_project_metrics: "id,owner_id,kr_item_id,starting_value,target_value,unit,active,version,created_at,updated_at",
   project_contributions: "id,owner_id,project_id,kr_item_id,default_value,actual_value,applied,enabled,last_request_id,version,created_at,updated_at",
-  kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at",
+  workspace_metric_calendars: "id,owner_id,timezone,holidays_json,version,created_at,updated_at",
+  project_metric_schedules: "id,owner_id,project_id,kr_item_id,mode,amount,start_date,end_date,pauses_json,credit_dates_json,accrued_value,through_date,calendar_version,active,suspended_at,version,created_at,updated_at",
+  kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at,is_estimate",
   project_task_goals: "id,owner_id,project_id,target_count,version,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
   item_property_values: "id,owner_id,item_id,property_id,value,legacy_value,updated_at",
@@ -179,6 +181,9 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   if(Array.isArray(data.tables.kr_project_metrics)) data.tables.kr_project_metrics=data.tables.kr_project_metrics.map(row=>({active:1,...row}));
   data.tables.project_contributions ??= [];
   data.tables.kr_metric_observations ??= [];
+  if(Array.isArray(data.tables.kr_metric_observations))data.tables.kr_metric_observations=data.tables.kr_metric_observations.map(row=>({is_estimate:0,...row}));
+  data.tables.workspace_metric_calendars ??= [];
+  data.tables.project_metric_schedules ??= [];
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");
@@ -262,7 +267,7 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
     tables.daily_scrum_task_selections = tables.daily_scrum_task_selections.filter((r) => scrumIds.has(r.daily_scrum_id));
     for (const row of tables.daily_submissions) if (!members.has(row.member_id)) row.member_id = null;
     for (const row of tables.routines) if (!members.has(row.assignee_member_id)) row.assignee_member_id = null;
-    for (const name of ["kr_project_metrics", "project_contributions"]) {
+    for (const name of ["kr_project_metrics", "project_contributions", "workspace_metric_calendars", "project_metric_schedules"]) {
       const versions = new Map(current.tables[name].map((r) => [r.id, Number(r.version)]));
       for (const row of tables[name]) row.version = Math.max(Number(row.version), versions.get(row.id) ?? 0) + 1;
     }
@@ -334,7 +339,7 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
     // Observation triggers skip intermediate restore states inside the guarded batch.
     statements.push(ctx.DB.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at)
       SELECT lower(hex(randomblob(16))),m.owner_id,m.kr_item_id,'projects','restored',
-        m.starting_value+coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=m.owner_id AND c.kr_item_id=m.kr_item_id AND c.applied=1),0),
+        m.starting_value+coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=m.owner_id AND c.kr_item_id=m.kr_item_id AND c.applied=1),0)+coalesce((SELECT sum(s.accrued_value) FROM project_metric_schedules s WHERE s.owner_id=m.owner_id AND s.kr_item_id=m.kr_item_id),0),
         0,m.target_value,m.unit,? FROM kr_project_metrics m WHERE m.owner_id=? AND m.active=1`).bind(new Date().toISOString(),ownerId));
     statements.push(ctx.DB.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload)
       VALUES (?, ?, ?, 'workspace_restored', 'web', ?)`)

@@ -28,7 +28,7 @@ const paceSource = await read("lib/pace-data.ts");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
 const selected = new Set(["listDataConnections", "createDataConnection", "updateDataConnection", "getDataConnection", "requireDataConnectionTarget", "dataConnectionTargetMap", "serializeDataConnection", "normalizeKrDataCadence", "finiteMetric", "normalizeKrDataEndpoint", "isPrivateHostname"]);
 const paceFunctions = paceAst.statements.filter(n => ts.isFunctionDeclaration(n) && selected.has(n.name?.text)).map(n => n.getText(paceAst)).join("\n");
-const migrations = await Promise.all(["0076_project_task_goals", "0077_project_contributions", "0078_kr_data_sources", "0079_kr_metric_history"].map(n => read(`drizzle/${n}.sql`)));
+const migrations = await Promise.all(["0076_project_task_goals", "0077_project_contributions", "0078_kr_data_sources", "0079_kr_metric_history", "0080_project_metric_schedules"].map(n => read(`drizzle/${n}.sql`)));
 const auth = {ownerId: "w", userId: "u", role: "owner", apiToken: true};
 const endpoint = "https://metrics.example.com/private/metric?token=secret-test-token";
 const settings = {item_id: "kr", target_kind: "key_result", endpoint_url: endpoint, value_path: "", baseline_value: 37158, target_value: 50000, unit: "건/주", cadence: "hourly", active: true};

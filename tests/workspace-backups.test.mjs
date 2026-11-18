@@ -22,6 +22,7 @@ const clientDirectoryMigration = await readFile(new URL("../drizzle/0065_client_
 const contributionMigration = await readFile(new URL("../drizzle/0077_project_contributions.sql", import.meta.url), "utf8");
 const sourceMigration = await readFile(new URL("../drizzle/0078_kr_data_sources.sql", import.meta.url), "utf8");
 const historyMigration = await readFile(new URL("../drizzle/0079_kr_metric_history.sql", import.meta.url), "utf8");
+const recurringMigration = await readFile(new URL("../drizzle/0080_project_metric_schedules.sql", import.meta.url), "utf8");
 const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
 
 function fixture() {
@@ -47,6 +48,7 @@ function fixture() {
   sqlite.exec(contributionMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(sourceMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(historyMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(recurringMigration.replaceAll("--> statement-breakpoint", ""));
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -108,6 +110,10 @@ function fixture() {
     INSERT INTO activity_log (id,owner_id,item_id,action) VALUES ('old-log','w','project','created');`);
   sqlite.exec("INSERT INTO project_task_goals(id,owner_id,project_id,target_count) VALUES ('project','w','project',10)");
   sqlite.exec("INSERT INTO kr_project_metrics(id,owner_id,kr_item_id,starting_value,target_value) VALUES ('metric','w','kr',20,100);INSERT INTO project_contributions(id,owner_id,project_id,kr_item_id,default_value) VALUES ('contribution','w','project','kr',10)");
+  sqlite.exec(`INSERT INTO workspace_metric_calendars(id,owner_id,timezone,holidays_json,created_at,updated_at) VALUES('w','w','Asia/Seoul','["2026-12-25"]','2026-11-18','2026-11-18');
+    INSERT INTO items(id,owner_id,parent_id,kind,title) VALUES('scheduled-project','w','initiative','project','Scheduled automation');
+    INSERT INTO project_metric_schedules(id,owner_id,project_id,kr_item_id,mode,amount,start_date,credit_dates_json,accrued_value,through_date,calendar_version,active,created_at,updated_at)
+      VALUES('schedule','w','scheduled-project','kr','once',0,'2050-01-01','[]',0,'2026-11-18',1,0,'2026-11-18','2026-11-18');`);
   return { sqlite, ctx, objects, bucket };
 }
 
@@ -195,6 +201,19 @@ test("restoring measured KR history records only the final restored total, prese
   assert.equal(f.sqlite.prepare("SELECT active FROM kr_data_connections WHERE id='dormant'").get().active,0);
   f.sqlite.close();
 });
+test("schedule/calendar restore retains dated estimates and records only the final restored total",async()=>{
+  const f=fixture();
+  f.sqlite.exec(`UPDATE project_metric_schedules SET amount=3,start_date='2026-11-17',credit_dates_json='["2026-11-17"]',accrued_value=3,active=1 WHERE id='schedule'`);
+  const backup=await backups.createWorkspaceBackup(f.ctx,"w","manual","u");
+  f.sqlite.exec("UPDATE project_metric_schedules SET amount=6,accrued_value=6,version=version+1 WHERE id='schedule';UPDATE workspace_metric_calendars SET holidays_json='[]',version=version+1");
+  await backups.restoreWorkspaceBackup(f.ctx,"w",backup.id,"u");
+  const restored=f.sqlite.prepare("SELECT * FROM project_metric_schedules WHERE id='schedule'").get();
+  assert.equal(restored.accrued_value,3);assert.deepEqual(JSON.parse(restored.credit_dates_json),["2026-11-17"]);
+  assert.deepEqual(JSON.parse(f.sqlite.prepare("SELECT holidays_json FROM workspace_metric_calendars").get().holidays_json),["2026-12-25"]);
+  const point=f.sqlite.prepare("SELECT * FROM kr_metric_observations ORDER BY rowid DESC LIMIT 1").get();assert.equal(point.current_value,23);assert.equal(point.is_estimate,1);
+  assert.equal(f.sqlite.prepare("SELECT progress FROM items WHERE id='kr'").get().progress,23);f.sqlite.close();
+});
+
 test("backup restoration preserves measurement order when timestamps tie",async()=>{
   const f=fixture(),at="2026-11-01T09:00:00.000Z",insert=f.sqlite.prepare("INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at) VALUES(?,'w','kr','projects','completed',?,0,100,'건',?)");
   for(const [id,value] of [["z-first",20],["a-second",28],["m-last",30]])insert.run(id,value,at);
@@ -264,17 +283,18 @@ test("revoked admin permission during restore prevents committing", async () => 
 
 test("storage failure and corrupt backup never modify live data or present a ready backup", async () => {
   const f = fixture();
+  const itemCount=f.sqlite.prepare("SELECT count(*) n FROM items").get().n;
   f.bucket.put = async () => { throw new Error("offline"); };
   await assert.rejects(backups.createWorkspaceBackup(f.ctx, "w", "daily"));
   assert.equal((await backups.listWorkspaceBackups(f.ctx, "w")).backups.length, 0);
-  assert.equal(f.sqlite.prepare("SELECT count(*) n FROM items").get().n, 7);
+  assert.equal(f.sqlite.prepare("SELECT count(*) n FROM items").get().n, itemCount);
   assert.ok(f.sqlite.prepare("SELECT last_error FROM workspace_backup_state WHERE owner_id='w'").get().last_error);
   f.bucket.put = async (key, bytes) => f.objects.set(key, new TextDecoder().decode(bytes));
   const original = await backups.createWorkspaceBackup(f.ctx, "w", "daily");
   const key = f.sqlite.prepare("SELECT object_key FROM workspace_backups WHERE id=?").get(original.id).object_key;
   f.objects.set(key, "corrupt");
   await assert.rejects(backups.restoreWorkspaceBackup(f.ctx, "w", original.id, "u"), { code: "invalid_backup" });
-  assert.equal(f.sqlite.prepare("SELECT count(*) n FROM items").get().n, 7);
+  assert.equal(f.sqlite.prepare("SELECT count(*) n FROM items").get().n, itemCount);
   f.sqlite.close();
 });
 
@@ -316,7 +336,9 @@ test("revision triggers cover all restored tables and business changes do not al
   const f = fixture();
   const clientColumns = {
     kr_project_metrics: ["id","owner_id","kr_item_id","starting_value","target_value","unit","active","version","created_at","updated_at"],
-    kr_metric_observations: ["id","owner_id","kr_item_id","source","event_kind","current_value","baseline_value","target_value","unit","observed_at"],
+    kr_metric_observations: ["id","owner_id","kr_item_id","source","event_kind","current_value","baseline_value","target_value","unit","observed_at","is_estimate"],
+    workspace_metric_calendars: ["id","owner_id","timezone","holidays_json","version","created_at","updated_at"],
+    project_metric_schedules: ["id","owner_id","project_id","kr_item_id","mode","amount","start_date","end_date","pauses_json","credit_dates_json","accrued_value","through_date","calendar_version","active","suspended_at","version","created_at","updated_at"],
     project_contributions: ["id","owner_id","project_id","kr_item_id","default_value","actual_value","applied","enabled","last_request_id","version","created_at","updated_at"],
     project_task_goals: ["id", "owner_id", "project_id", "target_count", "version", "created_at", "updated_at"],
     clients: ["id", "owner_id", "external_customer_id", "name", "phone", "email", "source_type", "source_name", "source_url", "source_updated_at", "created_by_user_id", "created_at", "updated_at"],
