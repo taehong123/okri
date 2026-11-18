@@ -6294,7 +6294,8 @@ export async function createDataConnection(ownerId: string, userId: string, inpu
   return serializeDataConnection(created, target.kind as DataConnectionTargetKind);
 }
 
-export async function updateDataConnection(ownerId: string, id: string, input: DataConnectionInput) {
+export async function updateDataConnection(ownerId: string, id: string, input: DataConnectionInput,
+  expected?: Pick<DataConnectionSummary, "updatedAt" | "name" | "endpointUrl" | "valuePath" | "baselineValue" | "targetValue" | "unit" | "cadence" | "active">) {
   await ensureWorkspace(ownerId);
   const current = await getDataConnection(ownerId, id);
   if (!current) throw new Error("Data connection not found");
@@ -6318,7 +6319,13 @@ export async function updateDataConnection(ownerId: string, id: string, input: D
     cadence, active,
     nextSyncAt: active && cadence !== "manual" ? now : null,
     updatedAt: now,
-  }).where(and(eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id))).returning();
+  }).where(and(eq(krDataConnections.ownerId, ownerId), eq(krDataConnections.id, id),
+    expected ? and(eq(krDataConnections.updatedAt, expected.updatedAt), eq(krDataConnections.name, expected.name),
+      eq(krDataConnections.endpointUrl, expected.endpointUrl), eq(krDataConnections.valuePath, expected.valuePath),
+      eq(krDataConnections.baselineValue, expected.baselineValue), eq(krDataConnections.targetValue, expected.targetValue),
+      eq(krDataConnections.unit, expected.unit), eq(krDataConnections.cadence, expected.cadence), eq(krDataConnections.active, expected.active)) : undefined,
+  )).returning();
+  if (!updated && expected) throw new Error("Data connection changed; read settings again");
   if (!updated) throw new Error("Data connection not found");
   return serializeDataConnection(updated, target.kind as DataConnectionTargetKind);
 }
