@@ -10,6 +10,7 @@ const old=await readFile(new URL("../drizzle/0076_project_task_goals.sql",import
 const migration=await readFile(new URL("../drizzle/0077_project_contributions.sql",import.meta.url),"utf8");
 const sourceMigration=await readFile(new URL("../drizzle/0078_kr_data_sources.sql",import.meta.url),"utf8");
 const historyMigration=await readFile(new URL("../drizzle/0079_kr_metric_history.sql",import.meta.url),"utf8");
+const recurringMigration=await readFile(new URL("../drizzle/0080_project_metric_schedules.sql",import.meta.url),"utf8");
 const history={};new Function("exports","require",ts.transpileModule(await readFile(new URL("../lib/kr-metric-history.ts",import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(history,()=>contributions);
 const sync={};new Function("exports",ts.transpileModule(await readFile(new URL("../lib/kr-data-sync.ts",import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(sync);
 const sources={};new Function("exports","require",ts.transpileModule(await readFile(new URL("../lib/kr-data-sources.ts",import.meta.url),"utf8"),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText)(sources,name=>name.includes("kr-data-sync")?sync:contributions);
@@ -29,7 +30,7 @@ function fixture(t,upgrade=true){
       ('i','w','kr','initiative','todo',0),('i2','w','kr2','initiative','todo',0),
       ('p','w','i','project','todo',35),('q','w','i','project','todo',0),
       ('foreign','other',NULL,'project','todo',0),('t','w','p','task','todo',0);`);
-  sql.exec(old);if(upgrade){sql.exec(migration);sql.exec(sourceMigration);sql.exec(historyMigration);}
+  sql.exec(old);if(upgrade){sql.exec(migration);sql.exec(sourceMigration);sql.exec(historyMigration);sql.exec(recurringMigration);}
   const prepare=(query,args=[])=>({bind:(...v)=>prepare(query,v),first:async()=>sql.prepare(query).get(...args)??null,all:async()=>({results:sql.prepare(query).all(...args)}),run:async()=>({meta:{changes:Number(sql.prepare(query).run(...args).changes)}})});
   const db={prepare,batch:async statements=>{sql.exec("BEGIN");try{const result=[];for(const s of statements)result.push(await s.run());sql.exec("COMMIT");return result;}catch(e){sql.exec("ROLLBACK");throw e;}}};
   const read=async(id="p")=>contributions.readContribution(db,"w",id);

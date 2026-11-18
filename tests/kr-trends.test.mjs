@@ -19,6 +19,11 @@ test("missing, single and failed records do not invent a direction",()=>{
   assert.equal(model.krTrendSignal([p(20),p(28)],true),"error");
   assert.deepEqual(model.krTrendSegments([p(null)],"명"),[]);
 });
+
+test("estimated totals are not joined to an actual-measurement trend",()=>{
+  const segments=model.krTrendSegments([p(20),p(25),p(30,{isEstimate:true}),p(35,{isEstimate:true})],"명");
+  assert.deepEqual(segments.map(s=>s.map(p=>p.currentValue)),[[20,25],[30,35]]);
+});
 test("source, unit, baseline and goal changes split historical lines",()=>{
   const history=[p(20),p(28),p(null,{source:"api",eventKind:"settings"}),p(30,{source:"api"}),p(35,{source:"api"}),p(40,{source:"api",targetValue:200}),p(60,{source:"api",targetValue:200}),p(70,{unit:"원"})];
   const segments=model.krTrendSegments(history,"명");

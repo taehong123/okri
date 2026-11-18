@@ -1929,6 +1929,7 @@ export const krMetricObservations = sqliteTable("kr_metric_observations", {
   targetValue: real("target_value").notNull(),
   unit: text("unit").notNull().default(""),
   observedAt: text("observed_at").notNull(),
+  isEstimate: integer("is_estimate", { mode: "boolean" }).notNull().default(false),
 }, table => [
   index("idx_kr_metric_observations_owner_kr_time").on(table.ownerId, table.keyResultId, table.observedAt),
   check("kr_metric_observation_source", sql`${table.source} IN ('api','projects')`),
@@ -1951,6 +1952,33 @@ export const projectContributions = sqliteTable("project_contributions", {
   uniqueIndex("idx_project_contributions_owner_project").on(table.ownerId, table.projectId),
   index("idx_project_contributions_owner_kr").on(table.ownerId, table.keyResultId),
   check("project_contribution_values", sql`${table.defaultValue} BETWEEN 0 AND 1000000000000 AND (${table.actualValue} IS NULL OR ${table.actualValue} BETWEEN 0 AND 1000000000000)`),
+]);
+
+export const workspaceMetricCalendars = sqliteTable("workspace_metric_calendars", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }).unique(),
+  timezone: text("timezone").notNull().default("Asia/Seoul"),
+  holidaysJson: text("holidays_json").notNull().default("[]"),
+  version: integer("version").notNull().default(1),
+  createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull(),
+}, table => [check("metric_calendar_holidays", sql`json_valid(${table.holidaysJson}) AND json_type(${table.holidaysJson})='array'`)]);
+
+export const projectMetricSchedules = sqliteTable("project_metric_schedules", {
+  id: text("id").primaryKey(), ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  keyResultId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  mode: text("mode").notNull(), amount: real("amount").notNull(), startDate: text("start_date").notNull(), endDate: text("end_date"),
+  pausesJson: text("pauses_json").notNull().default("[]"), creditDatesJson: text("credit_dates_json").notNull().default("[]"),
+  accruedValue: real("accrued_value").notNull().default(0), throughDate: text("through_date").notNull(),
+  calendarVersion: integer("calendar_version").notNull().default(0), active: integer("active", { mode: "boolean" }).notNull().default(true), suspendedAt: text("suspended_at"),
+  version: integer("version").notNull().default(1), createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull(),
+}, table => [
+  uniqueIndex("idx_project_metric_schedules_owner_project_kr").on(table.ownerId, table.projectId, table.keyResultId),
+  index("idx_project_metric_schedules_due").on(table.active, table.throughDate), index("idx_project_metric_schedules_owner_kr").on(table.ownerId, table.keyResultId),
+  check("metric_schedule_mode", sql`${table.mode} IN ('once','business_days','daily')`),
+  check("metric_schedule_amount", sql`${table.amount} BETWEEN 0 AND 1000000000000 AND ${table.accruedValue} BETWEEN 0 AND 1000000000000`),
+  check("metric_schedule_pauses", sql`json_valid(${table.pausesJson}) AND json_type(${table.pausesJson})='array'`),
+  check("metric_schedule_dates", sql`json_valid(${table.creditDatesJson}) AND json_type(${table.creditDatesJson})='array' AND json_array_length(${table.creditDatesJson})<=36600`),
 ]);
 
 export const projectContributionGuards = sqliteTable("project_contribution_guards", {

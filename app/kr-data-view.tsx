@@ -241,7 +241,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
       <select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)} aria-label={t("데이터 정렬")}><option value="structure">{t("구조 순서")}</option><option value="cadence">{t("갱신 주기")}</option><option value="status">{t("연결 상태")}</option></select>
       <button className="primary-action" disabled={readOnly || !hasAvailableTarget} onClick={() => openCreate()}><Plus size={14} />{t("Project API 연결")}</button>
     </section>
-    <aside className="kr-data-guide"><Database size={17} /><div><b>{t("KR과 Project를 각각 수치로 측정합니다")}</b><p>{t("API 데이터 또는 Project 완료 시 확인한 성과로 KR 수치를 관리합니다.")}</p></div></aside>
+    <aside className="kr-data-guide"><Database size={17} /><div><b>{t("KR과 Project를 각각 수치로 측정합니다")}</b><p>{t("API 데이터 또는 Project 기여 방식으로 KR 수치를 관리합니다.")}</p></div></aside>
     {!targets.length ? <DataState icon={Database} title={t("연결할 KR 또는 Project가 없습니다")} detail={t("먼저 OKR이나 Project 화면에서 항목을 만들어 주세요.")} /> : (
       <section className="kr-data-list" aria-label={t("데이터 연결 목록")}>
         {filtered.map((item) => {
@@ -252,7 +252,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
             <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{item.progress}%</strong></header>
             {metric ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${metric.progress}%` }} /></span><b>{formatDataMetric(metric.currentValue, metric.unit)} <em>/ {formatDataMetric(metric.targetValue, metric.unit)}</em></b></div>
-              <p>{t("Project 성과 합산")} · {t("Project 완료 시 확인한 실제 기여량을 누적합니다.")}</p>
+              <p>{t("Project 성과 합산")} · {t("Project 완료 성과와 날짜별 추정 기여를 합산합니다.")}{metric.isEstimate?" · "+t("추정 포함"):""}</p>
               <footer><button disabled={readOnly} onClick={()=>setConfiguringKr(item.id)}><Pencil size={13}/>{t("KR 데이터 설정")}</button></footer>
             </> : connection ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${item.progress}%` }} /></span><b>{formatDataMetric(connection.lastValue, connection.unit)} <em>/ {formatDataMetric(connection.targetValue, connection.unit)}</em></b></div>

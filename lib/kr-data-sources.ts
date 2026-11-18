@@ -8,14 +8,15 @@ export type KrSourceSettings = {
   revision: string;
   metric: { startingValue: number; currentValue: number; targetValue: number; unit: string } | null;
   api: { name: string; endpointUrl: string; valuePath: string; baselineValue: number; targetValue: number; unit: string; cadence: string; active: boolean } | null;
-  projects: { id: string; title: string; status: string; defaultValue: number | null; actualValue: number | null; applied: boolean }[];
+  projects: { id: string; title: string; status: string; defaultValue: number | null; actualValue: number | null; applied: boolean; schedule?:{mode:string;amount:number;accruedValue:number} | null }[];
 };
-export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number };
+export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean };
 type Row = Record<string, string | number | null>;
 const children = `SELECT p.id,p.title,p.status,p.updated_at,c.id AS config_id,c.version AS config_version,c.kr_item_id,
- c.default_value,c.actual_value,c.applied,c.enabled
+ c.default_value,c.actual_value,c.applied,c.enabled,s.mode AS schedule_mode,s.amount AS schedule_amount,s.accrued_value AS schedule_value
  FROM items p JOIN items i ON i.id=p.parent_id AND i.owner_id=p.owner_id
  LEFT JOIN project_contributions c ON c.owner_id=p.owner_id AND c.project_id=p.id
+ LEFT JOIN project_metric_schedules s ON s.owner_id=p.owner_id AND s.project_id=p.id AND s.kr_item_id=i.parent_id
  WHERE p.owner_id=? AND i.parent_id=? AND i.kind='initiative' AND i.archived_at IS NULL
  AND p.kind='project' AND p.archived_at IS NULL ORDER BY p.id`;
 
@@ -23,7 +24,7 @@ async function snapshot(db: D1Database, ownerId: string, id: string) {
   const kr=await db.prepare("SELECT id,title,progress,updated_at FROM items WHERE owner_id=? AND id=? AND kind='key_result' AND archived_at IS NULL").bind(ownerId,id).first<Row>();
   if(!kr)throw new ContributionError("key_result_not_found",404);
   const [m,a,p]=await Promise.all([
-    db.prepare(`SELECT m.*,m.starting_value+coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=m.owner_id AND c.kr_item_id=m.kr_item_id AND c.applied=1),0) AS current_value FROM kr_project_metrics m WHERE owner_id=? AND kr_item_id=?`).bind(ownerId,id).first<Row>(),
+    db.prepare(`SELECT m.*,m.starting_value+coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=m.owner_id AND c.kr_item_id=m.kr_item_id AND c.applied=1),0)+coalesce((SELECT sum(s.accrued_value) FROM project_metric_schedules s WHERE s.owner_id=m.owner_id AND s.kr_item_id=m.kr_item_id),0) AS current_value FROM kr_project_metrics m WHERE owner_id=? AND kr_item_id=?`).bind(ownerId,id).first<Row>(),
     db.prepare("SELECT * FROM kr_data_connections WHERE owner_id=? AND kr_item_id=?").bind(ownerId,id).first<Row>(),
     db.prepare(children).bind(ownerId,id).all<Row>(),
   ]);
@@ -37,19 +38,20 @@ function settings(s: Awaited<ReturnType<typeof snapshot>>): KrSourceSettings {
     mode:m?.active===1?"projects":a?"api":null,
     metric:m?{startingValue:Number(m.starting_value),currentValue:Number(m.current_value),targetValue:Number(m.target_value),unit:String(m.unit)}:null,
     api:a?{name:String(a.name),endpointUrl:String(a.endpoint_url),valuePath:String(a.value_path),baselineValue:Number(a.baseline_value),targetValue:Number(a.target_value),unit:String(a.unit),cadence:String(a.cadence),active:Boolean(a.active)}:null,
-    projects:s.projects.map(p=>({id:String(p.id),title:String(p.title),status:String(p.status),defaultValue:p.enabled===1&&p.kr_item_id===kr.id?Number(p.default_value):null,actualValue:p.kr_item_id===kr.id&&p.actual_value!==null?Number(p.actual_value):null,applied:p.kr_item_id===kr.id&&Boolean(p.applied)})),
+    projects:s.projects.map(p=>({id:String(p.id),title:String(p.title),status:String(p.status),defaultValue:p.enabled===1&&p.kr_item_id===kr.id?Number(p.default_value):null,actualValue:p.kr_item_id===kr.id&&p.actual_value!==null?Number(p.actual_value):null,applied:p.kr_item_id===kr.id&&Boolean(p.applied),schedule:p.schedule_mode?{mode:String(p.schedule_mode),amount:Number(p.schedule_amount),accruedValue:Number(p.schedule_value)}:null})),
   };
 }
 export async function readKrSource(db: D1Database, ownerId: string, id: string) { return settings(await snapshot(db,ownerId,id)); }
 export async function listKrMetricSummaries(db: D1Database, ownerId: string): Promise<KrMetricSummary[]> {
   const rows=await db.prepare(`SELECT k.id,k.progress,m.active,m.starting_value,m.target_value,m.unit,a.id AS api_id,a.last_value,a.target_value AS api_target,a.unit AS api_unit,
-    coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=k.owner_id AND c.kr_item_id=k.id AND c.applied=1),0) AS earned
+    EXISTS(SELECT 1 FROM project_metric_schedules s WHERE s.owner_id=k.owner_id AND s.kr_item_id=k.id AND json_array_length(s.credit_dates_json)>0) AS is_estimate,
+    coalesce((SELECT sum(actual_value) FROM project_contributions c WHERE c.owner_id=k.owner_id AND c.kr_item_id=k.id AND c.applied=1),0)+coalesce((SELECT sum(accrued_value) FROM project_metric_schedules s WHERE s.owner_id=k.owner_id AND s.kr_item_id=k.id),0) AS earned
     FROM items k LEFT JOIN kr_project_metrics m ON m.owner_id=k.owner_id AND m.kr_item_id=k.id
     LEFT JOIN kr_data_connections a ON a.owner_id=k.owner_id AND a.kr_item_id=k.id
     WHERE k.owner_id=? AND k.kind='key_result' AND k.archived_at IS NULL`).bind(ownerId).all<Row>();
   return rows.results.map(r=>({keyResultId:String(r.id),mode:r.active===1?"projects":r.api_id?"api":null,
     currentValue:r.active===1?Number(r.starting_value)+Number(r.earned):r.api_id&&r.last_value!==null?Number(r.last_value):null,
-    targetValue:r.active===1?Number(r.target_value):r.api_id?Number(r.api_target):null,unit:String(r.active===1?r.unit:r.api_unit??""),progress:Number(r.progress)}));
+    targetValue:r.active===1?Number(r.target_value):r.api_id?Number(r.api_target):null,unit:String(r.active===1?r.unit:r.api_unit??""),progress:Number(r.progress),isEstimate:r.active===1&&Boolean(r.is_estimate)}));
 }
 function numeric(v:unknown,positive=false) {
   if(typeof v!=="number"||!Number.isFinite(v)||v<0||v>1e12||(positive&&v===0))throw new ContributionError("invalid_contribution",400);

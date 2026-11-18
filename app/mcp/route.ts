@@ -4,6 +4,7 @@ import { z } from "zod";
 import { env } from "cloudflare:workers";
 import { listRoutineProperties } from "@/lib/routine-properties";
 import { registerDataConnectionTools } from "@/lib/mcp-data-connections";
+import { registerContributionScheduleTools } from "@/lib/mcp-contribution-schedules";
 import {
   createClient,
   listClients,
@@ -413,7 +414,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   const { ownerId } = authorization;
   const rules = await getWorkspaceRules(ownerId);
   const server = new McpServer(
-    { name: "okri", version: "0.11.0" },
+    { name: "okri", version: "0.12.0" },
     {
       instructions:
         [
@@ -2124,6 +2125,7 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   );
 
   registerDataConnectionTools(server, env.DB, authorization);
+  registerContributionScheduleTools(server, env.DB, authorization);
   return server;
 }
 

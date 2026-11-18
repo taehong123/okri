@@ -103,5 +103,12 @@
     "rollbackPlan": "Keep additive active flags, observation rows and accounting triggers on code rollback. Pause affected KR syncs before using older configuration UI; forward-fix source selection. No historical migration is modified.",
     "dataPreservation": "Source switches retain API configuration, Project defaults and applied credits. Replaced triggers enforce exclusivity for active sources, preserve completion undo, and block stale API overwrites. Observation triggers append factual snapshots without synthesizing past values; workspace backups include history.",
     "reviewedBy": "Codex source-bound SQLite accounting, observation and installed-client compatibility review, 2026-11-17"
+  },
+  "drizzle/0080_project_metric_schedules.sql": {
+    "sha256": "4d88df61915f4ee0febcdcf28ccda276fa189200ceabb83940bac80b3f81e701",
+    "v1Compatibility": "Additive schedule/calendar storage and an observation estimate flag retain frozen mobile v1 payloads, auth, legacy completion defaults and Task semantics. Explicitly scheduled Projects accrue independently of completion; existing settings are not migrated or activated.",
+    "rollbackPlan": "Retain additive tables, dated estimates and forward accounting/history guards on application rollback. Stop schedule jobs if needed and forward-fix editors; do not drop customer schedules or edit historical migrations. Old clients continue reading the stored KR progress.",
+    "dataPreservation": "The forward migration replaces only calculation/history triggers to add independently stored scheduled estimates while preserving existing actual completion credits and active API source isolation. Unique per-Project/KR schedules and validated unique credit dates prevent duplicate accrual. Workspace-scoped target guards and transactional revisions reject stale writes. Calendar/schedules and estimate metadata are included in backups and restores.",
+    "reviewedBy": "Codex source-bound SQLite accounting, calendar, idempotency, source isolation, backup and compatibility review, 2026-11-18"
   }
 }

@@ -215,9 +215,11 @@ test("disconnected task rules do not block other workspaces or replay on reconne
 test("delivery queues resume each minute without accelerating existing maintenance jobs", async () => {
   const calls = [];
   const mark = (name) => async () => { calls.push(name); };
-  const worker = compile(workerSource, {
-    "vinext/server/image-optimization": {}, "vinext/server/app-router-entry": {},
-    "@/lib/workspace-address": {}, "@/lib/api-error": {},
+  const runner = compile(await read("lib/scheduled-jobs.ts"), {
+    "@/lib/project-metric-schedules": {runDueProjectContributions:mark("contributions")},
+    "@/lib/ticket-automation": {runTicketAutomation:mark("tickets")},
+    "@/lib/notifications": {runNotificationJobs:mark("notifications")},
+    "@/lib/android-test-feedback": {runAndroidTestDailyReport:mark("android")},
     "@/lib/kr-data-sync": { syncDueKrDataConnectionsWithDb: mark("kr") },
     "@/lib/workspace-backups": { runDueWorkspaceBackups: mark("backups") },
     "@/lib/workspace-management-bot": { runDueWorkspaceManagementBots: mark("management") },
@@ -227,12 +229,16 @@ test("delivery queues resume each minute without accelerating existing maintenan
     "@/lib/slack-daily-manual": { runDueDailyManualRuns: mark("manual") },
     "@/lib/billing": { runBillingBatch: mark("billing") },
     "@/lib/slack-daily-digest": { runDueDailyDigests: mark("digest") },
+  });
+  const worker=compile(workerSource,{
+    "vinext/server/image-optimization":{},"vinext/server/app-router-entry":{},
+    "@/lib/workspace-address":{},"@/lib/api-error":{},"@/lib/scheduled-jobs":runner,
   }).default;
   for (const minute of [0, 1, 14, 15]) {
     calls.length = 0;
     const pending = [];
     worker.scheduled({ scheduledTime: Date.UTC(2026, 8, 5, 1, minute) }, { DB: {} }, { waitUntil: (job) => pending.push(job) });
     await Promise.all(pending);
-    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["deliveries", "changes", "manual", "digest", "kr", "backups", "management", "reminders", "billing"] : ["deliveries", "changes", "manual", "digest"]).sort());
+    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "kr", "backups", "management", "reminders", "billing","contributions"] : ["tickets","notifications","android","deliveries", "changes", "manual", "digest"]).sort());
   }
 });

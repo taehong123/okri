@@ -1,0 +1,18 @@
+import {env} from "cloudflare:workers";
+import {authorizeRequest,ensureWorkspace} from "@/lib/pace-data";
+import {readProjectSchedule,saveProjectSchedule,ScheduleError} from "@/lib/project-metric-schedules";
+const headers={"Cache-Control":"private, no-store"};
+export async function GET(request:Request) {
+  const auth=await authorizeRequest(request,{allowViewerWrite:true});if(auth instanceof Response)return auth;
+  try {await ensureWorkspace(auth.ownerId);return Response.json(await readProjectSchedule(env.DB,auth.ownerId,new URL(request.url).searchParams.get("projectId")??""),{headers});}
+  catch(error){return failure(error);}
+}
+export async function PUT(request:Request) {
+  const auth=await authorizeRequest(request);if(auth instanceof Response)return auth;
+  try {
+    await ensureWorkspace(auth.ownerId);const text=await request.text();if(text.length>16000)throw new ScheduleError("invalid_contribution_schedule",413);
+    const input=JSON.parse(text);if(!input||typeof input.projectId!=="string"||typeof input.revision!=="string")throw new ScheduleError("invalid_contribution_schedule");
+    return Response.json(await saveProjectSchedule(env.DB,auth.ownerId,input.projectId,input,input.revision),{headers});
+  }catch(error){return failure(error);}
+}
+function failure(error:unknown) {return Response.json({code:error instanceof ScheduleError?error.code:"contribution_schedule_failed"},{status:error instanceof ScheduleError?error.status:error instanceof SyntaxError?400:500,headers});}
