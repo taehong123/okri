@@ -5,6 +5,7 @@ import type { DataConnection } from "../../app/kr-data-view";
 import type { KrObservation } from "../../lib/kr-metric-history";
 export async function installKrDataMocks(page:Page,{configured=false,viewer=false,long=false}={}){
   const items=structuredClone(bootstrap.items),kr=items.find(i=>i.id==="kr-1")!,project=items.find(i=>i.id==="project-1")!;
+  kr.progress=configured?28:20;
   if(long){kr.title="고객 활성 사용자와 장기 유지율 개선 KR 2026 ".repeat(7);project.title="핵심 경험을 개선하는 Project 2026 ".repeat(7);}
   let state:KrSourceSettings={keyResult:{id:kr.id,title:kr.title,progress:configured?28:20},revision:"1",mode:configured?"projects":null,metric:configured?{startingValue:20,currentValue:28,targetValue:100,unit:"건"}:null,api:null,projects:[{id:project.id,title:project.title,status:project.status,defaultValue:configured?10:null,actualValue:configured?8:null,applied:configured}]};
   const observations:KrObservation[]=[20,25,28].map((n,i)=>({id:"sample-"+i,source:"projects",eventKind:i?"completed":"settings",currentValue:n,baselineValue:0,targetValue:100,unit:"건",observedAt:new Date(Date.now()-(8-i*2)*86_400_000).toISOString()}));
@@ -28,6 +29,7 @@ export async function installKrDataMocks(page:Page,{configured=false,viewer=fals
           connections=connections.filter(c=>c.itemId!==kr.id);
           connections.push({id:"kr-api",itemId:kr.id,targetKind:"key_result",...body.api,lastValue:null,lastSyncStatus:"never",lastError:"",lastSyncedAt:null,nextSyncAt:null,createdAt:new Date().toISOString(),updatedAt:new Date().toISOString()});
         }
+        kr.progress=state.keyResult.progress;
         return json(route,state);
       }
       return json(route,url.searchParams.has("keyResultId")?state:{metrics:[{keyResultId:kr.id,mode:state.mode,currentValue:state.mode==="projects"?state.metric?.currentValue??null:null,targetValue:state.mode==="projects"?state.metric?.targetValue??null:state.api?.targetValue??null,unit:state.mode==="projects"?state.metric?.unit??"":state.api?.unit??"",progress:state.keyResult.progress}]});
@@ -39,5 +41,5 @@ export async function installKrDataMocks(page:Page,{configured=false,viewer=fals
     if(path==="/api/data-connections/sync"){const body=request.postDataJSON(),connection=connections.find(c=>c.id===body.id)!;connection.lastValue=connection.targetKind==="project"?35:60;connection.lastSyncStatus="success";return json(route,{connection,progress:connection.lastValue,value:connection.lastValue});}
     return route.fallback();
   });
-  return {state:()=>state,writes,fail:()=>{fail=true;},observations};
+  return {state:()=>state,writes,fail:()=>{fail=true;},observations,items};
 }

@@ -21,6 +21,7 @@ import {
   X,
 } from "lucide-react";
 import { t , apiError , messageValue } from "@/lib/client-language";
+import { KrMetricsProvider, KrMetricDetails, KrTrendSummary, useKrMetricData } from "./kr-metric-graph";
 
 type ItemStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked";
 type CycleStatus = "planned" | "active" | "closed";
@@ -525,7 +526,7 @@ export function OkrFileSurface({
 
   return <article className="okr-file-read-surface">
     {error && <div className="okr-file-refresh-state error" role="status"><AlertTriangle size={12} />{error}</div>}
-    {readFile.objective ? <section className="okr-file-read-tree">
+    {readFile.objective ? <KrMetricsProvider key={workspaceId + ":" + readFile.cycle.id} workspaceId={workspaceId}><section className="okr-file-read-tree">
       <div id={`okr-search-${readFile.objective.id}`} tabIndex={-1} className={`okr-file-read-objective ${focusId === readFile.objective.id ? "search-target" : ""}`}>
         <Target className="okr-read-objective-icon" size={24} aria-hidden="true" />
         <div><small>{t("Objective")}</small><h3>{readFile.objective.title}</h3></div>
@@ -545,7 +546,7 @@ export function OkrFileSurface({
         onOpenProject={onOpenProject}
         onOpenTask={onOpenTask}
       />)}
-    </section> : <div className="okr-file-empty"><Target size={22} /><div><h2>{t("이 파일의 Objective를 작성해 주세요")}</h2><p>{t("파일 수정에서 Objective와 KR을 한 번에 만들 수 있습니다.")}</p></div>{!readOnly && <button onClick={() => void beginEdit()}><Plus size={14} />{t("파일 작성")}</button>}</div>}
+    </section></KrMetricsProvider> : <div className="okr-file-empty"><Target size={22} /><div><h2>{t("이 파일의 Objective를 작성해 주세요")}</h2><p>{t("파일 수정에서 Objective와 KR을 한 번에 만들 수 있습니다.")}</p></div>{!readOnly && <button onClick={() => void beginEdit()}><Plus size={14} />{t("파일 작성")}</button>}</div>}
   </article>;
 }
 
@@ -572,23 +573,25 @@ function OkrReadKeyResult({
 }) {
   const keyResultId = keyResult.id ?? keyResult.clientId;
   const keyResultExpanded = expandedRows.has(keyResultId);
+  const metricData = useKrMetricData(keyResultId);
   const initiativesId = `okr-tree-${keyResultId}`;
   const hasInitiatives = keyResult.initiatives.length > 0;
   const summary = <>
     <span className="okr-tree-copy"><small>{t("Key Result")} {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
     <span className="okr-tree-metrics">
+      {!keyResultExpanded && <KrTrendSummary data={metricData}/>}
       <span><small>{t("진척도")}</small><b className="okr-tree-progress">{keyResult.progress}%</b></span>
       <span className="okr-tree-count"><small>{t("Initiative")}</small><b>{keyResult.initiatives.length}</b></span>
     </span>
   </>;
   return <section id={`okr-search-${keyResultId}`} tabIndex={-1} className={`okr-file-read-kr ${focusId === keyResultId ? "search-target" : ""}`}>
-    {hasInitiatives ? <button type="button" className="okr-tree-row okr-tree-kr-row" aria-expanded={keyResultExpanded} aria-controls={initiativesId} onClick={() => onToggle(keyResultId)}>
+    <button type="button" className="okr-tree-row okr-tree-kr-row" aria-expanded={keyResultExpanded} aria-controls={initiativesId} onClick={() => onToggle(keyResultId)}>
       {summary}
       <TreeChevron expanded={keyResultExpanded} />
-    </button> : <div className="okr-tree-row okr-tree-kr-row static">
-      {summary}
-    </div>}
-    {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" id={initiativesId} role="group" aria-label={t("{value1}의 Initiative", { value1: messageValue(keyResult.title) })}>
+    </button>
+    <div id={initiativesId} hidden={!keyResultExpanded}>
+    {keyResultExpanded && <KrMetricDetails data={metricData} keyResultId={keyResultId}/>}
+    {hasInitiatives && keyResultExpanded && <div className="okr-tree-initiatives" role="group" aria-label={t("{value1}의 Initiative", { value1: messageValue(keyResult.title) })}>
       {keyResult.initiatives.map((initiative, initiativeIndex) => {
         const initiativeId = initiative.id ?? initiative.clientId;
         const projects = projectsByInitiative.get(initiativeId) ?? [];
@@ -633,6 +636,7 @@ function OkrReadKeyResult({
         </section>;
       })}
     </div>}
+    </div>
   </section>;
 }
 
