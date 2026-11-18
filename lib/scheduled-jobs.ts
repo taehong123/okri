@@ -12,6 +12,7 @@ import { runNotificationJobs } from "@/lib/notifications";
 
 import { runTicketAutomation } from "@/lib/ticket-automation";
 import { runDueProjectContributions } from "@/lib/project-metric-schedules";
+import { runDueDailyReports } from "@/lib/daily-report-slack";
 
 export type ScheduledRuntime = {
   DB: D1Database;
@@ -46,6 +47,7 @@ export async function runScheduledJobs(runtime: ScheduledRuntime, scheduledAt = 
     ["slack_task_changes", runDueTaskChanges(runtime.DB)],
     ["daily_manual_runs", runDueDailyManualRuns(runtime.DB)],
     ["daily_digests", runDueDailyDigests(runtime.DB, scheduledAt)],
+    ["daily_report_reviews", runDueDailyReports(runtime.DB, scheduledAt)],
     ["android_test_daily_report", runAndroidTestDailyReport(runtime, scheduledAt)],
     ["notifications", runNotificationJobs(runtime, scheduledAt)],
   ];

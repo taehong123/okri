@@ -228,6 +228,7 @@ test("delivery queues resume each minute without accelerating existing maintenan
     "@/lib/slack-task-changes": { runDueTaskChanges: mark("changes") },
     "@/lib/slack-daily-manual": { runDueDailyManualRuns: mark("manual") },
     "@/lib/billing": { runBillingBatch: mark("billing") },
+    "@/lib/daily-report-slack": { runDueDailyReports:mark("reports") },
     "@/lib/slack-daily-digest": { runDueDailyDigests: mark("digest") },
   });
   const worker=compile(workerSource,{
@@ -239,6 +240,6 @@ test("delivery queues resume each minute without accelerating existing maintenan
     const pending = [];
     worker.scheduled({ scheduledTime: Date.UTC(2026, 8, 5, 1, minute) }, { DB: {} }, { waitUntil: (job) => pending.push(job) });
     await Promise.all(pending);
-    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "kr", "backups", "management", "reminders", "billing","contributions"] : ["tickets","notifications","android","deliveries", "changes", "manual", "digest"]).sort());
+    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "reports", "kr", "backups", "management", "reminders", "billing","contributions"] : ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "reports"]).sort());
   }
 });

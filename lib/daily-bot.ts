@@ -471,7 +471,7 @@ export async function submitDailyDraft(authorization: RequestAuthorization, rawD
   const mutationGuardArgs = changedWork.length ? [member.id, authorization.ownerId, member.userId,
     JSON.stringify(changedWork.map(({ id, kind, status }) => ({ id, kind, status }))),
     authorization.ownerId, member.id, date, authorization.ownerId, member.id] : [];
-  const channels = await d1.prepare("SELECT channel_id FROM slack_daily_channels WHERE owner_id = ? ORDER BY channel_name")
+  const channels = await d1.prepare("SELECT channel_id FROM slack_daily_channels WHERE owner_id = ? AND NOT EXISTS(SELECT 1 FROM daily_report_policies p WHERE p.owner_id=slack_daily_channels.owner_id) ORDER BY channel_name")
     .bind(authorization.ownerId).all<{ channel_id: string }>();
   try {
     await d1.batch([

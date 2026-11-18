@@ -1,3 +1,4 @@
+const awaitDailyReportMcpSource=await readFile(new URL("../lib/mcp-daily-reports.ts",import.meta.url),"utf8");
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { DatabaseSync } from "node:sqlite";
@@ -259,6 +260,7 @@ function mcpFixture() {
   const serverModule = compile(`${mcpSource}\nexport { createOkriServer };`, {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
+    "@/lib/mcp-daily-reports": compile(awaitDailyReportMcpSource, {"./daily-report": {},"./daily-report-config": {},"./daily-report-slack": {},"./slack-daily": {}}),
     "@/lib/mcp-contribution-schedules": compile(contributionScheduleMcpSource, {"./project-metric-schedules": {},"./kr-data-sources": {}}),
     "@/lib/mcp-data-connections": compile(dataConnectionMcpSource, {
       "./pace-data": data, "./kr-data-sources": {}, "./kr-data-sync": {},

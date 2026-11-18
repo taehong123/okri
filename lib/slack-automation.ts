@@ -104,13 +104,13 @@ export class SlackMessageError extends Error {
   }
 }
 
-export async function postSlackMessage(token: string, channel: string, text: string, options: { blocks?: unknown[]; clientMsgId?: string; messageTs?: string } = {}) {
+export async function postSlackMessage(token: string, channel: string, text: string, options: { blocks?: unknown[]; clientMsgId?: string; messageTs?: string; threadTs?:string } = {}) {
   let response: Response;
   try {
     response = await fetch(`https://slack.com/api/${options.messageTs ? "chat.update" : "chat.postMessage"}`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json; charset=utf-8" },
-      body: JSON.stringify({ channel, text: text.slice(0, 3900), blocks: options.blocks, client_msg_id: options.clientMsgId, ts: options.messageTs, unfurl_links: false, unfurl_media: false }),
+      body: JSON.stringify({ channel, text: text.slice(0, 3900), blocks: options.blocks, client_msg_id: options.clientMsgId, ts: options.messageTs, thread_ts:options.messageTs?undefined:options.threadTs, unfurl_links: false, unfurl_media: false }),
       signal: AbortSignal.timeout(15_000),
     });
   } catch {

@@ -100,6 +100,7 @@ function fixture(t, options = {}) {
     });
   }
   db.exec("PRAGMA foreign_keys=ON");
+  db.exec("CREATE TABLE daily_report_policies(id TEXT,owner_id TEXT)");
   for (const table of Object.values(schema.tables)) {
     const columns = Object.values(table.columns).map((c) => `${c.name} ${c.type}${c.primaryKey ? " PRIMARY KEY" : ""}${c.notNull ? " NOT NULL" : ""}${c.default !== undefined ? ` DEFAULT ${c.default}` : ""}`);
     for (const fk of Object.values(table.foreignKeys)) columns.push(`FOREIGN KEY (${fk.columnsFrom}) REFERENCES ${fk.tableTo} (${fk.columnsTo}) ON DELETE ${fk.onDelete}`);
