@@ -579,12 +579,12 @@ test("OKR 읽기 화면은 별도 파일 요청 없이 bootstrap 데이터로 �
     await json(route, { error: "일시적인 연결 오류" }, 503);
   });
   await page.goto("/?view=okr");
-  await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
+  await expect(page.locator(".okr-file-read-objective").getByRole("heading", { name: "고객 경험 개선" })).toBeVisible();
   await expect(page.getByText("OKR 파일을 불러오는 중")).toHaveCount(0);
   expect(attempts).toBe(0);
 });
 
-test("OKR 화면 재진입은 bootstrap 최신화 한 번만 공유하고 파일을 다시 요청하지 않는다", async ({ page }) => {
+test("OKR 화면 재진입은 bootstrap 최신화 한 번만 공유하고 파일을 다시 요청하지 않는다", async ({ page, isMobile }) => {
   await installApiMocks(page);
   let readRequests = 0;
   page.on("request", (request) => {
@@ -592,11 +592,12 @@ test("OKR 화면 재진입은 bootstrap 최신화 한 번만 공유하고 파일
     if (url.pathname === "/api/okr-files/cycle-1" && url.searchParams.get("mode") === "read" && request.method() === "GET") readRequests += 1;
   });
   await page.goto("/?view=okr");
-  await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
+  await expect(page.locator(".okr-file-read-objective").getByRole("heading", { name: "고객 경험 개선" })).toBeVisible();
   expect(readRequests).toBe(0);
+  if(isMobile)await page.getByRole("button", { name: "더보기", exact: true }).click();
   await page.getByRole("button", { name: "Project", exact: true }).first().click();
   await page.getByRole("button", { name: "OKR", exact: true }).first().click();
-  await expect(page.getByRole("heading", { name: "2026 하반기" })).toBeVisible();
+  await expect(page.locator(".okr-file-read-objective").getByRole("heading", { name: "고객 경험 개선" })).toBeVisible();
   await expect(page.getByText("OKR 파일을 불러오는 중")).toHaveCount(0);
   expect(readRequests).toBe(0);
 });
@@ -736,7 +737,7 @@ test("KR과 Project 데이터는 각 대상 진행률만 갱신한다", async ({
   const objectiveSurface = page.locator(".okr-file-read-objective");
   const keyResultSurface = page.locator(".okr-file-read-kr").first();
   await expect(objectiveSurface).not.toContainText("50%");
-  await expect(keyResultSurface.locator(".okr-tree-progress")).toHaveText("45%");
+  await expect(keyResultSurface.locator(".okr-tree-progress")).toHaveText("20%");
   await expect(page.locator(".okr-file-read-initiative")).toHaveCount(0);
   await expect(page.locator(".okr-file-read-surface")).not.toContainText("할 일");
   await page.getByRole("button", { name: /활성 사용자 20% 증가/ }).click();

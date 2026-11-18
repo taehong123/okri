@@ -3051,6 +3051,14 @@ const messages = {
 "데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.": "In Data, set the parent KR's source to Project contributions.",
 
 "이 기간의 최근 측정 10,000개를 표시합니다. 나머지 이력도 보관됩니다.": "Showing the latest 10,000 measurements in this period. Additional history is retained.",
+"개선": "Improving",
+"후퇴": "Declining",
+"기록 부족": "Not enough history",
+"이력 확인 필요": "Check history",
+"측정 기록이 없습니다.": "No measurements yet.",
+"달성": "Reached",
+"변화 없음": "Unchanged",
+
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

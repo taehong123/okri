@@ -3051,5 +3051,13 @@ const messages = {
 "최신 설정 불러오기": "Cargar configuración actual",
 "데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.": "En Datos, configura la fuente del KR superior como suma de aportaciones de Project.",
 "이 기간의 최근 측정 10,000개를 표시합니다. 나머지 이력도 보관됩니다.": "Se muestran las últimas 10.000 mediciones del periodo. Se conserva el resto del historial.",
+"개선": "Mejora",
+"후퇴": "Retroceso",
+"기록 부족": "Historial insuficiente",
+"이력 확인 필요": "Revisar historial",
+"측정 기록이 없습니다.": "Todavía no hay mediciones.",
+"달성": "Alcanzado",
+"변화 없음": "Sin cambios",
+
 } satisfies Catalog;
 export default messages;
