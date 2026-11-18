@@ -471,6 +471,7 @@ type TeamInvitation = {
 };
 
 type InvitationPreview = {
+  kind?: "workspace_link";
   workspace: { id: string; name: string };
   role: Exclude<TeamRole, "owner">;
   inviterName: string;
@@ -1130,7 +1131,7 @@ function WorkspaceApp() {
   useEffect(() => {
     if (authState.status !== "authenticated" || !inviteToken) return;
     const controller = new AbortController();
-    void fetch(`/api/invitations/preview?token=${encodeURIComponent(inviteToken)}`, { signal: controller.signal, cache: "no-store" })
+    void fetch(`/api/${inviteToken.startsWith("wl_")?"workspace-invite-links":"invitations"}/preview?token=${encodeURIComponent(inviteToken)}`, { signal: controller.signal, cache: "no-store" })
       .then(async (response) => {
         const data = await response.json() as { invitation?: InvitationPreview; error?: string };
         if (!response.ok || !data.invitation) throw new Error(apiError(data, "초대를 불러오지 못했습니다."));
@@ -2933,7 +2934,7 @@ function startGoogleSignIn() {
 function invitationTokenFromLocation() {
   if (typeof window === "undefined") return null;
   const token = new URLSearchParams(window.location.hash.replace(/^#/, "")).get("invite")?.trim() ?? "";
-  return /^[a-f0-9]{64}$/.test(token) ? token : null;
+  return /^(?:[a-f0-9]{64}|wl_[a-f0-9-]{36}\.[a-f0-9]{64})$/.test(token) ? token : null;
 }
 
 function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
@@ -2950,7 +2951,7 @@ function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
     if (!preview || preview.status !== "pending" || accepting) return;
     setAccepting(true);
     setError("");
-    const response = await fetch("/api/invitations/accept", {
+    const response = await fetch(token.startsWith("wl_")?"/api/workspace-invite-links/accept":"/api/invitations/accept", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ token }),
@@ -2970,7 +2971,7 @@ function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
       ? "취소된 초대입니다."
       : preview?.status === "accepted"
         ? "이미 가입이 완료된 초대입니다."
-        : "초대받은 이메일과 같은 Google 계정으로 로그인한 경우에만 가입할 수 있습니다.";
+        : preview?.kind === "workspace_link" ? t("로그인한 계정으로 이 워크스페이스에 가입합니다.") : "초대받은 이메일과 같은 Google 계정으로 로그인한 경우에만 가입할 수 있습니다.";
 
   return (
     <OverlayDialog title={t("워크스페이스 초대")} dismissPolicy="critical" onRequestClose={() => onClose()}>
@@ -2990,7 +2991,7 @@ function InvitationDialog({ token, preview, loadError, onClose, onAccepted }: {
               <div><h3>{preview.workspace.name}</h3><p>{t("{name}님이 {role} 역할로 초대했습니다.", { name: preview.inviterName, role: teamRoleLabel(preview.role) })}</p></div>
             </div>
             <dl className="invitation-details">
-              <div><dt>{t("초대 계정")}</dt><dd>{preview.emailHint}</dd></div>
+              {preview.kind!=="workspace_link"&&<div><dt>{t("초대 계정")}</dt><dd>{preview.emailHint}</dd></div>}
               <div><dt>{t("유효 기간")}</dt><dd>{t("{date}까지", { date: new Date(preview.expiresAt).toLocaleDateString(getClientLocale()) })}</dd></div>
             </dl>
             <p className={`invitation-status-copy status-${preview.status}`}>{statusMessage}</p>

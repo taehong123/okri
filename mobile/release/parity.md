@@ -443,3 +443,5 @@ Server, Slack and local runner only: Windows long paths remain readable across p
 ## 2026-11-18 — Daily reporting with leader approval
 
 Web-only settings and additive external MCP tools persist scope, timing, safe conditions and prose instructions. Signed Slack DM approval publishes the immutable exact report into per-day channel threads. Personal reminders and frozen native v1 submissions remain compatible; native settings/preview UI is deferred. Structured automatic drafts use Project → Task · assignee; custom prose is read by the MCP author. No native release or live Slack QA send is claimed.
+
+- 2026-11-18: Shared workspace invite links add external MCP read/create tools and explicit web join acceptance with editor seat enforcement. Default role is Member; read never creates, extends or emails. Existing email invitations and frozen mobile v1/auth are unchanged. Native link acceptance and management UI are deferred; no store release is claimed. Full DB backups retain link credentials while business-data restore does not resurrect them.

@@ -10,6 +10,7 @@ export type SlackWorkGuideGroup = {
   entries: readonly SlackWorkGuideEntry[];
 };
 
+export const SLACK_INVITE_LINK_GUIDE = "외부 MCP에서 get_workspace_invite_link로 현재 워크스페이스의 유효한 공동 초대링크만 조회합니다. 없으면 없다고 반환하며 조회·생성 모두 메일을 보내지 않습니다. create_workspace_invite_link는 관리자만 실행하고 기본 가입 역할은 일반 멤버입니다. Slack AI에는 초대링크 관리 도구를 제공하지 않습니다.";
 export const SLACK_DAILY_REPORT_GUIDE = "보고 스레드는 웹·외부 MCP에서 설정합니다. Project 아래 Task와 담당자를 모으며, 지정 시각·전원 작성 또는 마감·수동 요청을 선택합니다. 저장한 지침은 MCP 초안 작성 시 다시 읽고, 공유 전 지정한 팀장의 Slack DM 승인을 받습니다. Slack AI에는 보고 설정 도구를 제공하지 않습니다.";
 
 export const SLACK_WORK_GUIDE_GROUPS: readonly SlackWorkGuideGroup[] = [
@@ -62,6 +63,7 @@ export function slackWorkGuideText(t: GuideTranslator) {
     t(SLACK_TICKET_SETUP_GUIDE),
     t(SLACK_TICKET_CLASSIFICATION_GUIDE),
     t(SLACK_DAILY_REPORT_GUIDE),
+    t(SLACK_INVITE_LINK_GUIDE),
   ];
   for (const group of SLACK_WORK_GUIDE_GROUPS) {
     lines.push("", `*${t(group.label)}*`, t(group.description));
@@ -84,6 +86,7 @@ export function slackWorkGuideBlocks(t: GuideTranslator) {
       text: { type: "mrkdwn", text: `${t("느낌표 명령은 양식을 열고, 말로 요청할 때는 @OKRI를 태그하세요.")}\n${t("여러 줄 요청도 가능합니다. 첫 내용 줄은 제목, 전체 내용은 설명에 채워집니다.")}\n${t("!티켓생성은 스레드 전체를 읽어 제목·설명을 채웁니다. 내용을 확인하고 제출하면 생성됩니다.")}\n${t("느낌표 명령은 봇이 참여한 채널에서만 수신됩니다. 채널에 OKRI 앱을 한 번 초대해 주세요.")}` },
     },
     {type:"section",text:{type:"mrkdwn",text:t(SLACK_DAILY_REPORT_GUIDE)}},
+    {type:"section",text:{type:"mrkdwn",text:t(SLACK_INVITE_LINK_GUIDE)}},
     ...SLACK_WORK_GUIDE_GROUPS.map((group) => ({
       type: "section",
       text: {
