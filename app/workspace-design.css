@@ -597,3 +597,6 @@
   .app-shell .client-fields, .app-shell .client-products-editor { padding-inline: var(--space-4); }
   .app-shell .client-editor-form > footer { padding-inline: var(--space-4); }
 }
+
+/* Invitation dialogs also render outside the signed-in app shell. */
+.invitation-dialog { color: var(--text-primary); }
