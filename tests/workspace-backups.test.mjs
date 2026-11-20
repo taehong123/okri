@@ -23,6 +23,8 @@ const contributionMigration = await readFile(new URL("../drizzle/0077_project_co
 const sourceMigration = await readFile(new URL("../drizzle/0078_kr_data_sources.sql", import.meta.url), "utf8");
 const historyMigration = await readFile(new URL("../drizzle/0079_kr_metric_history.sql", import.meta.url), "utf8");
 const recurringMigration = await readFile(new URL("../drizzle/0080_project_metric_schedules.sql", import.meta.url), "utf8");
+const performanceMigration = await readFile(new URL("../drizzle/0084_kr_performance.sql", import.meta.url), "utf8");
+const performanceSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0075_snapshot.json", import.meta.url), "utf8"));
 const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
 
 function fixture() {
@@ -49,6 +51,7 @@ function fixture() {
   sqlite.exec(sourceMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(historyMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(recurringMigration.replaceAll("--> statement-breakpoint", ""));
+  sqlite.exec(performanceMigration);
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -127,7 +130,7 @@ test("snapshot uses separate storage, includes complete business hierarchy, and 
   assert.ok(!payload.includes("Other workspace"));
   const snapshot = JSON.parse(payload);
   assert.deepEqual(Object.keys(snapshot.tables), backups.BACKUP_TABLES);
-  for (const table of backups.BACKUP_TABLES) assert.ok(snapshot.tables[table].length, table);
+  for (const table of backups.BACKUP_TABLES.filter(table => !table.startsWith("kr_performance_"))) assert.ok(snapshot.tables[table].length, table);
   assert.equal(entry.summary.tasks, 2);
   assert.equal(Date.parse(entry.expiresAt) - Date.parse(entry.createdAt), 30 * 86400000);
   assert.equal((await backups.listWorkspaceBackups(f.ctx, "other")).backups.length, 0);
@@ -212,6 +215,26 @@ test("schedule/calendar restore retains dated estimates and records only the fin
   assert.deepEqual(JSON.parse(f.sqlite.prepare("SELECT holidays_json FROM workspace_metric_calendars").get().holidays_json),["2026-12-25"]);
   const point=f.sqlite.prepare("SELECT * FROM kr_metric_observations ORDER BY rowid DESC LIMIT 1").get();assert.equal(point.current_value,23);assert.equal(point.is_estimate,1);
   assert.equal(f.sqlite.prepare("SELECT progress FROM items WHERE id='kr'").get().progress,23);f.sqlite.close();
+});
+
+test("restoring performance preserves the dated audit and invalidates stale rule revisions", async () => {
+  const f = fixture();
+  const add = f.sqlite.prepare(`INSERT INTO kr_performance_changes
+    (id,owner_id,kr_item_id,revision,request_id,kind,effective_date,recorded_at,actor_id,reason,request_json,value_json,receipt_json)
+    VALUES (?,'w','kr',?,?,'rule','2026-11-01','2026-11-03T02:00:00Z','u','Historical correction','{}','{}',?)`);
+  add.run("rule", 1, "first", '{"revision":1}');
+  const saved = await backups.createWorkspaceBackup(f.ctx, "w", "u");
+  add.run("rule-edit", 2, "second", '{"revision":2}');
+  const result = await backups.restoreWorkspaceBackup(f.ctx, "w", saved.id, "u");
+  const rows = f.sqlite.prepare("SELECT revision,reason,effective_date,recorded_at,receipt_json FROM kr_performance_changes").all();
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].revision, 4);
+  assert.equal(JSON.parse(rows[0].receipt_json).revision, 4);
+  assert.equal(rows[0].reason, "Historical correction");
+  assert.equal(rows[0].effective_date, "2026-11-01");
+  assert.equal(rows[0].recorded_at, "2026-11-03T02:00:00Z");
+  assert.ok(result.rollbackBackupId);
+  f.sqlite.close();
 });
 
 test("backup restoration preserves measurement order when timestamps tie",async()=>{
@@ -348,7 +371,8 @@ test("revision triggers cover all restored tables and business changes do not al
   };
   for (const name of backups.BACKUP_TABLES) {
     assert.equal(f.sqlite.prepare("SELECT count(*) n FROM sqlite_master WHERE type='trigger' AND tbl_name=? AND name LIKE 'backup_revision_%'").get(name).n, 3, name);
-    const expectedColumns = clientColumns[name] ? [...clientColumns[name]] : Object.keys(currentSchema.tables[name].columns);
+    const expectedColumns = clientColumns[name] ? [...clientColumns[name]] :
+      Object.keys((currentSchema.tables[name] ?? performanceSchema.tables[name]).columns);
     if (name === "daily_scrums") {
       expectedColumns.splice(expectedColumns.indexOf("skip_reason"), 0, "work_status");
       expectedColumns.push("yesterday_work_selection_json", "calendar_events_json");

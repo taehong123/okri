@@ -21,7 +21,7 @@ export default function ProjectContributionScheduleDialog({projectId,onClose,onS
       .then(async([r,c])=>{if(!r.ok||!c.ok)throw new Error();return [await r.json() as ProjectScheduleState,await c.json() as {calendar:MetricCalendar;canEdit:boolean}] as const;})
       .then(([next,cal])=>{
         if(controller.signal.aborted)return;const s=next.schedule;
-        const value:Draft={mode:s?.mode??"daily",amount:s?String(s.amount):"",startDate:s?.startDate??localDate(new Date(),cal.calendar.timezone),endDate:s?.endDate??"",pauses:s?.pauses.map(p=>({startDate:p.startDate,endDate:p.endDate??""}))??[]};
+        const value:Draft={mode:s?.mode==="weekly"?"daily":s?.mode??"daily",amount:s?String(s.amount):"",startDate:s?.startDate??localDate(new Date(),cal.calendar.timezone),endDate:s?.endDate??"",pauses:s?.pauses.map(p=>({startDate:p.startDate,endDate:p.endDate??""}))??[]};
         setState(next);setDraft(value);setInitial(JSON.stringify(value));setCalendar(cal.calendar);setTimezone(cal.calendar.timezone);setHolidays(cal.calendar.holidays.join("\n"));setCanEditCalendar(cal.canEdit);
       }).catch(()=>{if(!controller.signal.aborted)setError(t("기여 방식과 달력을 불러오지 못했습니다."));});
     return()=>controller.abort();

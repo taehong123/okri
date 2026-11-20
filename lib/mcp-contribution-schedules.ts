@@ -10,12 +10,14 @@ function writeAccess(auth:RequestAuthorization,admin=false) {
 }
 const result=(value:unknown)=>({structuredContent:value as Record<string,unknown>,content:[{type:"text" as const,text:JSON.stringify(value)}]});
 function failure(error:unknown) {return {isError:true,content:[{type:"text" as const,text:JSON.stringify({code:error instanceof ScheduleError?error.code:"contribution_schedule_failed"})}]};}
-export function registerContributionScheduleTools(server:McpServer,db:D1Database,auth:RequestAuthorization) {
+export function registerContributionScheduleTools(server:McpServer,db:D1Database,auth:RequestAuthorization,isManaged?:(krId:string)=>Promise<boolean>) {
   server.registerTool("set_kr_project_measurement",{
     title:"Measure a KR with Project contributions",description:"Explicitly select Project measurement before configuring date-based contributions, without opening the web UI. Preserve existing Project defaults, completed credits, schedules and saved API configuration; pause the KR API. A new numeric metric needs user-supplied starting_value, target_value and unit. Omit values to retain an existing Project metric. Never invent a target, unit, or starting amount. Uses an atomic revision check.",
     inputSchema:{key_result_id:projectId,starting_value:z.number().finite().min(0).max(1e12).optional(),target_value:z.number().finite().positive().max(1e12).optional(),unit:z.string().max(24).optional(),expected_revision:z.string().optional()},annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},
   },async input=>{try {
-    writeAccess(auth);const state=await readKrSource(db,auth.ownerId,input.key_result_id);
+    writeAccess(auth);
+    if(await isManaged?.(input.key_result_id))throw new ScheduleError("versioned_kr_rule_required",409);
+    const state=await readKrSource(db,auth.ownerId,input.key_result_id);
     if(input.expected_revision!==undefined&&input.expected_revision!==state.revision)throw new ScheduleError("contribution_schedule_conflict",409);
     const startingValue=input.starting_value??state.metric?.startingValue,targetValue=input.target_value??state.metric?.targetValue,unit=input.unit??state.metric?.unit;
     if(startingValue===undefined||targetValue===undefined||unit===undefined)throw new ScheduleError("project_metric_values_required");
@@ -32,6 +34,7 @@ export function registerContributionScheduleTools(server:McpServer,db:D1Database
     annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},
   },async input=>{try {
     writeAccess(auth);const current=await readProjectSchedule(db,auth.ownerId,input.project_id),s=current.schedule;
+    if(await isManaged?.(current.keyResult.id))throw new ScheduleError("versioned_project_rule_required",409);
     return result(await saveProjectSchedule(db,auth.ownerId,input.project_id,{mode:input.mode??s?.mode,amount:input.amount??s?.amount,startDate:input.start_date??s?.startDate,endDate:input.end_date===undefined?s?.endDate??null:input.end_date,pauses:input.pauses?.map(p=>({startDate:p.start_date,endDate:p.end_date}))??s?.pauses??[]},input.expected_revision??current.revision));
   }catch(error){return failure(error);}});
   server.registerTool("get_metric_calendar",{

@@ -6341,7 +6341,15 @@ export async function deleteDataConnection(ownerId: string, id: string) {
 
 export async function syncDataConnection(ownerId: string, id: string) {
   await ensureWorkspace(ownerId);
-  return syncKrDataConnectionWithDb((env as RuntimeEnv).DB, ownerId, id);
+  const db = (env as RuntimeEnv).DB;
+  const result = await syncKrDataConnectionWithDb(db, ownerId, id);
+  if (result.connection.targetKind !== "key_result") return result;
+  const { hasPerformanceRule, readKrPerformance } = await import("@/lib/kr-performance");
+  const keyResultId = result.connection.itemId;
+  if (!await hasPerformanceRule(db, ownerId, keyResultId)) return result;
+  const { performance } = await readKrPerformance(db, ownerId, keyResultId, { grain: "month" });
+  if (!performance) return result;
+  return { ...result, sampleValue: result.value, value: performance.current.value, progress: performance.current.progress ?? 0 };
 }
 
 export async function syncDueKrDataConnections() {

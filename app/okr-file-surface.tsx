@@ -580,7 +580,7 @@ function OkrReadKeyResult({
     <span className="okr-tree-copy"><small>{t("Key Result")} {keyResultIndex + 1}</small><strong>{keyResult.title}</strong></span>
     <span className="okr-tree-metrics">
       {!keyResultExpanded && <KrTrendSummary data={metricData}/>}
-      <span><small>{t("진척도")}</small><b className="okr-tree-progress">{keyResult.progress}%</b></span>
+      <span><small>{t("진척도")}</small><b className="okr-tree-progress">{metricData.metric?.progress ?? keyResult.progress}%</b></span>
       <span className="okr-tree-count"><small>{t("Initiative")}</small><b>{keyResult.initiatives.length}</b></span>
     </span>
   </>;

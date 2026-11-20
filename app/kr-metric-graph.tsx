@@ -8,6 +8,7 @@ import { t } from "@/lib/client-language";
 import { formatContribution } from "./project-contributions";
 import { latestKrTrendSegment, krTrendSignal, type KrSignal } from "./kr-trend-model";
 import KrMetricHistoryChart from "./kr-metric-history-chart";
+import KrPerformanceChart from "./kr-performance-chart";
 import "./kr-metrics.css";
 
 export type KrHistoryRead = { observations: KrObservation[]; limited: boolean; receivedAt: number; error?: boolean };
@@ -40,18 +41,26 @@ export function useKrMetricData(keyResultId: string) {
   const {metrics, revision} = useContext(Metrics);
   const [history, setHistory] = useState<KrHistoryRead>();
   const [attempt, setAttempt] = useState(0);
+  const metric = metrics.get(keyResultId);
+  const managed = Boolean(metric?.performance);
   useEffect(() => {
+    if (managed) return;
     const controller = new AbortController();
     void fetch("/api/kr-metric-history?keyResultId=" + encodeURIComponent(keyResultId) + "&days=30", {cache: "no-store", signal: controller.signal})
       .then(async response => { if (!response.ok) throw new Error(); return response.json() as Promise<KrHistoryRead>; })
       .then(data => { if (!controller.signal.aborted) setHistory({...data, receivedAt: Date.now(), error: false}); })
       .catch(() => { if (!controller.signal.aborted) setHistory(previous => ({observations: [], limited: false, receivedAt: Date.now(), ...previous, error: true})); });
     return () => controller.abort();
-  }, [keyResultId, revision, attempt]);
-  const metric = metrics.get(keyResultId);
+  }, [keyResultId, revision, attempt, managed]);
   const unit = metric?.unit ?? history?.observations.at(-1)?.unit ?? "";
-  const points = latestKrTrendSegment(history?.observations ?? [], unit, metric?.mode, metric?.targetValue);
-  const signal = krTrendSignal(points, history?.error);
+  const recent = metric?.trend?.at(-1);
+  const points: KrObservation[] = managed ? (metric?.trend ?? []).filter(p => p.periodValue !== null &&
+    p.periodStart === recent?.periodStart && p.ruleRevision === recent.ruleRevision).map(p => ({
+    id: p.end, source: metric?.mode === "api" ? "api" : "projects", eventKind: "period",
+    unit: p.unit, observedAt: p.end + "T00:00:00Z", currentValue: p.periodValue,
+    baselineValue: p.baseline, targetValue: p.target, isEstimate: p.isEstimate,
+  })) : latestKrTrendSegment(history?.observations ?? [], unit, metric?.mode, metric?.targetValue);
+  const signal = krTrendSignal(points, !managed && history?.error);
   return {metric, history, unit, points, signal, revision, retry: () => setAttempt(value => value + 1)};
 }
 export type KrMetricData = ReturnType<typeof useKrMetricData>;
@@ -64,7 +73,7 @@ function SignalIcon({signal}: {signal: KrSignal}) {
 }
 export function KrTrendSummary({data}: {data: KrMetricData}) {
   const {points, signal, unit, history} = data;
-  const label = (!history ? t("측정 이력을 불러오는 중입니다.") : signalLabel(signal))+(data.metric?.isEstimate?" · "+t("추정 포함"):"");
+  const label = (!history && !data.metric?.performance ? t("측정 이력을 불러오는 중입니다.") : signalLabel(signal))+(data.metric?.isEstimate?" · "+t("추정 포함"):"");
   const title = points.length > 1 ? t("최근 30일") + " · " + label + " · " + formatContribution(points[0].currentValue!, unit) + " → " + formatContribution(points.at(-1)!.currentValue!, unit) : label;
   const values = points.map(p => p.currentValue!), low = Math.min(...values), high = Math.max(...values), span = high - low;
   const start = Date.parse(points[0]?.observedAt ?? ""), end = Date.parse(points.at(-1)?.observedAt ?? "");
@@ -80,6 +89,7 @@ export function KrTrendSummary({data}: {data: KrMetricData}) {
 }
 export function KrMetricDetails({data, keyResultId}: {data: KrMetricData; keyResultId: string}) {
   const {metric, history, unit, signal, revision, retry} = data;
+  if (metric?.performance) return <div className="kr-inline-metric"><KrPerformanceChart keyResultId={keyResultId} refreshToken={revision}/></div>;
   const latest = history?.observations.filter(p => p.currentValue !== null && p.unit === unit).at(-1);
   const current = metric?.currentValue ?? latest?.currentValue, target = metric?.targetValue ?? latest?.targetValue;
   return <div className="kr-inline-metric">

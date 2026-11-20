@@ -1,0 +1,21 @@
+.kr-performance-chart { display: grid; gap: var(--space-3); min-width: 0; padding-block: var(--space-2); }
+.perf-meta, .perf-figure figcaption { margin: 0; color: var(--text-secondary); font-size: var(--type-label); overflow-wrap: anywhere; }
+.perf-range { display: flex; align-items: flex-end; flex-wrap: wrap; gap: var(--space-2) var(--space-4); min-width: 0; }
+.perf-range label { display: grid; gap: var(--space-1); min-width: 0; color: var(--text-secondary); font-size: var(--type-label); }
+.perf-range :is(input:not([type=checkbox]),select) { min-width: 0; max-width: 100%; min-height: var(--control-height); padding-inline: var(--space-2); border: 1px solid var(--border-control); border-radius: var(--radius-control); background: var(--bg-raised); color: var(--text-primary); font-family: var(--font-ui); font-size: var(--type-ui); }
+.perf-range button { min-height: var(--control-height); }
+.perf-range .perf-check { display: inline-flex; align-items: center; min-height: var(--control-height); }
+.perf-check input { accent-color: var(--accent); }
+.perf-figure { margin: 0; min-width: 0; }
+.kr-performance-chart ul { padding-inline-start: var(--space-4); overflow-wrap: anywhere; }
+.kr-performance-chart li > :not(:first-child) { margin-inline-start: var(--space-3); }
+.perf-settings-tabs, .perf-weekdays { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.perf-settings-tabs { padding: var(--space-3) var(--space-5); border-bottom: 1px solid var(--border-default); }
+.perf-settings-tabs button[aria-pressed="true"] { background: var(--bg-subtle); border-color: var(--border-control); color: var(--text-primary); font-weight: 650; }
+.perf-settings-form .perf-check, .perf-weekdays .perf-check { display: inline-flex; flex-direction: row; align-items: center; gap: var(--space-2); min-height: var(--control-height); }
+.perf-settings-form textarea { min-width: 0; width: 100%; }
+.perf-pause { display: flex; align-items: end; flex-wrap: wrap; gap: var(--space-2); }
+.perf-audit, .perf-notice { min-width: 0; padding: var(--space-3) var(--space-5); margin: 0; }
+.perf-audit p { overflow-wrap: anywhere; }
+.perf-audit-value pre { max-height: 18rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-family: var(--font-ui); font-size: var(--type-label); }
+@media (max-width: 48rem) { .perf-range :is(button, input:not([type=checkbox]), select, .perf-check) { min-height: 2.75rem; } }

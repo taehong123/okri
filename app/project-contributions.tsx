@@ -90,6 +90,14 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
     }finally{saveRef.current=false;setSaving(false);}
   }
   const c=state?.contribution,m=state?.metric;
+  if (state?.performance) {
+    const period = state.performance;
+    return <div className="project-contribution">
+      <div className="contribution-summary"><b>{t("기간 실적")}</b><span>{formatContribution(period.value, period.unit)}{period.isEstimate && " · " + t("추정 포함")}</span></div>
+      <small>{period.start} – {period.end}{period.operating !== null && " · " + (period.operating ? t("운영 중") : t("운영 중지"))}</small>
+      <a href="/?view=data">{t("성과 측정 설정")}</a>
+    </div>;
+  }
   return <div className="project-contribution">
     {loadError?<p role="alert">{t("성과 설정을 불러오지 못했습니다.")} <button className="secondary" onClick={()=>setAttempt(v=>v+1)}>{t("다시 시도")}</button></p>:!state?<span role="status">{t("데이터를 불러오는 중")}</span>:<>
       <div className="contribution-summary"><b>{t("성과 쌓기")}</b>{c?.enabled&&<span>{c.applied?t("반영한 성과 {value}",{value:formatContribution(c.actualValue??0,m?.unit??"")}):t("기본 기여량 {value}",{value:formatContribution(c.defaultValue,m?.unit??"")})}</span>}</div>

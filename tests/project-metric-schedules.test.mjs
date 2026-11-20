@@ -116,7 +116,8 @@ test("archiving a KR suspends its schedules without erasing already credited dat
 test("HTTP routes enforce auth, write scope, calendar admin and private responses",async t=>{
   const f=fixture(t);let auth={ownerId:"w",role:"owner"};
   const pace={ensureWorkspace:async()=>{},authorizeRequest:async(_r,o)=>auth instanceof Response?auth:auth.role==="viewer"&&!o?.allowViewerWrite?new Response("forbidden",{status:403}):auth};
-  const deps={"cloudflare:workers":{env:{DB:f.db}},"@/lib/pace-data":pace,"@/lib/project-metric-schedules":api};
+  const deps={"cloudflare:workers":{env:{DB:f.db}},"@/lib/pace-data":pace,"@/lib/project-metric-schedules":api,
+    "@/lib/kr-performance":{hasPerformanceRule:async()=>false}};
   const routes=compile(await read("app/api/project-contribution-schedules/route.ts"),deps),calendar=compile(await read("app/api/metric-calendar/route.ts"),deps);
   const get=new Request("https://okri.ai/api/project-contribution-schedules?projectId=p");
   auth=new Response("unauthorized",{status:401});assert.equal((await routes.GET(get)).status,401);
