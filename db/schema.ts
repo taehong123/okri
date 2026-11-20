@@ -1963,6 +1963,40 @@ export const workspaceMetricCalendars = sqliteTable("workspace_metric_calendars"
   createdAt: text("created_at").notNull(), updatedAt: text("updated_at").notNull(),
 }, table => [check("metric_calendar_holidays", sql`json_valid(${table.holidaysJson}) AND json_type(${table.holidaysJson})='array'`)]);
 
+export const krPerformanceChanges = sqliteTable("kr_performance_changes", {
+  id: text("id").primaryKey().notNull(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  requestId: text("request_id").notNull(),
+  kind: text("kind", { enum: ["rule", "project", "entry"] }).notNull(),
+  subjectId: text("subject_id").notNull().default(""),
+  effectiveDate: text("effective_date").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+  actorId: text("actor_id").notNull(),
+  reason: text("reason").notNull().default(""),
+  requestJson: text("request_json").notNull(),
+  valueJson: text("value_json").notNull(),
+  receiptJson: text("receipt_json").notNull(),
+}, t => [
+  index("idx_kr_performance_owner_kind").on(t.ownerId, t.kind, t.krItemId),
+  uniqueIndex("idx_kr_performance_revision").on(t.ownerId, t.krItemId, t.revision),
+  uniqueIndex("idx_kr_performance_request").on(t.ownerId, t.krItemId, t.requestId),
+  check("kr_performance_revision", sql`${t.revision} > 0`),
+  check("kr_performance_kind", sql`${t.kind} in ('rule','project','entry')`),
+  check("kr_performance_request_json", sql`json_valid(${t.requestJson})`),
+  check("kr_performance_value_json", sql`json_valid(${t.valueJson})`),
+  check("kr_performance_receipt_json", sql`json_valid(${t.receiptJson})`),
+]);
+
+export const krPerformanceStops = sqliteTable("kr_performance_stops", {
+  id: text("id").primaryKey().notNull(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+}, t => [index("idx_kr_performance_stops_owner_kr").on(t.ownerId, t.krItemId, t.recordedAt)]);
+
 export const projectMetricSchedules = sqliteTable("project_metric_schedules", {
   id: text("id").primaryKey(), ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),

@@ -124,5 +124,12 @@
     "rollbackPlan": "Keep new link tables on code rollback; no customer records are rewritten or activated by migration. Forward-fix web handlers and rotate a shared link explicitly when needed. Do not edit historical migrations or drop joined memberships.",
     "dataPreservation": "Only token hashes are stored. Read-only lookup has no writes or email delivery. Admin creation verifies current tenant and membership transactionally. Signed-in acceptance checks link validity, editor seat limits and email/user conflicts without demoting existing members or changing assignments. Full DB backups retain integration credentials; business data imports do not restore live invitation credentials.",
     "reviewedBy": "Codex source-bound SQLite, member isolation, join/rotation/seat/idempotency and frozen-client review, 2026-11-18"
+  },
+  "drizzle/0084_kr_performance.sql": {
+    "sha256": "e13c059328832915943b6bb995ed91639a7b4a5eacc3134ff36d4da3dcdba3b8",
+    "v1Compatibility": "Additive rule and audit storage plus archive tracking. Mobile v1 keeps its existing item and measurement contracts. Existing KR measurement settings are preserved until explicitly adopted.",
+    "rollbackPlan": "Retain the tables, dated ledger and restore checkpoints during rollback. Re-enable the canonical readers when the web and MCP versions are restored. Never rewrite or drop historical migrations.",
+    "dataPreservation": "Rule versions, corrections, request receipts and lifecycle stops are scoped to the workspace and retained in backups. No existing row is migrated or activated automatically. Archive and reparent retain dated project credits.",
+    "reviewedBy": "Codex source-bound SQLite and mobile compatibility review, 2026-11-20"
   }
 }

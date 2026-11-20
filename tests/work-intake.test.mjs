@@ -1,4 +1,5 @@
 const workspaceInviteMcpSource=await readFile(new URL("../lib/mcp-workspace-invites.ts",import.meta.url),"utf8");
+const performanceMcpSource = await readFile(new URL("../lib/mcp-kr-performance.ts", import.meta.url), "utf8");
 const awaitDailyReportMcpSource=await readFile(new URL("../lib/mcp-daily-reports.ts",import.meta.url),"utf8");
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -262,6 +263,8 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/mcp-workspace-invites":compile(workspaceInviteMcpSource,{"./workspace-invite-links":{},"./workspace-invite-runtime":{}}),
+    "@/lib/mcp-kr-performance": compile(performanceMcpSource, { "./kr-performance": {} }),
+    "@/lib/kr-performance": { hasPerformanceRule: async () => false },
     "@/lib/mcp-daily-reports": compile(awaitDailyReportMcpSource, {"./daily-report": {},"./daily-report-config": {},"./daily-report-slack": {},"./slack-daily": {}}),
     "@/lib/mcp-contribution-schedules": compile(contributionScheduleMcpSource, {"./project-metric-schedules": {},"./kr-data-sources": {}}),
     "@/lib/mcp-data-connections": compile(dataConnectionMcpSource, {

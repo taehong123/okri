@@ -6,6 +6,8 @@ import { listRoutineProperties } from "@/lib/routine-properties";
 import { registerDataConnectionTools } from "@/lib/mcp-data-connections";
 import { registerWorkspaceInviteTools } from "@/lib/mcp-workspace-invites";
 import { registerDailyReportTools } from "@/lib/mcp-daily-reports";
+import { registerKrPerformanceTools } from "@/lib/mcp-kr-performance";
+import { hasPerformanceRule } from "@/lib/kr-performance";
 import { registerContributionScheduleTools } from "@/lib/mcp-contribution-schedules";
 import {
   createClient,
@@ -2127,7 +2129,8 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   );
 
   registerDataConnectionTools(server, env.DB, authorization);
-  registerContributionScheduleTools(server, env.DB, authorization);
+  registerContributionScheduleTools(server, env.DB, authorization, krId => hasPerformanceRule(env.DB, authorization.ownerId, krId));
+  registerKrPerformanceTools(server, env.DB, authorization);
   registerDailyReportTools(server, env.DB, authorization);
   registerWorkspaceInviteTools(server, env.DB, authorization);
   return server;

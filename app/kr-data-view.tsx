@@ -7,6 +7,7 @@ import { t , apiError , getClientLocale , messageValue } from "@/lib/client-lang
 
 import type { ProjectMetric } from "@/lib/project-contributions";
 import KrSourceSettingsDialog from "./kr-source-settings";
+import type { KrMetricSummary } from "@/lib/kr-data-sources";
 
 type DataTargetKind = "key_result" | "project";
 export type DataItem = {
@@ -78,6 +79,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
   const [loadError, setLoadError] = useState(false);
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [projectMetrics, setProjectMetrics] = useState<ProjectMetric[] | null>(null);
+  const [performanceMetrics, setPerformanceMetrics] = useState<KrMetricSummary[]>([]);
   const [metricsError, setMetricsError] = useState(false);
   const [search, setSearch] = useState("");
   const [targetFilter, setTargetFilter] = useState<"all" | DataTargetKind>("all");
@@ -115,7 +117,21 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     refresh(); window.addEventListener("okri:project-contributions", refresh);
     return () => { controller.abort(); window.removeEventListener("okri:project-contributions", refresh); };
   }, [cacheKey, loadAttempt]);
-  const metricByItem = useMemo(() => new Map((projectMetrics ?? []).map(metric => [metric.keyResultId, metric])), [projectMetrics]);
+  useEffect(() => {
+    const controller = new AbortController();
+    const refresh = () => { void fetch("/api/kr-data-sources", { cache: "no-store", signal: controller.signal })
+      .then(async response => { if (!response.ok) throw new Error(); return response.json() as Promise<{ metrics: KrMetricSummary[] }>; })
+      .then(data => { if (!controller.signal.aborted) setPerformanceMetrics((data.metrics ?? []).filter(metric => metric.performance)); })
+      .catch(() => {}); };
+    setPerformanceMetrics([]);
+    refresh();
+    window.addEventListener("okri:kr-data-sources", refresh);
+    return () => { controller.abort(); window.removeEventListener("okri:kr-data-sources", refresh); };
+  }, [cacheKey, loadAttempt]);
+  const metricByItem = useMemo(() => new Map<string, KrMetricSummary>([
+    ...(projectMetrics ?? []).map(metric => [metric.keyResultId, { ...metric, mode: "projects" }] as const),
+    ...performanceMetrics.map(metric => [metric.keyResultId, metric] as const),
+  ]), [projectMetrics, performanceMetrics]);
 
   const targets = useMemo(() => items.filter((item): item is DataItem & { kind: DataTargetKind } => item.kind === "key_result" || item.kind === "project"), [items]);
   const itemById = useMemo(() => new Map(items.map((item) => [item.id, item])), [items]);
@@ -212,6 +228,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
     markConnectionCacheFresh(cacheKey);
     setConnections(next);
     onProgressChange(connection.itemId, data.progress);
+    if (connection.targetKind === "key_result") window.dispatchEvent(new Event("okri:kr-data-sources"));
     onNotice(t("{value1} 진행률을 {value2}%로 업데이트했습니다.", { value1: messageValue(targetLabels[connection.targetKind]), value2: messageValue(data.progress) }));
   }
 
@@ -249,11 +266,12 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
           const metric = metricByItem.get(item.id);
           const contextLabel = item.kind === "project" ? itemById.get(item.parentId ?? "")?.title ?? t("상위 Initiative 미연결") : cycleById.get(item.cycleId ?? "") ?? t("OKR 파일");
           return <article className={`kr-data-card ${connection ? "connected" : "unconnected"}`} key={item.id}>
-            <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{item.progress}%</strong></header>
+            <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{metric?.progress ?? item.progress}%</strong></header>
             {metric ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${metric.progress}%` }} /></span><b>{formatDataMetric(metric.currentValue, metric.unit)} <em>/ {formatDataMetric(metric.targetValue, metric.unit)}</em></b></div>
-              <p>{t("Project 성과 합산")} · {t("Project 완료 성과와 날짜별 추정 기여를 합산합니다.")}{metric.isEstimate?" · "+t("추정 포함"):""}</p>
-              <footer><button disabled={readOnly} onClick={()=>setConfiguringKr(item.id)}><Pencil size={13}/>{t("KR 데이터 설정")}</button></footer>
+              <p>{metric.performance ? t("기간 실적") : <>{t("Project 성과 합산")} · {t("Project 완료 성과와 날짜별 추정 기여를 합산합니다.")}</>}{metric.isEstimate?" · "+t("추정 포함"):""}</p>
+              <footer>{metric.mode === "api" && connection && <button disabled={readOnly || syncingId === connection.id} onClick={() => void sync(connection)}><RefreshCw size={13}/>{t("지금 업데이트")}</button>}
+                <button disabled={readOnly} onClick={()=>setConfiguringKr(item.id)}><Pencil size={13}/>{t("KR 데이터 설정")}</button></footer>
             </> : connection ? <>
               <div className="kr-data-progress"><span><i style={{ width: `${item.progress}%` }} /></span><b>{formatDataMetric(connection.lastValue, connection.unit)} <em>/ {formatDataMetric(connection.targetValue, connection.unit)}</em></b></div>
               <dl><div><dt>{t("데이터 소스")}</dt><dd><Link2 size={12} />{connection.name}</dd></div><div><dt>{t("값 경로")}</dt><dd>{connection.valuePath || t("응답 자체")}</dd></div><div><dt>{t("갱신")}</dt><dd>{cadenceLabels[connection.cadence]}{connection.active ? t(" · 활성") : t(" · 일시정지")}</dd></div><div><dt>{t("최근 결과")}</dt><dd className={`sync-${connection.lastSyncStatus}`}>{dataSyncStatusLabel(connection)}</dd></div></dl>

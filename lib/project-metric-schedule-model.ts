@@ -1,7 +1,8 @@
-export type ContributionCadence = "once" | "business_days" | "daily";
+export type ContributionCadence = "once" | "business_days" | "daily" | "weekly";
 export type ContributionPause = {startDate:string; endDate:string|null};
 export type ContributionScheduleInput = {mode:ContributionCadence; amount:number; startDate:string; endDate:string|null; pauses:ContributionPause[]};
-export type MetricCalendar = {timezone:string; holidays:string[]; version:number};
+export type MetricCalendarInput = {timezone:string; holidays:string[]; weekendDays?:number[]};
+export type MetricCalendar = MetricCalendarInput & {version:number};
 export class ScheduleError extends Error {
   constructor(public code:string, public status=400) {super(code);this.name="ScheduleError";}
 }
@@ -25,7 +26,7 @@ export function calendarInput(input:unknown):Omit<MetricCalendar,"version"> {
 export function scheduleInput(input:unknown):ContributionScheduleInput {
   if(!input||typeof input!=="object")throw new ScheduleError("invalid_contribution_schedule");
   const v=input as Record<string,unknown>;
-  if(!["once","business_days","daily"].includes(v.mode as string)||typeof v.amount!=="number"||!Number.isFinite(v.amount)||v.amount<0||v.amount>1e12)throw new ScheduleError("invalid_contribution_schedule");
+  if(!["once","business_days","daily","weekly"].includes(v.mode as string)||typeof v.amount!=="number"||!Number.isFinite(v.amount)||v.amount<0||v.amount>1e12)throw new ScheduleError("invalid_contribution_schedule");
   const startDate=dateOnly(v.startDate),endDate=v.endDate==null||v.endDate===""?null:dateOnly(v.endDate);
   if(endDate&&endDate<startDate)throw new ScheduleError("invalid_schedule_period");
   if(v.pauses!==undefined&&(!Array.isArray(v.pauses)||v.pauses.length>50))throw new ScheduleError("invalid_schedule_pauses");
@@ -41,12 +42,12 @@ export function scheduleCredits(input:ContributionScheduleInput,calendar:MetricC
   const today=localDate(now,calendar.timezone),throughDate=input.mode==="once"?today:shiftDate(today,-1);
   const last=[input.endDate??throughDate,throughDate].sort()[0];
   if((Date.parse(last+"T00:00:00Z")-Date.parse(input.startDate+"T00:00:00Z"))/86400000>=36600)throw new ScheduleError("schedule_period_too_long");
-  const holidays=new Set(calendar.holidays),dates:string[]=[];
-  for(let date=input.startDate;date<=last;date=shiftDate(date,1)) {
+  const holidays=new Set(calendar.holidays),weekends=new Set(calendar.weekendDays??[0,6]),dates:string[]=[];
+  for(let date=input.startDate;date<=last;date=shiftDate(date,input.mode==="weekly"?7:1)) {
     if(input.mode==="once"&&date!==input.startDate)break;
     if(input.pauses.some(p=>date>=p.startDate&&(!p.endDate||date<=p.endDate)))continue;
     const weekday=new Date(date+"T00:00:00Z").getUTCDay();
-    if(input.mode==="business_days"&&(weekday===0||weekday===6||holidays.has(date)))continue;
+    if(input.mode==="business_days"&&(weekends.has(weekday)||holidays.has(date)))continue;
     dates.push(date);
   }
   const accruedValue=dates.length*input.amount;

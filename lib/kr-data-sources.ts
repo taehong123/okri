@@ -5,12 +5,13 @@ export type KrSourceMode = "api" | "projects";
 export type KrSourceSettings = {
   keyResult: { id: string; title: string; progress: number };
   mode: KrSourceMode | null;
+  performanceConfigured?: boolean;
   revision: string;
   metric: { startingValue: number; currentValue: number; targetValue: number; unit: string } | null;
   api: { name: string; endpointUrl: string; valuePath: string; baselineValue: number; targetValue: number; unit: string; cadence: string; active: boolean } | null;
   projects: { id: string; title: string; status: string; defaultValue: number | null; actualValue: number | null; applied: boolean; schedule?:{mode:string;amount:number;accruedValue:number} | null }[];
 };
-export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean };
+export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | "manual" | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean; performance?:boolean; trend?:import("./kr-performance-model").PerformanceResult["points"] };
 type Row = Record<string, string | number | null>;
 const children = `SELECT p.id,p.title,p.status,p.updated_at,c.id AS config_id,c.version AS config_version,c.kr_item_id,
  c.default_value,c.actual_value,c.applied,c.enabled,s.mode AS schedule_mode,s.amount AS schedule_amount,s.accrued_value AS schedule_value

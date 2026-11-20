@@ -15,6 +15,8 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   workspace_metric_calendars: "id,owner_id,timezone,holidays_json,version,created_at,updated_at",
   project_metric_schedules: "id,owner_id,project_id,kr_item_id,mode,amount,start_date,end_date,pauses_json,credit_dates_json,accrued_value,through_date,calendar_version,active,suspended_at,version,created_at,updated_at",
   kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at,is_estimate",
+  kr_performance_changes: "id,owner_id,kr_item_id,revision,request_id,kind,subject_id,effective_date,recorded_at,actor_id,reason,request_json,value_json,receipt_json",
+  kr_performance_stops: "id,owner_id,kr_item_id,project_id,recorded_at",
   project_task_goals: "id,owner_id,project_id,target_count,version,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
   item_property_values: "id,owner_id,item_id,property_id,value,legacy_value,updated_at",
@@ -184,6 +186,8 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   if(Array.isArray(data.tables.kr_metric_observations))data.tables.kr_metric_observations=data.tables.kr_metric_observations.map(row=>({is_estimate:0,...row}));
   data.tables.workspace_metric_calendars ??= [];
   data.tables.project_metric_schedules ??= [];
+  data.tables.kr_performance_changes ??= [];
+  data.tables.kr_performance_stops ??= [];
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");
@@ -270,6 +274,13 @@ export async function restoreWorkspaceBackup(ctx: Context, ownerId: string, id: 
     for (const name of ["kr_project_metrics", "project_contributions", "workspace_metric_calendars", "project_metric_schedules"]) {
       const versions = new Map(current.tables[name].map((r) => [r.id, Number(r.version)]));
       for (const row of tables[name]) row.version = Math.max(Number(row.version), versions.get(row.id) ?? 0) + 1;
+    }
+    const performanceRevisions = new Map<Row[string], number>();
+    for (const row of current.tables.kr_performance_changes) performanceRevisions.set(row.kr_item_id,
+      Math.max(performanceRevisions.get(row.kr_item_id) ?? 0, Number(row.revision)));
+    for (const row of tables.kr_performance_changes) {
+      row.revision = Number(row.revision) + (performanceRevisions.get(row.kr_item_id) ?? 0) + 1;
+      row.receipt_json = JSON.stringify({ ...JSON.parse(String(row.receipt_json)), revision: row.revision });
     }
     const goalVersions = new Map(current.tables.project_task_goals.map((r) => [r.project_id, Number(r.version)]));
     for (const row of tables.project_task_goals) row.version = Math.max(Number(row.version), goalVersions.get(row.project_id) ?? 0) + 1;

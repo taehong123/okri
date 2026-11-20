@@ -65,7 +65,9 @@ export async function saveProjectSchedule(db:D1Database,ownerId:string,projectId
   const state=await snapshot(db,ownerId,projectId);
   if(expectedRevision!==undefined&&expectedRevision!==state.revision)throw new ScheduleError("contribution_schedule_conflict",409);
   if(state.p.active!==1)throw new ScheduleError("project_metric_source_required",409);
-  return writeSchedule(db,ownerId,state,scheduleInput(raw),now);
+  const input=scheduleInput(raw);
+  if (input.mode==="weekly") throw new ScheduleError("versioned_project_rule_required");
+  return writeSchedule(db,ownerId,state,input,now);
 }
 export async function saveMetricCalendar(db:D1Database,ownerId:string,raw:unknown,expectedVersion:number,now=new Date()) {
   const input=calendarInput(raw),current=await readMetricCalendar(db,ownerId);

@@ -7,6 +7,7 @@ import { OverlayDialog } from "./overlay-dialog";
 import { formatContribution } from "./project-contributions";
 import "./kr-metrics.css";
 import ProjectContributionScheduleDialog from "./project-contribution-schedule";
+import KrPerformanceSettings from "./kr-performance-settings";
 
 type Draft={mode:KrSourceMode;starting:string;target:string;unit:string;projects:Record<string,string>;api:{name:string;endpointUrl:string;valuePath:string;baseline:string;target:string;unit:string;cadence:string;active:boolean}};
 function draftFor(s:KrSourceSettings):Draft {
@@ -18,6 +19,7 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
   const [state,setState]=useState<KrSourceSettings|null>(null),[draft,setDraft]=useState<Draft|null>(null),[initial,setInitial]=useState(""),[error,setError]=useState(""),[attempt,setAttempt]=useState(0),[saving,setSaving]=useState(false),[conflict,setConflict]=useState(false);
   const savingRef=useRef(false);
   const [scheduledProject,setScheduledProject]=useState<string|null>(null);
+  const [performanceOpen,setPerformanceOpen]=useState(false);
   useEffect(()=>{
     const controller=new AbortController();
     void fetch("/api/kr-data-sources?keyResultId="+encodeURIComponent(keyResultId),{cache:"no-store",signal:controller.signal})
@@ -48,12 +50,13 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
     {requestClose=><aside className="property-panel kr-data-panel kr-source-panel">
       <header><div><h2>{t("KR 데이터 설정")}</h2><p>{state?.keyResult.title??t("측정 방식을 선택해 주세요.")}</p></div><button className="icon-button" disabled={saving} onClick={()=>requestClose("close-button")} aria-label={t("KR 데이터 설정 닫기")}><X size={18}/></button></header>
       {!draft||!state?<div className="kr-source-status">{error?<><p role="alert">{error}</p><button onClick={reload}>{t("다시 시도")}</button></>:<p role="status">{t("데이터를 불러오는 중")}</p>}</div>:<form className="property-form" onSubmit={event=>void submit(event)} aria-busy={saving}>
+        <button type="button" className="secondary" disabled={dirty || saving} onClick={()=>setPerformanceOpen(true)}>{t("성과 측정 설정")}</button>
         <fieldset className="kr-source-options" disabled={saving}><legend>{t("KR 수치 반영 방식")}</legend>
-          <label aria-label={t("Project 성과 합산")}><input type="radio" name="krSource" value="projects" checked={draft.mode==="projects"} onChange={()=>setDraft({...draft,mode:"projects"})}/><span><b>{t("Project 성과 합산")}</b><small>{t("Project 완료 성과와 운영 중 쌓이는 기여량을 KR에 더합니다.")}</small></span></label>
+          {!state.performanceConfigured&&<label aria-label={t("Project 성과 합산")}><input type="radio" name="krSource" value="projects" checked={draft.mode==="projects"} onChange={()=>setDraft({...draft,mode:"projects"})}/><span><b>{t("Project 성과 합산")}</b><small>{t("Project 완료 성과와 운영 중 쌓이는 기여량을 KR에 더합니다.")}</small></span></label>}
           <label aria-label={t("API 연동")}><input type="radio" name="krSource" value="api" checked={draft.mode==="api"} onChange={()=>setDraft({...draft,mode:"api"})}/><span><b>{t("API 연동")}</b><small>{t("외부 API의 실제 수치로 KR을 갱신합니다.")}</small></span></label>
         </fieldset>
         <fieldset className="kr-source-fields" disabled={saving}>
-        {draft.mode==="projects"?<>
+        {draft.mode==="projects"?(!state.performanceConfigured&&<>
           <div className="kr-data-number-grid"><label><span>{t("시작값")}</span><input type="number" step="any" min="0" max="1000000000000" required value={draft.starting} onChange={e=>setDraft({...draft,starting:e.target.value})}/></label><label><span>{t("목표값")}</span><input type="number" step="any" min="0.000000001" max="1000000000000" required value={draft.target} onChange={e=>setDraft({...draft,target:e.target.value})}/></label></div>
           <label><span>{t("단위")}</span><input maxLength={24} value={draft.unit} onChange={e=>setDraft({...draft,unit:e.target.value})} placeholder={t("예: 원, 명, %")}/></label>
           <p className="kr-source-preview">{t("현재값")} <strong>{formatContribution(Number(draft.starting||0)+earned,draft.unit)}</strong><small>{t("시작값에 이미 반영한 Project 성과를 더한 값입니다.")}</small></p>
@@ -62,7 +65,7 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
           {(dirty||state.mode!=="projects")&&<small>{t("KR 설정을 먼저 저장한 뒤 Project별 기여 방식을 설정할 수 있습니다.")}</small>}
           {!state.projects.length&&<p>{t("이 KR의 Initiative 아래에 Project를 연결하면 기본 기여량을 설정할 수 있습니다.")}</p>}</div>
           <small>{t("Project 자체의 API 연결은 별도로 유지됩니다.")}</small>
-        </>:api&&<>
+        </>):api&&<>
           <p className="kr-source-hint">{t("인증이 필요 없는 HTTPS JSON GET API를 연결할 수 있습니다.")}</p>
           <label><span>{t("데이터 소스 이름")}</span><input required maxLength={120} value={api.name} onChange={e=>setDraft({...draft,api:{...api,name:e.target.value}})}/></label>
           <label><span>API URL</span><input type="url" required value={api.endpointUrl} onChange={e=>setDraft({...draft,api:{...api,endpointUrl:e.target.value}})} placeholder="https://api.example.com/metrics"/></label>
@@ -76,8 +79,12 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
         </fieldset>
         {error&&<p className="kr-data-error" role="alert">{error}</p>}
         {conflict&&<button type="button" className="secondary" onClick={reload}>{t("최신 설정 불러오기")}</button>}
-        <button type="submit" disabled={saving||conflict||(draft.mode==="api"&&api?.baseline===api?.target)}>{saving?t("저장 중"):<><Check size={15}/>{t("설정 저장")}</>}</button>
+        {(!state.performanceConfigured||draft.mode==="api")&&<button type="submit" disabled={saving||conflict||(draft.mode==="api"&&api?.baseline===api?.target)}>{saving?t("저장 중"):<><Check size={15}/>{t("설정 저장")}</>}</button>}
       </form>}
     </aside>}
-  </OverlayDialog>{scheduledProject&&<ProjectContributionScheduleDialog projectId={scheduledProject} onClose={()=>setScheduledProject(null)} onSaved={()=>{reload();void fetch("/api/kr-data-sources?keyResultId="+encodeURIComponent(keyResultId),{cache:"no-store"}).then(async response=>{if(response.ok)onSaved(await response.json() as KrSourceSettings);}).catch(()=>{});}}/>}</>;
+  </OverlayDialog>{scheduledProject&&<ProjectContributionScheduleDialog projectId={scheduledProject} onClose={()=>setScheduledProject(null)} onSaved={()=>{reload();void fetch("/api/kr-data-sources?keyResultId="+encodeURIComponent(keyResultId),{cache:"no-store"}).then(async response=>{if(response.ok)onSaved(await response.json() as KrSourceSettings);}).catch(()=>{});}}/>}
+  {performanceOpen&&state&&<KrPerformanceSettings legacy={state} onClose={()=>{setPerformanceOpen(false);reload();}} onSaved={()=>{
+    window.dispatchEvent(new Event("okri:kr-data-sources"));
+    void fetch("/api/kr-data-sources?keyResultId="+encodeURIComponent(keyResultId),{cache:"no-store"}).then(async response=>{if(response.ok)onSaved(await response.json() as KrSourceSettings);}).catch(()=>{});
+  }}/>}</>;
 }
