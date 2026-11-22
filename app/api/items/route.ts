@@ -11,7 +11,7 @@ import {
   getItemAssignmentMap,
   getItemCreatorMap,
   getPeriodReview,
-  listItems,
+  listWorkspaceItems,
   replaceItemAssignmentRole,
   serializeItem,
   updateItem,
@@ -43,7 +43,7 @@ export async function GET(request: Request) {
       return Response.json({ review: { ...review, items: review.items.map((item) => serializeItem(item, {}, assignments[item.id] ?? [])) } });
     }
 
-    const rows = await listItems(authorization.ownerId, {
+    const rows = await listWorkspaceItems(authorization.ownerId, {
       kind: asValue(url.searchParams.get("kind"), ITEM_KINDS),
       status: asValue(requestedStatus, ITEM_STATUSES),
       cadence,

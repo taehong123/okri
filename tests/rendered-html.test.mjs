@@ -435,7 +435,7 @@ test("ships product metadata and removes starter assets", async () => {
   assert.match(bootstrapRoute, /Promise\.all/);
   assert.match(bootstrapRoute, /Object\.assign\(\{\}, \.\.\.await Promise\.all/);
   assert.match(bootstrapRoute, /getTeam/);
-  assert.match(bootstrapRoute, /listItems/);
+  assert.match(bootstrapRoute, /listWorkspaceItems/);
   assert.match(bootstrapRoute, /Server-Timing/);
   assert.match(bootstrapRoute, /BOOTSTRAP_REQUEST_TIMEOUT_MS = 10_000/);
   assert.match(bootstrapRoute, /withTimeout\(loadBootstrap/);

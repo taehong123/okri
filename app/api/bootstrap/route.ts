@@ -14,7 +14,7 @@ import {
   getTeam,
   getWorkspaceRules,
   listArchivedProjects,
-  listItems,
+  listWorkspaceItems,
   listOkrCycles,
   listProjectPropertyDefinitions,
   listRoutines,
@@ -79,7 +79,7 @@ async function loadBootstrap(request: Request) {
 
     const loadData = async () => {
       const [itemRows, propertyRows, propertyValues, propertyUsageCounts, hiddenByProject, archivedRows, routines] = await Promise.all([
-        listItems(authorization.ownerId),
+        listWorkspaceItems(authorization.ownerId),
         listProjectPropertyDefinitions(authorization.ownerId, true),
         getProjectPropertyValueMap(authorization.ownerId),
         getProjectPropertyUsageCounts(authorization.ownerId),
