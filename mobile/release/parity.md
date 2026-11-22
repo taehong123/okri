@@ -1,5 +1,14 @@
 # Native parity ledger
 
+## 2026-11-22 · Complete workspace OKR snapshots
+
+- Shared API correction: bootstrap and item refresh return every authorized, active
+  workspace item, preserving Objective/KR/Initiative rows beyond 200 records.
+- Bounded MCP/search lists retain their existing cap. Assignment lookup uses one
+  JSON parameter so growing snapshots do not exceed SQL bind limits.
+- Existing mobile v1 response fields, authentication, permissions and data schema
+  are unchanged. Native clients receive the complete shared bootstrap snapshot.
+
 ## 2026-10-27 · Direct assigned-port conversations
 
 - Slack/backend and local runner only: API intake assigns and transports without

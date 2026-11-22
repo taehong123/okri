@@ -4080,9 +4080,7 @@ function requireGroupRole(value: GroupRole) {
   return value;
 }
 
-export async function listItems(
-  ownerId: string,
-  filter: {
+type ItemListFilter = {
     kind?: ItemKind;
     status?: ItemStatus;
     cadence?: ItemCadence;
@@ -4090,8 +4088,20 @@ export async function listItems(
     query?: string;
     limit?: number;
     includeArchived?: boolean;
-  } = {},
-) {
+  };
+
+// Search/MCP callers retain their bounded result contract.
+export async function listItems(ownerId: string, filter: ItemListFilter = {}) {
+  return workspaceItemQuery(ownerId, filter).limit(Math.min(filter.limit ?? 200, 200));
+}
+
+// The app consumes a complete workspace snapshot, including old OKR ancestors.
+// A search-result cap here can silently hide the entire hierarchy as Tasks grow.
+export async function listWorkspaceItems(ownerId: string, filter: Omit<ItemListFilter, "limit"> = {}) {
+  return workspaceItemQuery(ownerId, filter);
+}
+
+function workspaceItemQuery(ownerId: string, filter: ItemListFilter) {
   const conditions = [eq(items.ownerId, ownerId)];
   if (!filter.includeArchived && filter.status !== "archived") conditions.push(isNull(items.archivedAt));
   if (filter.kind) conditions.push(eq(items.kind, filter.kind));
@@ -4111,8 +4121,7 @@ export async function listItems(
     .select()
     .from(items)
     .where(and(...conditions))
-    .orderBy(asc(items.sortOrder), desc(items.createdAt))
-    .limit(Math.min(filter.limit ?? 200, 200));
+    .orderBy(asc(items.sortOrder), desc(items.createdAt));
 }
 
 export async function getItem(ownerId: string, id: string) {
@@ -4657,7 +4666,7 @@ async function assertItemDeletePermission(ownerId: string, userId: string, itemR
 export async function getItemAssignmentMap(ownerId: string, itemIds?: string[]) {
   if (itemIds && itemIds.length === 0) return {} as Record<string, ItemAssignmentSummary[]>;
   const conditions = [eq(itemAssignments.ownerId, ownerId)];
-  if (itemIds) conditions.push(inArray(itemAssignments.itemId, itemIds));
+  if (itemIds) conditions.push(sql`${itemAssignments.itemId} IN (SELECT value FROM json_each(${JSON.stringify(itemIds)}))`);
   const rows = await getDb()
     .select({
       id: itemAssignments.id,
