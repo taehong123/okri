@@ -13,7 +13,8 @@ export async function GET(request: Request) {
     const id = query.get("keyResultId") || (projectId ? (await currentProjectKr(env.DB, auth.ownerId, projectId)).keyResultId : "");
     if (!id) throw new PerformanceError("key_result_required");
     if (query.get("view") === "changes") return performanceResponse(await readPerformanceChanges(env.DB, auth.ownerId, id,
-      Number(query.get("after") ?? 0), Number(query.get("limit") ?? 50)));
+      Number(query.get("after") ?? 0), Number(query.get("limit") ?? 50),
+      { from: query.get("start"), to: query.get("end"), kind: query.get("kind") }));
     const estimates = query.get("includeEstimates");
     if (estimates !== null && estimates !== "true" && estimates !== "false") throw new PerformanceError("invalid_performance_input");
     const options = {

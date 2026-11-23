@@ -140,14 +140,20 @@ export async function readKrPerformance(db: D1Database, owner: string, id: strin
 }
 export type KrPerformanceState = Awaited<ReturnType<typeof readKrPerformance>>;
 
-export async function readPerformanceChanges(db: D1Database, owner: string, id: string, fromRevision = 0, limit = 50) {
+export async function readPerformanceChanges(db: D1Database, owner: string, id: string, fromRevision = 0, limit = 50,
+  filter: { from?: string | null; to?: string | null; kind?: string | null } = {}) {
   await keyResult(db, owner, id);
   if (!Number.isSafeInteger(fromRevision) || fromRevision < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
     throw new PerformanceError("invalid_performance_page");
   }
+  const from = filter.from ? dateOnly(filter.from) : null, to = filter.to ? dateOnly(filter.to) : null;
+  if (from && to) validateRange(from, to);
+  const kind = filter.kind ? choice(filter.kind, ["rule", "project", "entry"]) : null;
   const r = await db.prepare(`SELECT revision,kind,subject_id,effective_date,recorded_at,actor_id,reason,receipt_json
-    FROM kr_performance_changes WHERE owner_id=? AND kr_item_id=? AND revision>? ORDER BY revision LIMIT ?`)
-    .bind(owner, id, fromRevision, limit + 1).all<Stored>();
+    FROM kr_performance_changes WHERE owner_id=? AND kr_item_id=? AND revision>?
+      AND (? IS NULL OR effective_date>=?) AND (? IS NULL OR effective_date<=?) AND (? IS NULL OR kind=?)
+    ORDER BY revision LIMIT ?`)
+    .bind(owner, id, fromRevision, from, from, to, to, kind, kind, limit + 1).all<Stored>();
   const items = r.results.slice(0, limit).map(row => ({
     revision: row.revision, kind: row.kind, subjectId: row.subject_id, effectiveDate: row.effective_date,
     recordedAt: row.recorded_at, actorId: row.actor_id, reason: row.reason, ...JSON.parse(row.receipt_json),

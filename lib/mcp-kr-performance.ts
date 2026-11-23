@@ -50,7 +50,16 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
   const options = (input: { start?: string; end?: string; as_of?: string; grain?: string; include_estimates?: boolean }) => ({
     start: input.start, end: input.end, asOf: input.as_of, grain: input.grain, includeEstimates: input.include_estimates,
   });
-  const readState = (kr: string) => readKrPerformance(db, auth.ownerId, kr, { grain: "month" });
+  const readState = (kr: string, asOf?: string) => readKrPerformance(db, auth.ownerId, kr, { grain: "month", asOf });
+  const rulePage = <T extends { effectiveDate: string }>(versions: T[], input: {
+    start?: string; end?: string; offset?: number; limit?: number;
+  }) => {
+    const filtered = versions.filter(row => (!input.start || row.effectiveDate >= input.start) && (!input.end || row.effectiveDate <= input.end));
+    const offset = input.offset ?? 0, limit = input.limit ?? 50;
+    return { rules: filtered.slice(offset, offset + limit), ruleCount: filtered.length,
+      nextOffset: offset + limit < filtered.length ? offset + limit : null };
+  };
+  const ruleQuery = { start: date.optional(), end: date.optional(), as_of: date.optional(), ...page };
   const command = (input: z.infer<z.ZodObject<typeof versioned>>, kind: "rule" | "project" | "entry", value: unknown, subjectId?: string) => ({
     kind, value, ...(subjectId ? { subjectId } : {}), expectedRevision: input.expected_revision,
     requestId: input.request_id, effectiveDate: input.effective_date, reason: input.reason ?? "",
@@ -58,11 +67,11 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
 
   server.registerTool("get_kr_measurement_rule", {
     description: "Read the current workspace KR's measurement rule versions, current evaluation and optimistic revision.",
-    inputSchema: { key_result_id: id }, annotations: read,
+    inputSchema: { key_result_id: id, ...ruleQuery }, annotations: read,
   }, input => operation(async () => {
-    const state = await readState(input.key_result_id);
+    const state = await readState(input.key_result_id, input.as_of);
     return { keyResult: state.keyResult, revision: state.revision, asOf: state.asOf, timezone: state.timezone,
-      rules: state.configuration.rules, current: state.performance?.current ?? null, evaluation: state.performance?.evaluation ?? null };
+      ...rulePage(state.configuration.rules, input), current: state.performance?.current ?? null, evaluation: state.performance?.evaluation ?? null };
   }));
 
   server.registerTool("set_kr_measurement_rule", {
@@ -79,12 +88,12 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
 
   server.registerTool("get_project_contribution_rule", {
     description: "Read a Project's versioned contribution rule, operating state, paused intervals, calendar, evidence and current KR evaluation contribution.",
-    inputSchema: { project_id: id }, annotations: read,
+    inputSchema: { project_id: id, ...ruleQuery }, annotations: read,
   }, input => operation(async () => {
     const project = await currentProjectKr(db, auth.ownerId, input.project_id);
-    const state = await readState(project.keyResultId);
+    const state = await readState(project.keyResultId, input.as_of);
     return { project, revision: state.revision, asOf: state.asOf, evaluation: state.performance?.evaluation ?? null,
-      rules: state.configuration.projects.filter(item => item.projectId === project.id),
+      ...rulePage(state.configuration.projects.filter(item => item.projectId === project.id), input),
       contribution: state.performance?.current.projectBreakdown.find(item => item.projectId === project.id) ?? null };
   }));
 
@@ -129,8 +138,10 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
   server.registerTool("list_kr_performance_changes", {
     description: "Read the versioned configuration and correction audit trail separately from the dated performance series.",
     inputSchema: { key_result_id: id, after_revision: z.number().int().nonnegative().optional(),
-      limit: z.number().int().min(1).max(100).optional() }, annotations: read,
-  }, input => operation(() => readPerformanceChanges(db, auth.ownerId, input.key_result_id, input.after_revision, input.limit)));
+      limit: z.number().int().min(1).max(100).optional(), start: date.optional(), end: date.optional(),
+      kind: z.enum(["rule", "project", "entry"]).optional() }, annotations: read,
+  }, input => operation(() => readPerformanceChanges(db, auth.ownerId, input.key_result_id, input.after_revision, input.limit,
+    { from: input.start, to: input.end, kind: input.kind })));
 
   server.registerTool("list_project_operations", {
     description: "Read Project build state, operating/adoption state and recency of use evidence. Projects can have operations without a numeric contribution or KR.",
