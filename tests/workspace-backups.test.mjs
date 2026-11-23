@@ -153,6 +153,9 @@ test("backups predating personal work selection restore with empty work arrays w
   }
   for (const row of old.tables.daily_scrums) { delete row.work_selection_json; delete row.yesterday_work_selection_json; }
   for (const row of old.tables.daily_submissions) { delete row.work_snapshot_json; delete row.yesterday_work_snapshot_json; delete row.request_id; }
+  for (const row of old.tables.kr_metric_observations) {
+    delete row.numerator; delete row.denominator; delete row.snapshot_key;
+  }
   const validated = backups.validateSnapshot(old, "w");
   assert.equal(validated.tables.daily_scrums[0].work_selection_json, "[]");
   assert.equal(validated.tables.daily_scrums[0].yesterday_work_selection_json, "[]");

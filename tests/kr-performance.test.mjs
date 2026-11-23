@@ -345,3 +345,18 @@ test("MIXSOON progress regression returns the shared 49% instead of cached 8%", 
   assert.equal(summary[0].currentValue.toFixed(2), "49.07");
   assert.equal(summary[0].progress, 49);
 });
+
+test("the same API snapshot received three times remains 1,000", async t => {
+  const f = dataFixture(t);
+  f.seed("kr_data_connections", { id: "api", owner_id: "w", kr_item_id: "kr", name: "Counter",
+    endpoint_url: "https://example.com/api", unit: "items", baseline_value: 0, target_value: 2000 });
+  await f.write(change("rule", { ...krRule, source: "api", input: "samples", aggregation: "last", unit: "items", target: 2000 },
+    "2026-11-01", 0), "2026-11-01");
+  for (const [i, day] of ["2026-11-03", "2026-11-03", "2026-11-04"].entries()) {
+    f.seed("kr_metric_observations", { id: "poll-" + i, owner_id: "w", kr_item_id: "kr", source: "api", event_kind: "synced",
+      current_value: 1000, baseline_value: 0, target_value: 2000, unit: "items", observed_at: day + "T00:00:0" + i + ".000Z" });
+  }
+  const { performance } = await f.state("2026-11-04");
+  assert.equal(performance.current.value, 1000);
+  assert.equal(performance.current.progress, 50);
+});

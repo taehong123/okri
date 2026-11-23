@@ -1,7 +1,7 @@
 import { readMetricCalendar } from "./project-metric-schedules";
 import { dateOnly, localDate, ScheduleError, shiftDate } from "./project-metric-schedule-model";
 import { operationHistory } from "./project-operations";
-import { aggregatePerformance, amount, bool, choice, evaluationRange, evidenceUrl, formulaInput, formulaValue,
+import { activeOperations, aggregatePerformance, amount, bool, choice, evaluationRange, evidenceUrl, formulaInput, formulaValue,
   PerformanceError, projectRuleInput, record, ruleAt, scheduledOccurrences,
   ruleInput, textValue, validateRange, type ApiSample, type Data, type Entry, type Grain, type Measurement, type MeasurementRule, type ProjectRule, type Version } from "./kr-performance-model";
 
@@ -76,10 +76,11 @@ export async function readProjectPeriodContribution(db: D1Database, owner: strin
   const result = state.performance;
   if (!result) return null;
   const version = ruleAt(state.configuration.projects.filter(project => project.projectId === projectId), state.asOf);
+  const operations = ruleAt((await operationHistory(db, owner, [projectId])).get(projectId) ?? [], state.asOf);
   const contribution = result.current.projectBreakdown.find(project => project.projectId === projectId);
   return { start: result.evaluation.start, end: result.evaluation.end, unit: result.rule.value.unit,
-    value: contribution?.value ?? 0, isEstimate: Boolean(contribution && contribution.estimatedValue !== 0),
-    operating: version?.value.operating ?? null };
+    value: contribution?.value ?? 0, isEstimate: Boolean(contribution?.hasEstimates),
+    operating: operations ? activeOperations(operations.value, state.asOf) : version?.value.operating ?? null };
 }
 
 async function compileData(db: D1Database, owner: string, id: string, ledger: Stored[]): Promise<Data> {

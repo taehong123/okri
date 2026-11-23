@@ -444,12 +444,12 @@ export function aggregatePerformance(data: Data, options: { asOf: string; range?
     start = shiftDate(end, 1);
   }
   const detail = ({ records, ...summary }: ReturnType<typeof measured>) => {
-    const projects = new Map<string, { projectId: string; title: string; value: number; estimatedValue: number; occurrences: number }>();
+    const projects = new Map<string, { projectId: string; title: string; value: number; estimatedValue: number; hasEstimates: boolean; occurrences: number }>();
     for (const row of records) {
       if (!row.projectId) continue;
-      const item = projects.get(row.projectId) ?? { projectId: row.projectId, title: row.title ?? row.projectId, value: 0, estimatedValue: 0, occurrences: 0 };
+      const item = projects.get(row.projectId) ?? { projectId: row.projectId, title: row.title ?? row.projectId, value: 0, estimatedValue: 0, hasEstimates: false, occurrences: 0 };
       item.value += row.value;
-      if (row.isEstimate) item.estimatedValue += row.value;
+      if (row.isEstimate) { item.estimatedValue += row.value; item.hasEstimates = true; }
       item.occurrences++;
       projects.set(item.projectId, item);
     }

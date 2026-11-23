@@ -184,7 +184,7 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   if(Array.isArray(data.tables.kr_project_metrics)) data.tables.kr_project_metrics=data.tables.kr_project_metrics.map(row=>({active:1,...row}));
   data.tables.project_contributions ??= [];
   data.tables.kr_metric_observations ??= [];
-  if(Array.isArray(data.tables.kr_metric_observations))data.tables.kr_metric_observations=data.tables.kr_metric_observations.map(row=>({is_estimate:0,...row}));
+  if(Array.isArray(data.tables.kr_metric_observations))data.tables.kr_metric_observations=data.tables.kr_metric_observations.map(row=>({is_estimate:0,numerator:null,denominator:null,snapshot_key:null,...row}));
   data.tables.workspace_metric_calendars ??= [];
   data.tables.project_metric_schedules ??= [];
   data.tables.kr_performance_changes ??= [];
