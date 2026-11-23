@@ -1,8 +1,8 @@
 import { env } from "cloudflare:workers";
 import { authorizeRequest, ensureWorkspace } from "@/lib/pace-data";
-import { hasPerformanceRule, listPerformanceSummaries, readKrPerformance } from "@/lib/kr-performance";
+import { hasPerformanceRule, readKrPerformance } from "@/lib/kr-performance";
 import { ContributionError } from "@/lib/project-contributions";
-import { listKrMetricSummaries, readKrSource, saveKrSource } from "@/lib/kr-data-sources";
+import { listCurrentKrMetrics, readKrSource, saveKrSource } from "@/lib/kr-data-sources";
 export async function GET(request: Request) {
   const auth=await authorizeRequest(request,{allowViewerWrite:true});
   if(auth instanceof Response)return auth;
@@ -14,12 +14,13 @@ export async function GET(request: Request) {
       const [legacy, state] = await Promise.all([readKrSource(env.DB, auth.ownerId, id), readKrPerformance(env.DB, auth.ownerId, id, { grain: "month" })]);
       const performance = state.performance;
       return Response.json({ ...legacy, performanceConfigured: Boolean(state.revision),
-        keyResult: { ...legacy.keyResult, progress: performance ? performance.current.progress ?? 0 : legacy.keyResult.progress } }, { headers });
+        keyResult: { ...legacy.keyResult, progress: performance ? performance.current.progress ?? 0 : legacy.keyResult.progress },
+        metric: performance ? performance.rule.value.source === "projects" ? {
+          startingValue: performance.rule.value.baseline, targetValue: performance.rule.value.target,
+          currentValue: performance.current.value ?? 0, unit: performance.rule.value.unit,
+        } : null : legacy.metric }, { headers });
     }
-    const [legacy, modern] = await Promise.all([listKrMetricSummaries(env.DB, auth.ownerId), listPerformanceSummaries(env.DB, auth.ownerId)]);
-    const merged = new Map(legacy.map(item => [item.keyResultId, item]));
-    for (const item of modern) if (item) merged.set(item.keyResultId, item);
-    return Response.json({ metrics: [...merged.values()] }, { headers });
+    return Response.json({ metrics: await listCurrentKrMetrics(env.DB, auth.ownerId) }, { headers });
   }catch(error){return failure(error);}
 }
 export async function PUT(request: Request) {

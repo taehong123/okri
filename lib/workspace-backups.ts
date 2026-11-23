@@ -14,9 +14,10 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   project_contributions: "id,owner_id,project_id,kr_item_id,default_value,actual_value,applied,enabled,last_request_id,version,created_at,updated_at",
   workspace_metric_calendars: "id,owner_id,timezone,holidays_json,version,created_at,updated_at",
   project_metric_schedules: "id,owner_id,project_id,kr_item_id,mode,amount,start_date,end_date,pauses_json,credit_dates_json,accrued_value,through_date,calendar_version,active,suspended_at,version,created_at,updated_at",
-  kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at,is_estimate",
+  kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at,is_estimate,numerator,denominator,snapshot_key",
   kr_performance_changes: "id,owner_id,kr_item_id,revision,request_id,kind,subject_id,effective_date,recorded_at,actor_id,reason,request_json,value_json,receipt_json",
   kr_performance_stops: "id,owner_id,kr_item_id,project_id,recorded_at",
+  project_operation_versions: "id,owner_id,project_id,revision,request_id,effective_date,recorded_at,actor_id,reason,value_json,receipt_json",
   project_task_goals: "id,owner_id,project_id,target_count,version,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
   item_property_values: "id,owner_id,item_id,property_id,value,legacy_value,updated_at",
@@ -188,6 +189,7 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   data.tables.project_metric_schedules ??= [];
   data.tables.kr_performance_changes ??= [];
   data.tables.kr_performance_stops ??= [];
+  data.tables.project_operation_versions ??= [];
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];
     if (!Array.isArray(rows) || rows.length > MAX_ROWS) throw new BackupError("invalid_backup", "백업 데이터가 완전하지 않습니다.");

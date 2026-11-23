@@ -1919,6 +1919,9 @@ export const krProjectMetrics = sqliteTable("kr_project_metrics", {
 ]);
 
 export const krMetricObservations = sqliteTable("kr_metric_observations", {
+  numerator: real("numerator"),
+  denominator: real("denominator"),
+  snapshotKey: text("snapshot_key"),
   id: text("id").primaryKey(),
   ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
   keyResultId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
@@ -2034,3 +2037,57 @@ export const dailyReportGuards = sqliteTable("daily_report_guards",{id:text("id"
 
 export const workspaceInviteLinks = sqliteTable("workspace_invite_links",{id:text("id").primaryKey().notNull(),workspaceId:text("workspace_id").notNull().references(()=>workspaces.id,{onDelete:"cascade"}).unique(),role:text("role").notNull().default("member"),tokenHash:text("token_hash").notNull().unique(),invitedByUserId:text("invited_by_user_id").notNull(),expiresAt:text("expires_at").notNull(),revokedAt:text("revoked_at"),createdAt:text("created_at").notNull(),updatedAt:text("updated_at").notNull()},table=>[check("workspace_invite_link_role",sql`${table.role} IN ('admin','member','viewer')`)]);
 export const workspaceInviteLinkGuards=sqliteTable("workspace_invite_link_guards",{id:text("id").primaryKey().notNull(),valid:integer("valid").notNull()},table=>[check("workspace_invite_link_guard_valid",sql`${table.valid}=1`)]);
+
+export const projectOperationVersions = sqliteTable("project_operation_versions", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  projectId: text("project_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  revision: integer("revision").notNull(),
+  requestId: text("request_id").notNull(),
+  effectiveDate: text("effective_date").notNull(),
+  recordedAt: text("recorded_at").notNull(),
+  actorId: text("actor_id").notNull(),
+  reason: text("reason").notNull(),
+  valueJson: text("value_json").notNull(),
+  receiptJson: text("receipt_json").notNull(),
+}, t => [
+  uniqueIndex("idx_project_operations_revision").on(t.ownerId, t.projectId, t.revision),
+  uniqueIndex("idx_project_operations_request").on(t.ownerId, t.projectId, t.requestId),
+  check("project_operations_revision", sql`${t.revision} > 0`),
+  check("project_operations_json", sql`json_valid(${t.valueJson}) and json_valid(${t.receiptJson})`),
+]);
+
+export const krMetricOccurrences = sqliteTable("kr_metric_occurrences", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  occurredOn: text("occurred_on").notNull(),
+  payload: text("payload").notNull(),
+  postedAt: text("posted_at").notNull(),
+}, t => [
+  index("idx_kr_metric_occurrences_date").on(t.ownerId, t.krItemId, t.occurredOn),
+  check("kr_metric_occurrence_json", sql`json_valid(${t.payload})`),
+]);
+
+export const krMetricRollupState = sqliteTable("kr_metric_rollup_state", {
+  krItemId: text("kr_item_id").primaryKey().references(() => items.id, { onDelete: "cascade" }),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  generation: text("generation").notNull(),
+  signature: text("signature").notNull(),
+  throughDate: text("through_date").notNull(),
+  lastSuccessAt: text("last_success_at").notNull(),
+  lastScheduledAt: text("last_scheduled_at"),
+});
+
+export const krMetricRollupRuns = sqliteTable("kr_metric_rollup_runs", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  recordedAt: text("recorded_at").notNull(),
+  status: text("status").notNull(),
+  origin: text("origin").notNull(),
+  resultJson: text("result_json").notNull(),
+}, t => [
+  index("idx_kr_metric_rollup_runs_time").on(t.ownerId, t.krItemId, t.recordedAt, t.id),
+  check("kr_metric_rollup_run_json", sql`json_valid(${t.resultJson})`),
+]);

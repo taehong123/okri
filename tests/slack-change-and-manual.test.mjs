@@ -217,6 +217,7 @@ test("delivery queues resume each minute without accelerating existing maintenan
   const mark = (name) => async () => { calls.push(name); };
   const runner = compile(await read("lib/scheduled-jobs.ts"), {
     "@/lib/project-metric-schedules": {runDueProjectContributions:mark("contributions")},
+    "@/lib/kr-performance": {runDueMetricRollups:mark("metric_rollups")},
     "@/lib/ticket-automation": {runTicketAutomation:mark("tickets")},
     "@/lib/notifications": {runNotificationJobs:mark("notifications")},
     "@/lib/android-test-feedback": {runAndroidTestDailyReport:mark("android")},
@@ -240,6 +241,6 @@ test("delivery queues resume each minute without accelerating existing maintenan
     const pending = [];
     worker.scheduled({ scheduledTime: Date.UTC(2026, 8, 5, 1, minute) }, { DB: {} }, { waitUntil: (job) => pending.push(job) });
     await Promise.all(pending);
-    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "reports", "kr", "backups", "management", "reminders", "billing","contributions"] : ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "reports"]).sort());
+    assert.deepEqual(calls.sort(), (minute % 15 === 0 ? ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "reports", "kr", "backups", "management", "reminders", "billing","contributions","metric_rollups"] : ["tickets","notifications","android","deliveries", "changes", "manual", "digest", "reports"]).sort());
   }
 });

@@ -1,3 +1,4 @@
+import { listPerformanceSummaries } from "./kr-performance";
 import { ContributionError } from "./project-contributions";
 import { normalizeEndpoint } from "./kr-data-sync";
 
@@ -11,7 +12,7 @@ export type KrSourceSettings = {
   api: { name: string; endpointUrl: string; valuePath: string; baselineValue: number; targetValue: number; unit: string; cadence: string; active: boolean } | null;
   projects: { id: string; title: string; status: string; defaultValue: number | null; actualValue: number | null; applied: boolean; schedule?:{mode:string;amount:number;accruedValue:number} | null }[];
 };
-export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | "manual" | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean; performance?:boolean; trend?:import("./kr-performance-model").PerformanceResult["points"] };
+export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | "manual" | "throughput" | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean; performance?:boolean; trend?:import("./kr-performance-model").PerformanceResult["points"] };
 type Row = Record<string, string | number | null>;
 const children = `SELECT p.id,p.title,p.status,p.updated_at,c.id AS config_id,c.version AS config_version,c.kr_item_id,
  c.default_value,c.actual_value,c.applied,c.enabled,s.mode AS schedule_mode,s.amount AS schedule_amount,s.accrued_value AS schedule_value
@@ -54,6 +55,17 @@ export async function listKrMetricSummaries(db: D1Database, ownerId: string): Pr
     currentValue:r.active===1?Number(r.starting_value)+Number(r.earned):r.api_id&&r.last_value!==null?Number(r.last_value):null,
     targetValue:r.active===1?Number(r.target_value):r.api_id?Number(r.api_target):null,unit:String(r.active===1?r.unit:r.api_unit??""),progress:Number(r.progress),isEstimate:r.active===1&&Boolean(r.is_estimate)}));
 }
+export async function listCurrentKrMetrics(db: D1Database, ownerId: string, ids?: string[]) {
+  if (ids?.length === 0) return [];
+  const [legacy, current] = await Promise.all([
+    listKrMetricSummaries(db, ownerId), listPerformanceSummaries(db, ownerId, new Date(), ids),
+  ]);
+  const filter = ids && new Set(ids);
+  const metrics = new Map(legacy.filter(row => !filter || filter.has(row.keyResultId)).map(row => [row.keyResultId, row]));
+  for (const row of current) if (row) metrics.set(row.keyResultId, row);
+  return [...metrics.values()];
+}
+
 function numeric(v:unknown,positive=false) {
   if(typeof v!=="number"||!Number.isFinite(v)||v<0||v>1e12||(positive&&v===0))throw new ContributionError("invalid_contribution",400);
   return v;

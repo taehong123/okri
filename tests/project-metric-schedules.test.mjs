@@ -16,7 +16,7 @@ const model=compile(await read("lib/project-metric-schedule-model.ts"));
 const api=compile(await read("lib/project-metric-schedules.ts"),{"./project-metric-schedule-model":model});
 const contributions=compile(await read("lib/project-contributions.ts"));
 const sync=compile(await read("lib/kr-data-sync.ts"));
-const sources=compile(await read("lib/kr-data-sources.ts"),{"./project-contributions":contributions,"./kr-data-sync":sync});
+const sources=compile(await read("lib/kr-data-sources.ts"),{"./project-contributions":contributions,"./kr-data-sync":sync,"./kr-performance":{}});
 const mcp=compile(await read("lib/mcp-contribution-schedules.ts"),{"./project-metric-schedules":api,"./kr-data-sources":sources});
 const schema=JSON.parse(await read("drizzle/meta/0071_snapshot.json"));
 const migrations=await Promise.all(["0076_project_task_goals","0077_project_contributions","0078_kr_data_sources","0079_kr_metric_history","0080_project_metric_schedules"].map(n=>read(`drizzle/${n}.sql`)));

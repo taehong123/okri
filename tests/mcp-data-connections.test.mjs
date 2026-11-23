@@ -22,7 +22,7 @@ const schema = compile(await read("db/schema.ts"));
 const snapshot = JSON.parse(await read("drizzle/meta/0071_snapshot.json"));
 const contributions = compile(await read("lib/project-contributions.ts"));
 const sync = compile(await read("lib/kr-data-sync.ts"));
-const sources = compile(await read("lib/kr-data-sources.ts"), {"./project-contributions": contributions, "./kr-data-sync": sync});
+const sources = compile(await read("lib/kr-data-sources.ts"), {"./project-contributions": contributions, "./kr-data-sync": sync, "./kr-performance": {}});
 const serviceSource = await read("lib/mcp-data-connections.ts");
 const paceSource = await read("lib/pace-data.ts");
 const paceAst = ts.createSourceFile("pace-data.ts", paceSource, ts.ScriptTarget.Latest, true);
@@ -68,7 +68,7 @@ function fixture(t) {
     return row ? {...row, archivedAt: row.archived_at} : null;
   };
   data.syncDataConnection = (owner, id) => sync.syncKrDataConnectionWithDb(db, owner, id);
-  const api = compile(serviceSource, {"./pace-data": data, "./kr-data-sources": sources, "./kr-data-sync": sync});
+  const api = compile(serviceSource, {"./pace-data": data, "./kr-data-sources": sources, "./kr-data-sync": sync, "./kr-performance": {}});
   const upsert = input => api.upsertMcpDataConnection(db, auth, {...settings, ...input});
   const rows = () => sql.prepare("SELECT * FROM kr_metric_observations ORDER BY rowid").all();
   return {sql, db, data, api, upsert, rows};

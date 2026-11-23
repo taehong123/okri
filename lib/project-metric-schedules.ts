@@ -83,8 +83,9 @@ export async function saveMetricCalendar(db:D1Database,ownerId:string,raw:unknow
   ]);}catch {throw new ScheduleError("metric_calendar_conflict",409);}
   return readMetricCalendar(db,ownerId);
 }
-export async function runDueProjectContributions(db:D1Database,now=new Date()) {
-  const rows=await db.prepare(`SELECT s.owner_id,s.project_id,s.id,s.mode,s.start_date,s.through_date,s.calendar_version,c.timezone,coalesce(c.version,0) AS current_calendar_version
+export async function runDueProjectContributions(db:D1Database,now=new Date(),
+  isVersioned?: (ownerId: string, keyResultId: string, at: Date) => Promise<boolean>) {
+  const rows=await db.prepare(`SELECT s.owner_id,s.project_id,s.id,s.kr_item_id,s.mode,s.start_date,s.through_date,s.calendar_version,c.timezone,coalesce(c.version,0) AS current_calendar_version
     FROM project_metric_schedules s LEFT JOIN workspace_metric_calendars c ON c.owner_id=s.owner_id
     JOIN items p ON p.id=s.project_id AND p.owner_id=s.owner_id JOIN items i ON i.id=p.parent_id AND i.owner_id=p.owner_id
     JOIN items k ON k.id=i.parent_id AND k.owner_id=p.owner_id
@@ -97,6 +98,7 @@ export async function runDueProjectContributions(db:D1Database,now=new Date()) {
     if(String(row.through_date)>=through&&row.calendar_version===row.current_calendar_version)continue;
     if(updated+failed>=100)break;
     try {
+      if (await isVersioned?.(String(row.owner_id), String(row.kr_item_id), now)) continue;
       const state=await snapshot(db,String(row.owner_id),String(row.project_id));
       if(!state.s?.active||state.s.id!==row.id)continue;
       await writeSchedule(db,String(row.owner_id),state,scheduleInput({mode:state.s.mode,amount:state.s.amount,startDate:state.s.start_date,endDate:state.s.end_date,pauses:JSON.parse(String(state.s.pauses_json))}),now);updated++;

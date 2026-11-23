@@ -69,7 +69,8 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
     const projectSource=await d1.prepare("SELECT id FROM kr_project_metrics WHERE owner_id=? AND kr_item_id=? AND active=1").bind(connection.owner_id,connection.kr_item_id).first();
     if(projectSource)throw new Error("KR uses Project contributions");
     const payload = await fetchMetric(connection.endpoint_url);
-    const value = numericValueAtPath(payload, connection.value_path);
+    const ratio = target.kind === "key_result" ? await readSnapshotRatio(d1, connection, payload, now) : null;
+    const value = ratio ? ratio.value : numericValueAtPath(payload, connection.value_path);
     const progress = metricProgress(value, connection.baseline_value, connection.target_value);
     const guard=crypto.randomUUID();
     await d1.batch([
@@ -84,7 +85,11 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
         WHERE owner_id = ? AND id = ?`).bind(value, timestamp, nextSyncAt, timestamp, connection.owner_id, connection.id),
       d1.prepare("UPDATE items SET progress = ?, updated_at = ? WHERE owner_id = ? AND id = ? AND kind = ?")
         .bind(progress, timestamp, connection.owner_id, target.id, target.kind),
-      d1.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at)
+      ratio ? d1.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at,
+        numerator,denominator,snapshot_key) VALUES(?,?,?,'api','synced',?,?,?,?,?,?,?,?)`)
+        .bind(crypto.randomUUID(), connection.owner_id, target.id, value, connection.baseline_value, connection.target_value,
+          connection.unit, timestamp, ratio.numerator, ratio.denominator, ratio.key)
+      : d1.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at)
         SELECT ?,?,?, 'api','synced',?,?,?,?,? WHERE ?='key_result'`).bind(crypto.randomUUID(),connection.owner_id,target.id,value,connection.baseline_value,connection.target_value,connection.unit,timestamp,target.kind),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
         VALUES (?, ?, ?, 'data_synced', 'api', ?, ?)`)
@@ -165,13 +170,44 @@ async function fetchMetric(endpointUrl: string) {
   throw new Error("API request failed");
 }
 
-function numericValueAtPath(payload: unknown, valuePath: string) {
+async function readSnapshotRatio(db: D1Database, connection: ConnectionRow, payload: unknown, now: Date) {
+  type Rule = { source: string; input: string; timezone: string; unit: string; ratioScale?: number;
+    numeratorPath?: string; denominatorPath?: string; snapshotKeyPath?: string };
+  const versions = await db.prepare(`SELECT effective_date,json_extract(value_json,'$.rule') AS rule
+    FROM kr_performance_changes WHERE owner_id=? AND kr_item_id=? AND kind='rule'
+    ORDER BY effective_date DESC,revision DESC`).bind(connection.owner_id, connection.kr_item_id)
+    .all<{ effective_date: string; rule: string }>()
+    // Standalone legacy instances can poll their scalar connection during a rolling migration.
+    .catch(error => { if (error instanceof Error && /no such table: kr_performance_changes/.test(error.message)) return { results: [] }; throw error; });
+  for (const version of versions.results) {
+    const rule = JSON.parse(version.rule) as Rule;
+    const day = new Intl.DateTimeFormat("sv-SE", { timeZone: rule.timezone, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+    if (version.effective_date > day) continue;
+    if (rule.source !== "api" || rule.input !== "ratio" || !rule.numeratorPath || !rule.denominatorPath || !rule.snapshotKeyPath) return null;
+    if (rule.unit !== connection.unit) throw new Error("The API connection and ratio rule units must match");
+    const numerator = numericValueAtPath(payload, rule.numeratorPath), denominator = numericValueAtPath(payload, rule.denominatorPath);
+    const rawKey = valueAtPath(payload, rule.snapshotKeyPath);
+    const key = typeof rawKey === "string" || typeof rawKey === "number" ? String(rawKey).trim() : "";
+    if (!key || key.length > 180 || denominator < 0 || Math.abs(numerator) > 1e12 || denominator > 1e12) throw new Error("Invalid ratio snapshot");
+    const value = denominator ? (rule.ratioScale ?? 1) * numerator / denominator : 0;
+    if (!Number.isFinite(value)) throw new Error("Invalid ratio snapshot");
+    return { key, numerator, denominator, value };
+  }
+  return null;
+}
+
+function valueAtPath(payload: unknown, valuePath: string) {
   const segments = valuePath.trim() ? valuePath.replace(/\[(\d+)\]/g, ".$1").split(".").map((segment) => segment.trim()).filter(Boolean) : [];
   let value: unknown = payload;
   for (const segment of segments) {
     if (["__proto__", "prototype", "constructor"].includes(segment) || typeof value !== "object" || value === null) throw new Error("The configured value path was not found");
     value = (value as Record<string, unknown>)[segment];
   }
+  return value;
+}
+
+function numericValueAtPath(payload: unknown, valuePath: string) {
+  const value = valueAtPath(payload, valuePath);
   const numeric = typeof value === "number" ? value : typeof value === "string" ? Number(value.replaceAll(",", "")) : Number.NaN;
   if (!Number.isFinite(numeric)) throw new Error("The configured value is not numeric");
   return numeric;

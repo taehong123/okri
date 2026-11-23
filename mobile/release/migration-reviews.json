@@ -131,5 +131,12 @@
     "rollbackPlan": "Retain the tables, dated ledger and restore checkpoints during rollback. Re-enable the canonical readers when the web and MCP versions are restored. Never rewrite or drop historical migrations.",
     "dataPreservation": "Rule versions, corrections, request receipts and lifecycle stops are scoped to the workspace and retained in backups. No existing row is migrated or activated automatically. Archive and reparent retain dated project credits.",
     "reviewedBy": "Codex source-bound SQLite and mobile compatibility review, 2026-11-20"
+  },
+  "drizzle/0085_metric_ledger.sql": {
+    "sha256": "3e4d73367100ca89c97e6bbcc0ea94613ed778513a178c33534f3c74bcfd11db",
+    "v1Compatibility": "Additive Project operation and KR occurrence/rollup tables. No frozen v1 request, response, status, authorization, or completion semantics change.",
+    "rollbackPlan": "Keep the appended tables and prior migration checks. Pause the metric rollup job during a code rollback if needed. Retain Project operations and source records for forward reconciliation.",
+    "dataPreservation": "Workspace-scoped versioned operations are backed up with their receipts. Idempotent occurrence IDs are derived from the KR, Project and closed local date. A transaction guards posting against stale rules, operations and lifecycle changes. Derived occurrences can be rebuilt; configured business records are never dropped by migration.",
+    "reviewedBy": "Codex source-bound SQLite, workspace backup, and frozen-client compatibility review, 2026-11-23"
   }
 }

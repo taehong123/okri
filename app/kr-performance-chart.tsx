@@ -2,23 +2,23 @@
 
 import { useEffect, useState, type FormEvent } from "react";
 import { t } from "@/lib/client-language";
-import type { KrPerformanceState } from "@/lib/kr-performance";
+import type { getMetricRollupStatus, KrPerformanceState, listMetricEntries, previewMetricRollup } from "@/lib/kr-performance";
 import type { Grain, PerformanceResult } from "@/lib/kr-performance-model";
 import { formatContribution } from "./project-contributions";
 import "./kr-performance.css";
 
 const fmt = (value: number | null, unit: string) => value === null ? "—" : formatContribution(value, unit);
 const periodLabel = (rule: PerformanceResult["rule"]["value"]) => ({
-  monthly: t("월간"), weekly: t("주간"), fixed: t("지정 기간"), all_time: t("전체 기간"),
+  daily: t("일간"), quarterly: t("분기"), monthly: t("월간"), weekly: t("주간"), fixed: t("지정 기간"), all_time: t("전체 기간"),
 })[rule.period];
 const aggregationLabel = (rule: PerformanceResult["rule"]["value"]) => ({
-  sum: t("합계"), last: t("마지막 값"), average: t("평균"),
+  ratio: t("분자·분모 합산"), sum: t("합계"), last: t("마지막 값"), average: t("평균"),
 })[rule.aggregation];
 
 export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyResultId: string; refreshToken: number }) {
   const [state, setState] = useState<KrPerformanceState>();
-  const [query, setQuery] = useState({ start: "", end: "", grain: "day" as Grain, includeEstimates: true });
-  const [dates, setDates] = useState({ start: "", end: "" });
+  const [query, setQuery] = useState({ start: "", end: "", asOf: "", grain: "day" as Grain, includeEstimates: true });
+  const [dates, setDates] = useState({ start: "", end: "", asOf: "" });
   const [error, setError] = useState(false);
   const [attempt, setAttempt] = useState(0);
   const [series, setSeries] = useState<"periodValue" | "cumulativeValue" | "value">("periodValue");
@@ -26,6 +26,7 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
   useEffect(() => {
     const controller = new AbortController();
     const params = new URLSearchParams({ keyResultId, grain: query.grain, includeEstimates: String(query.includeEstimates) });
+    if (query.asOf) params.set("asOf", query.asOf);
     if (query.start && query.end) { params.set("start", query.start); params.set("end", query.end); }
     void fetch("/api/kr-performance?" + params, { signal: controller.signal, cache: "no-store" })
       .then(async response => {
@@ -36,7 +37,7 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
         if (controller.signal.aborted) return;
         setState(next);
         setError(false);
-        if (next.performance) setDates(next.performance.range);
+        if (next.performance) setDates({ ...next.performance.range, asOf: next.asOf });
       })
       .catch(() => { if (!controller.signal.aborted) setError(true); });
     return () => controller.abort();
@@ -63,8 +64,9 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
     <form className="perf-range" onSubmit={applyRange}>
       <label>{t("조회 시작일")}<input type="date" required value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })}/></label>
       <label>{t("조회 종료일")}<input type="date" required min={dates.start} value={dates.end} onChange={e => setDates({ ...dates, end: e.target.value })}/></label>
+      <label>{t("집계 기준일")}<input type="date" value={dates.asOf} onChange={e => setDates({ ...dates, asOf: e.target.value })}/></label>
       <button type="submit" className="secondary">{t("조회")}</button>
-      <button type="button" className="secondary" onClick={() => setQuery({ ...query, start: "", end: "" })}>{t("평가 기간으로")}</button>
+      <button type="button" className="secondary" onClick={() => setQuery({ ...query, start: "", end: "", asOf: "" })}>{t("평가 기간으로")}</button>
     </form>
     <div className="perf-range">
       <label>{t("집계 단위")}<select value={query.grain} onChange={e => setQuery({ ...query, grain: e.target.value as Grain })}>
@@ -79,7 +81,8 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
     </div>
     <PerformancePlot points={result.points} series={series}/>
     <p className="perf-meta">{t("선택 기간 실적")} <strong>{fmt(selected.value, chosen?.unit ?? rule.unit)}</strong>
-      {chosen && <> · {aggregationLabel(chosen)}</>}{selected.hasEstimates && <> · {t("추정 포함")}</>}</p>
+      {chosen && <> · {aggregationLabel(chosen)}</>}{selected.hasEstimates && <> · {t("추정 포함")}</>}
+      {rule.aggregation === "sum" && <> · {t("전체 누적")} <strong>{fmt(result.lifetime?.value ?? null, rule.unit)}</strong></>}</p>
     {(selected.counterGaps || current.counterGaps) > 0 && <p className="perf-meta">{t("누적계의 첫 기록과 초기화 구간은 변화량에서 제외합니다.")}</p>}
     {selected.projectBreakdown.length > 0 && <details className="kr-history-records">
       <summary>{t("Project별 기여 합계")}</summary>
@@ -100,7 +103,60 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
       </div>
       {limit < result.records.length && <button className="secondary" type="button" onClick={() => setLimit(n => n + 50)}>{t("더 보기")}</button>}
     </details>
+    <MetricLedger key={[keyResultId, result.range.start, result.range.end, result.asOf, result.includeEstimates, refreshToken].join("/")}
+      keyResultId={keyResultId} result={result}/>
   </section>;
+}
+
+function MetricLedger({ keyResultId, result }: { keyResultId: string; result: PerformanceResult }) {
+  const [ledger, setLedger] = useState<Awaited<ReturnType<typeof listMetricEntries>>>();
+  const [status, setStatus] = useState<Awaited<ReturnType<typeof getMetricRollupStatus>>>();
+  const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewMetricRollup>>>();
+  const [error, setError] = useState(false);
+  const base = new URLSearchParams({ keyResultId, asOf: result.asOf, start: result.range.start, end: result.range.end,
+    includeEstimates: String(result.includeEstimates) });
+  async function load(view: "ledger" | "rollup" | "preview", offset = 0) {
+    try {
+      const query = new URLSearchParams(base);
+      query.set("view", view);
+      if (view === "ledger") { query.set("limit", "25"); query.set("offset", String(offset)); }
+      const response = await fetch("/api/kr-performance?" + query, { cache: "no-store" });
+      if (!response.ok) throw Error();
+      if (view === "ledger") {
+        const page = await response.json() as Awaited<ReturnType<typeof listMetricEntries>>;
+        setLedger(before => offset && before ? { ...page, entries: [...before.entries, ...page.entries] } : page);
+      } else if (view === "rollup") setStatus(await response.json());
+      else setPreview(await response.json());
+      setError(false);
+    } catch { setError(true); }
+  }
+  const label = (state: string) => state === "applied" ? t("반영") : state === "undated" ? t("발생일 미상")
+    : state === "cancelled" ? t("취소됨") : t("미반영");
+  return <>
+    <details className="kr-history-records" onToggle={e => { if (e.currentTarget.open && !ledger) void load("ledger"); }}>
+      <summary>{t("실적 원장")}</summary>
+      {ledger && <div className="kr-history-table"><table>
+        <thead><tr><th>{t("성과 날짜")}</th><th>Project</th><th>{t("실적")}</th><th>{t("상태")}</th></tr></thead>
+        <tbody>{ledger.entries.map(row => <tr key={row.id}>
+          <td>{row.date ?? "—"}</td><td>{row.title ?? "—"}</td><td>{fmt(row.value, row.unit)} · {row.isEstimate ? t("추정") : t("실측")}</td><td>{label(row.status)}</td>
+        </tr>)}</tbody>
+      </table></div>}
+      {ledger && ledger.nextOffset !== null &&
+        <button type="button" className="secondary" onClick={() => void load("ledger", ledger.nextOffset!)}>{t("더 보기")}</button>}
+    </details>
+    {result.rule.value.source === "projects" && <details className="kr-history-records" onToggle={e => { if (e.currentTarget.open) void load("rollup"); }}>
+      <summary>{t("집계 상태")}</summary>
+      {status && <>
+        <p className="perf-meta">{t("마지막 자동 집계")} {status.lastScheduledAt ? new Date(status.lastScheduledAt).toLocaleString() : "—"}
+          {" · "}{t("누적 완료일")} {status.accumulatedThrough ?? "—"}</p>
+        <button type="button" className="secondary" onClick={() => void load("preview")}>{t("재집계 미리보기")}</button>
+      </>}
+      {preview && <p role="status" className="perf-meta">
+        {t("반영 예상 증감")} {fmt((preview.selectedAfter?.value ?? 0) - (preview.selectedBefore?.value ?? 0), result.rule.value.unit)}
+      </p>}
+    </details>}
+    {error && <p className="perf-meta" role="alert">{t("집계 정보를 불러오지 못했습니다.")}</p>}
+  </>;
 }
 
 function PerformancePlot({ points, series }: { points: PerformanceResult["points"]; series: "periodValue" | "cumulativeValue" | "value" }) {

@@ -12,6 +12,7 @@ import { runNotificationJobs } from "@/lib/notifications";
 
 import { runTicketAutomation } from "@/lib/ticket-automation";
 import { runDueProjectContributions } from "@/lib/project-metric-schedules";
+import { hasEffectivePerformanceRule, runDueMetricRollups } from "@/lib/kr-performance";
 import { runDueDailyReports } from "@/lib/daily-report-slack";
 
 export type ScheduledRuntime = {
@@ -56,7 +57,8 @@ export async function runScheduledJobs(runtime: ScheduledRuntime, scheduledAt = 
     jobs.push(
       ["billing", runBillingBatch()],
       ["kr_data_sync", syncDueKrDataConnectionsWithDb(runtime.DB)],
-      ["project_contribution_schedules", runDueProjectContributions(runtime.DB, scheduledAt)],
+      ["project_contribution_schedules", runDueProjectContributions(runtime.DB, scheduledAt, (owner, kr, at) => hasEffectivePerformanceRule(runtime.DB, owner, kr, at))],
+      ["metric_rollups", runDueMetricRollups(runtime.DB, scheduledAt)],
       ["workspace_management_bots", runDueWorkspaceManagementBots(runtime.DB, scheduledAt)],
       ["workspace_backups", runDueWorkspaceBackups(runtime)],
       ["slack_daily_reminders", runDueSlackDailyReminders()],
