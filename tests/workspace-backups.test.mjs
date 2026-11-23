@@ -23,8 +23,9 @@ const contributionMigration = await readFile(new URL("../drizzle/0077_project_co
 const sourceMigration = await readFile(new URL("../drizzle/0078_kr_data_sources.sql", import.meta.url), "utf8");
 const historyMigration = await readFile(new URL("../drizzle/0079_kr_metric_history.sql", import.meta.url), "utf8");
 const recurringMigration = await readFile(new URL("../drizzle/0080_project_metric_schedules.sql", import.meta.url), "utf8");
+const metricLedgerMigration = await readFile(new URL("../drizzle/0085_metric_ledger.sql", import.meta.url), "utf8");
 const performanceMigration = await readFile(new URL("../drizzle/0084_kr_performance.sql", import.meta.url), "utf8");
-const performanceSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0075_snapshot.json", import.meta.url), "utf8"));
+const performanceSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0076_snapshot.json", import.meta.url), "utf8"));
 const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
 
 function fixture() {
@@ -52,6 +53,7 @@ function fixture() {
   sqlite.exec(historyMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(recurringMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(performanceMigration);
+  sqlite.exec(metricLedgerMigration);
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -130,7 +132,7 @@ test("snapshot uses separate storage, includes complete business hierarchy, and 
   assert.ok(!payload.includes("Other workspace"));
   const snapshot = JSON.parse(payload);
   assert.deepEqual(Object.keys(snapshot.tables), backups.BACKUP_TABLES);
-  for (const table of backups.BACKUP_TABLES.filter(table => !table.startsWith("kr_performance_"))) assert.ok(snapshot.tables[table].length, table);
+  for (const table of backups.BACKUP_TABLES.filter(table => !table.startsWith("kr_performance_") && table !== "project_operation_versions")) assert.ok(snapshot.tables[table].length, table);
   assert.equal(entry.summary.tasks, 2);
   assert.equal(Date.parse(entry.expiresAt) - Date.parse(entry.createdAt), 30 * 86400000);
   assert.equal((await backups.listWorkspaceBackups(f.ctx, "other")).backups.length, 0);
@@ -151,6 +153,9 @@ test("backups predating personal work selection restore with empty work arrays w
   }
   for (const row of old.tables.daily_scrums) { delete row.work_selection_json; delete row.yesterday_work_selection_json; }
   for (const row of old.tables.daily_submissions) { delete row.work_snapshot_json; delete row.yesterday_work_snapshot_json; delete row.request_id; }
+  for (const row of old.tables.kr_metric_observations) {
+    delete row.numerator; delete row.denominator; delete row.snapshot_key;
+  }
   const validated = backups.validateSnapshot(old, "w");
   assert.equal(validated.tables.daily_scrums[0].work_selection_json, "[]");
   assert.equal(validated.tables.daily_scrums[0].yesterday_work_selection_json, "[]");
@@ -359,7 +364,7 @@ test("revision triggers cover all restored tables and business changes do not al
   const f = fixture();
   const clientColumns = {
     kr_project_metrics: ["id","owner_id","kr_item_id","starting_value","target_value","unit","active","version","created_at","updated_at"],
-    kr_metric_observations: ["id","owner_id","kr_item_id","source","event_kind","current_value","baseline_value","target_value","unit","observed_at","is_estimate"],
+    kr_metric_observations: ["id","owner_id","kr_item_id","source","event_kind","current_value","baseline_value","target_value","unit","observed_at","is_estimate","numerator","denominator","snapshot_key"],
     workspace_metric_calendars: ["id","owner_id","timezone","holidays_json","version","created_at","updated_at"],
     project_metric_schedules: ["id","owner_id","project_id","kr_item_id","mode","amount","start_date","end_date","pauses_json","credit_dates_json","accrued_value","through_date","calendar_version","active","suspended_at","version","created_at","updated_at"],
     project_contributions: ["id","owner_id","project_id","kr_item_id","default_value","actual_value","applied","enabled","last_request_id","version","created_at","updated_at"],

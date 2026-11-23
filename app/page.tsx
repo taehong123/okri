@@ -1,6 +1,7 @@
 "use client";
 import DailyReportSettings from "./daily-report-settings";
 /* eslint-disable @next/next/no-img-element */
+import ProjectOperationsSettings from "./project-operations-settings";
 import { DailyWorkPicker } from "@/app/daily-work-picker";
 import { SlackMemberConnections } from "@/app/slack-member-connections";
 import type { DailyWork } from "@/lib/daily-work";
@@ -3654,6 +3655,7 @@ function ProjectProgressSection({ project, onMetricChange, tasks, teamMembers, b
       {!readOnly && <button type="button" className={isCompletedStatus(project.status) ? "secondary" : "primary-action"} disabled={completing} aria-busy={completing} onClick={async () => { if (completing) return; setCompleting(true); try { await onPatch(project.id, { status: isCompletedStatus(project.status) ? "todo" : "done", progress: isCompletedStatus(project.status) ? 0 : 100 }); } finally { setCompleting(false); } }}><Check size={14} />{isCompletedStatus(project.status) ? t("완료 취소") : t("Project 완료")}</button>}
     </header>
     <ProjectContributionSettings projectId={project.id} status={project.status} readOnly={readOnly} onMetricChange={onMetricChange} />
+    <ProjectOperationsSettings key={project.id} projectId={project.id} readOnly={readOnly} />
     <div className="project-progress-overview">
       <div className="project-progress-value"><strong>{project.progress}%</strong><span>{t("Project 진행률")}</span></div>
       <div className="project-progress-track" aria-label={t("Project 진행률")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={project.progress} role="progressbar"><i style={{ width: `${project.progress}%` }} /></div>

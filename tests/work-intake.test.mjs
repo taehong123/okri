@@ -263,8 +263,9 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/mcp-workspace-invites":compile(workspaceInviteMcpSource,{"./workspace-invite-links":{},"./workspace-invite-runtime":{}}),
-    "@/lib/mcp-kr-performance": compile(performanceMcpSource, { "./kr-performance": {} }),
+    "@/lib/mcp-kr-performance": compile(performanceMcpSource, { "./kr-performance": {}, "./project-operations": {}, "./project-metric-schedules": {} }),
     "@/lib/kr-performance": { hasPerformanceRule: async () => false },
+    "@/lib/kr-data-sources": { listCurrentKrMetrics: async () => [] },
     "@/lib/mcp-daily-reports": compile(awaitDailyReportMcpSource, {"./daily-report": {},"./daily-report-config": {},"./daily-report-slack": {},"./slack-daily": {}}),
     "@/lib/mcp-contribution-schedules": compile(contributionScheduleMcpSource, {"./project-metric-schedules": {},"./kr-data-sources": {}}),
     "@/lib/mcp-data-connections": compile(dataConnectionMcpSource, {

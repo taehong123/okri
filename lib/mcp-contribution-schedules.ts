@@ -10,7 +10,8 @@ function writeAccess(auth:RequestAuthorization,admin=false) {
 }
 const result=(value:unknown)=>({structuredContent:value as Record<string,unknown>,content:[{type:"text" as const,text:JSON.stringify(value)}]});
 function failure(error:unknown) {return {isError:true,content:[{type:"text" as const,text:JSON.stringify({code:error instanceof ScheduleError?error.code:"contribution_schedule_failed"})}]};}
-export function registerContributionScheduleTools(server:McpServer,db:D1Database,auth:RequestAuthorization,isManaged?:(krId:string)=>Promise<boolean>) {
+export function registerContributionScheduleTools(server:McpServer,db:D1Database,auth:RequestAuthorization,isManaged?:(krId:string)=>Promise<boolean>,
+  readManaged?:(krId:string, projectId:string)=>Promise<object|null>) {
   server.registerTool("set_kr_project_measurement",{
     title:"Measure a KR with Project contributions",description:"Explicitly select Project measurement before configuring date-based contributions, without opening the web UI. Preserve existing Project defaults, completed credits, schedules and saved API configuration; pause the KR API. A new numeric metric needs user-supplied starting_value, target_value and unit. Omit values to retain an existing Project metric. Never invent a target, unit, or starting amount. Uses an atomic revision check.",
     inputSchema:{key_result_id:projectId,starting_value:z.number().finite().min(0).max(1e12).optional(),target_value:z.number().finite().positive().max(1e12).optional(),unit:z.string().max(24).optional(),expected_revision:z.string().optional()},annotations:{readOnlyHint:false,destructiveHint:false,openWorldHint:false},
@@ -27,7 +28,11 @@ export function registerContributionScheduleTools(server:McpServer,db:D1Database
   server.registerTool("get_project_contribution_schedule",{
     title:"Read a Project's KR contribution schedule",description:"Read its current KR, saved one-off/business-day/daily estimated contribution, operating dates, pauses, cumulative/monthly estimates and latest 100 credited dates. Read-only; never treats Project completion as evidence of recurring work.",
     inputSchema:{project_id:projectId},annotations:{readOnlyHint:true,destructiveHint:false,openWorldHint:false},
-  },async input=>{try{return result(await readProjectSchedule(db,auth.ownerId,input.project_id));}catch(error){return failure(error);}});
+  },async input=>{try {
+    const legacy = await readProjectSchedule(db, auth.ownerId, input.project_id);
+    const performance = await readManaged?.(legacy.keyResult.id, input.project_id);
+    return result(performance ? { ...legacy, schedule: null, performance } : legacy);
+  } catch(error){return failure(error);}});
   server.registerTool("upsert_project_contribution_schedule",{
     title:"Set one-off, business-day or daily KR contribution",description:"Save a Project's date-based estimated contribution independently of completion. KR must already use Project measurement. Modes: once (specified start_date), business_days (Mon–Fri excluding workspace holidays), daily. New settings require mode, amount and start_date; dates are local to the workspace calendar. Repeats credit closed days, not today. Optional inclusive end_date and pauses (null end_date means ongoing pause). Preserve omitted settings. Edits recalculate estimates for the operating period, never duplicate a credited date, preserve legacy completion credits, and never present estimates as actual API measurements. All amounts use the KR unit; do not invent an amount, operating start, or holiday dates.",
     inputSchema:{project_id:projectId,mode:z.enum(["once","business_days","daily"]).optional(),amount:z.number().finite().min(0).max(1e12).optional(),start_date:date.optional(),end_date:date.nullable().optional(),pauses:z.array(z.object({start_date:date,end_date:date.nullable()})).max(50).optional(),expected_revision:z.string().optional()},

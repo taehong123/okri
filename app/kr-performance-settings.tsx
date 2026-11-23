@@ -5,20 +5,37 @@ import { Check, X } from "lucide-react";
 import { t } from "@/lib/client-language";
 import type { KrSourceSettings } from "@/lib/kr-data-sources";
 import type { KrPerformanceState } from "@/lib/kr-performance";
-import type { MeasurementRule, ProjectRule } from "@/lib/kr-performance-model";
+import type { Formula, MeasurementRule, ProjectRule } from "@/lib/kr-performance-model";
 import type { MetricCalendarInput } from "@/lib/project-metric-schedule-model";
 import { OverlayDialog } from "./overlay-dialog";
 import "./kr-performance.css";
 
 type Tab = "rule" | "project" | "entry" | "history";
 type Pause = { startDate: string; endDate: string };
+type FormulaDraft = { kind: Formula["kind"]; quantity: string; quantityUnit: string; perUnit: string; before: string; after: string;
+  quantityIsEstimate: boolean; factorIsEstimate: boolean };
+const emptyFormula: FormulaDraft = { kind: "fixed", quantity: "", quantityUnit: "", perUnit: "", before: "", after: "",
+  quantityIsEstimate: false, factorIsEstimate: false };
+function formulaDraft(value?: Formula): FormulaDraft {
+  if (!value || value.kind === "fixed") return emptyFormula;
+  return { ...emptyFormula, kind: value.kind, quantity: String(value.quantity.value), quantityUnit: value.quantity.unit,
+    quantityIsEstimate: value.quantity.isEstimate, factorIsEstimate: value.factorIsEstimate,
+    ...(value.kind === "product" ? { perUnit: String(value.perUnit) } : { before: String(value.before), after: String(value.after) }) };
+}
+function formulaPayload(value: FormulaDraft): Formula | undefined {
+  if (value.kind === "fixed") return undefined;
+  const quantity = { value: Number(value.quantity), unit: value.quantityUnit, isEstimate: value.quantityIsEstimate };
+  return value.kind === "product" ? { kind: value.kind, quantity, perUnit: Number(value.perUnit), factorIsEstimate: value.factorIsEstimate }
+    : { kind: value.kind, quantity, before: Number(value.before), after: Number(value.after), factorIsEstimate: value.factorIsEstimate };
+}
 type ProjectDraft = { mode: ProjectRule["mode"]; amount: string; startDate: string; endDate: string; pauses: Pause[];
-  operating: boolean; isEstimate: boolean; basis: string; calendar: MetricCalendarInput | null };
-type RuleDraft = Omit<MeasurementRule, "baseline" | "target" | "timezone"> & { baseline: string; target: string };
+  operating: boolean; isEstimate: boolean; basis: string; calendar: MetricCalendarInput | null; formula: FormulaDraft;
+  effectKey: string; evidenceUrl: string; closePeriod: boolean };
+type RuleDraft = Omit<MeasurementRule, "baseline" | "target"> & { baseline: string; target: string };
 type Audit = { revision: number; kind: Tab; subjectId: string; effectiveDate: string; recordedAt: string; actorId: string; reason: string;
   before: unknown; after: unknown; affected: { from: string; through: string | null; periods: { start: string; end: string }[] } };
 
-const modes = () => ({ once: t("1회성"), daily: t("매일"), business_days: t("영업일마다"), weekly: t("매주") });
+const modes = () => ({ once: t("1회성"), daily: t("매일"), business_days: t("영업일마다"), weekly: t("매주"), monthly: t("매월"), actual: t("실제 처리량 기준") });
 const tabs = () => ({ rule: t("KR 측정 규칙"), project: t("Project 기여 규칙"), entry: t("실적 기록·정정"), history: t("변경 이력") });
 const errors = () => ({
   performance_revision_conflict: t("다른 변경이 있었습니다. 최신 설정을 불러온 뒤 다시 저장해 주세요."),
@@ -34,21 +51,20 @@ const errors = () => ({
 
 function ruleDraft(state: KrPerformanceState, legacy: KrSourceSettings, date: string): RuleDraft {
   const rule = state.configuration.rules.findLast(version => version.effectiveDate <= date)?.value;
-  if (rule) {
-    const { timezone, ...definition } = rule;
-    return { ...definition, baseline: String(rule.baseline), target: String(rule.target) };
-  }
+  if (rule) return { ...rule, baseline: String(rule.baseline), target: String(rule.target) };
   const api = legacy.mode === "api" ? legacy.api : null;
   const baseline = api?.baselineValue ?? 0, target = api?.targetValue ?? legacy.metric?.targetValue ?? 100;
   return { source: api ? "api" : "projects", input: api ? "samples" : "events", aggregation: api ? "last" : "sum",
     period: "monthly", start: null, end: null, direction: baseline < target ? "increase" : "decrease",
-    baseline: String(baseline), target: String(target), unit: api?.unit ?? legacy.metric?.unit ?? "" };
+    timezone: state.timezone, baseline: String(baseline), target: String(target), unit: api?.unit ?? legacy.metric?.unit ?? "" };
 }
 function projectDraft(state: KrPerformanceState, id: string, date: string, legacy: KrSourceSettings): ProjectDraft {
   const rule = state.configuration.projects.findLast(version => version.projectId === id && version.effectiveDate <= date)?.value;
   return { mode: rule?.mode ?? "daily", amount: String(rule?.amount ?? legacy.projects.find(p => p.id === id)?.defaultValue ?? ""),
     startDate: rule?.startDate ?? date, endDate: rule?.endDate ?? "", pauses: rule?.pauses.map(p => ({ startDate: p.startDate, endDate: p.endDate ?? "" })) ?? [],
     operating: rule?.operating ?? true, isEstimate: rule?.isEstimate ?? true, basis: rule?.basis ?? "",
+    formula: formulaDraft(rule?.formula), effectKey: rule?.effectKey ?? "", evidenceUrl: rule?.evidenceUrl ?? "",
+    closePeriod: rule ? rule.closePeriod ?? false : true,
     calendar: rule ? { timezone: rule.calendar.timezone, holidays: rule.calendar.holidays, weekendDays: rule.calendar.weekendDays } : null };
 }
 
@@ -61,7 +77,8 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
   const [rule, setRule] = useState<RuleDraft>();
   const [project, setProject] = useState<ProjectDraft>();
   const [projectId, setProjectId] = useState(legacy.projects[0]?.id ?? "");
-  const [entry, setEntry] = useState({ subjectId: "", amount: "", basis: "", isEstimate: false, voided: false });
+  const [entry, setEntry] = useState({ subjectId: "", amount: "", basis: "", isEstimate: false, voided: false,
+    numerator: "", denominator: "", evidenceUrl: "", effectKey: "", formula: emptyFormula });
   const [audit, setAudit] = useState<Audit[]>([]);
   const [nextRevision, setNextRevision] = useState<number | null>(null);
   const [error, setError] = useState("");
@@ -74,6 +91,9 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
   const url = "/api/kr-performance?keyResultId=" + encodeURIComponent(keyResultId);
   const active = state?.configuration.rules.findLast(version => version.effectiveDate <= date);
   const projectEntry = active?.value.source === "projects";
+  const actualEntry = active?.value.source === "throughput" || projectEntry && project?.mode === "actual";
+  const ratioEntry = active?.value.input === "ratio";
+  const setEntryFields = (patch: Partial<typeof entry>) => { setDirty(true); setEntry(value => ({ ...value, ...patch })); };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -118,9 +138,13 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
     if (!state || !rule || !project || tab === "history" || loading.current) return;
     const value = tab === "rule" ? { ...rule, baseline: Number(rule.baseline), target: Number(rule.target) }
       : tab === "project" ? { ...project, amount: Number(project.amount), endDate: project.endDate || null,
+        formula: project.mode === "actual" ? undefined : formulaPayload(project.formula),
         pauses: project.mode === "once" ? [] : project.pauses.map(p => ({ startDate: p.startDate, endDate: p.endDate || null })),
         calendar: project.calendar && { ...project.calendar, holidays: project.calendar.holidays.map(date => date.trim()).filter(Boolean) } }
-      : { projectId: projectEntry ? projectId : undefined, value: Number(entry.amount), basis: entry.basis, isEstimate: entry.isEstimate, voided: entry.voided };
+      : { projectId: projectEntry ? projectId : undefined, value: Number(entry.amount), basis: entry.basis, isEstimate: entry.isEstimate,
+        voided: entry.voided, numerator: Number(entry.numerator), denominator: Number(entry.denominator),
+        effectKey: entry.effectKey, evidenceUrl: entry.evidenceUrl,
+        formula: actualEntry ? formulaPayload(entry.formula.kind === "fixed" ? { ...entry.formula, kind: "product" } : entry.formula) : undefined };
     const payload = { keyResultId, kind: tab, effectiveDate: date, reason, value,
       subjectId: tab === "project" ? projectId : tab === "entry" && !projectEntry ? entry.subjectId : undefined };
     const serialized = JSON.stringify(payload);
@@ -176,23 +200,30 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
             <label><span>{t("데이터 소스")}</span><select value={rule.source} onChange={e => {
               const source = e.target.value as RuleDraft["source"];
               changeRule({ source, input: source === "api" ? "samples" : "events", aggregation: source === "api" ? "last" : "sum" });
-            }}><option value="projects">{t("Project 성과 합산")}</option><option value="api">{t("API 연동")}</option><option value="manual">{t("직접 입력")}</option></select></label>
-            {rule.source !== "projects" && <label><span>{t("데이터 형태")}</span><select value={rule.input} onChange={e => {
-              const input = e.target.value as RuleDraft["input"]; changeRule({ input, aggregation: input === "samples" ? "last" : "sum" });
+            }}><option value="projects">{t("Project 성과 합산")}</option><option value="api">{t("API 연동")}</option><option value="manual">{t("직접 입력")}</option><option value="throughput">{t("실제 처리량 기준")}</option></select></label>
+            {(rule.source === "manual" || rule.source === "api") && <label><span>{t("데이터 형태")}</span><select value={rule.input} onChange={e => {
+              const input = e.target.value as RuleDraft["input"]; changeRule({ input, aggregation: input === "samples" ? "last" : input === "ratio" ? "ratio" : "sum" });
             }}>
               {rule.source === "manual" && <option value="events">{t("발생 건별 값")}</option>}
+              <option value="ratio">{t("분자·분모")}</option>
               <option value="samples">{t("시점별 측정값")}</option><option value="counter">{t("계속 증가하는 누적계")}</option>
             </select></label>}
             <div className="kr-data-number-grid">
               <label><span>{t("평가 기간")}</span><select value={rule.period} onChange={e => changeRule({ period: e.target.value as RuleDraft["period"] })}>
+                <option value="daily">{t("일간")}</option><option value="quarterly">{t("분기")}</option>
                 <option value="monthly">{t("월간")}</option><option value="weekly">{t("주간")}</option>
                 <option value="fixed">{t("지정 기간")}</option><option value="all_time">{t("전체 기간")}</option>
               </select></label>
               <label><span>{t("집계 방식")}</span><select value={rule.aggregation} onChange={e => changeRule({ aggregation: e.target.value as RuleDraft["aggregation"] })}>
                 {rule.input === "samples" ? <><option value="last">{t("마지막 값")}</option><option value="average">{t("평균")}</option></>
-                  : <option value="sum">{t("합계")}</option>}
+                  : rule.input === "ratio" ? <option value="ratio">{t("분자·분모 합산")}</option> : <option value="sum">{t("합계")}</option>}
               </select></label>
             </div>
+            {rule.input === "ratio" && rule.source === "api" && <>
+              <label><span>{t("분자 경로")}</span><input required maxLength={200} value={rule.numeratorPath ?? ""} onChange={e => changeRule({ numeratorPath: e.target.value })}/></label>
+              <label><span>{t("분모 경로")}</span><input required maxLength={200} value={rule.denominatorPath ?? ""} onChange={e => changeRule({ denominatorPath: e.target.value })}/></label>
+              <label><span>{t("스냅샷 식별자 경로")}</span><input required maxLength={200} value={rule.snapshotKeyPath ?? ""} onChange={e => changeRule({ snapshotKeyPath: e.target.value })}/></label>
+            </>}
             {rule.period === "fixed" && <div className="kr-data-number-grid">
               <label><span>{t("평가 시작일")}</span><input type="date" required value={rule.start ?? ""} onChange={e => changeRule({ start: e.target.value })}/></label>
               <label><span>{t("평가 종료일")}</span><input type="date" required min={rule.start ?? undefined} value={rule.end ?? ""} onChange={e => changeRule({ end: e.target.value })}/></label>
@@ -202,6 +233,12 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
                 <option value="increase">{t("증가")}</option><option value="decrease">{t("감소")}</option></select></label></div>
             <div className="kr-data-number-grid"><label><span>{t("기준값")}</span><input type="number" step="any" required value={rule.baseline} onChange={e => changeRule({ baseline: e.target.value })}/></label>
               <label><span>{t("목표값")}</span><input type="number" step="any" required value={rule.target} onChange={e => changeRule({ target: e.target.value })}/></label></div>
+            <div className="kr-data-number-grid">
+              <label><span>{t("진행률 기준")}</span><select value={rule.progressBasis ?? "baseline"} onChange={e =>
+                changeRule({ progressBasis: e.target.value as RuleDraft["progressBasis"] })}>
+                <option value="baseline">{t("기준값 대비 개선율")}</option><option value="target">{t("목표 대비 달성률")}</option></select></label>
+              <label><span>{t("시간대")}</span><input required maxLength={100} value={rule.timezone} onChange={e => changeRule({ timezone: e.target.value })}/></label>
+            </div>
           </>}
           {(tab === "project" || tab === "entry" && projectEntry) && <label><span>Project</span>
             <select required value={projectId} onChange={e => { setProjectId(e.target.value); setProject(projectDraft(state, e.target.value, date, legacy)); }}>
@@ -212,12 +249,17 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
               <label><span>{t("기여 주기")}</span><select value={project.mode} onChange={e => changeProject({ mode: e.target.value as ProjectDraft["mode"] })}>
                 {Object.entries(modes()).map(([key, name]) => <option key={key} value={key}>{name}</option>)}
               </select></label>
-              <label><span>{t("회당 기여량")}</span><input type="number" min="0" step="any" required value={project.amount} onChange={e => changeProject({ amount: e.target.value })}/></label>
             </div>
+            {project.mode !== "actual" && <FormulaFields draft={project.formula} onChange={formula => changeProject({ formula })}/>}
+            {project.mode !== "actual" && project.formula.kind === "fixed" && <label><span>{t("회당 기여량")}</span>
+              <input type="number" step="any" required value={project.amount} onChange={e => changeProject({ amount: e.target.value })}/></label>}
+            <label><span>{t("성과 중복 방지 키")}</span><input maxLength={128} value={project.effectKey} onChange={e => changeProject({ effectKey: e.target.value })}/></label>
+            <label><span>{t("확인 근거 링크")}</span><input type="url" maxLength={2000} value={project.evidenceUrl} onChange={e => changeProject({ evidenceUrl: e.target.value })}/></label>
             <div className="kr-data-number-grid"><label><span>{t("운영 시작일")}</span><input type="date" required value={project.startDate} onChange={e => changeProject({ startDate: e.target.value })}/></label>
               {project.mode !== "once" && <label><span>{t("운영 종료일")}</span><input type="date" min={project.startDate} value={project.endDate} onChange={e => changeProject({ endDate: e.target.value })}/></label>}</div>
             <label className="perf-check"><input type="checkbox" checked={project.operating} onChange={e => changeProject({ operating: e.target.checked })}/>{t("운영 중")}</label>
-            <label className="perf-check"><input type="checkbox" checked={project.isEstimate} onChange={e => changeProject({ isEstimate: e.target.checked })}/>{t("추정 성과")}</label>
+            {project.mode !== "actual" && project.formula.kind === "fixed" && <label className="perf-check">
+              <input type="checkbox" checked={project.isEstimate} onChange={e => changeProject({ isEstimate: e.target.checked })}/>{t("추정 성과")}</label>}
             <label><span>{t("산정 근거")}</span><textarea required maxLength={1000} value={project.basis} onChange={e => changeProject({ basis: e.target.value })}/></label>
             {project.mode !== "once" && <fieldset className="kr-source-fields"><legend>{t("중지 기간")}</legend>
               {project.pauses.map((pause, index) => <div className="perf-pause" key={index}>
@@ -235,8 +277,14 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
           {tab === "entry" && <>
             {!projectEntry && <label><span>{t("성과 기록 ID")}</span><input required maxLength={128} value={entry.subjectId} onChange={e => { setDirty(true); setEntry({ ...entry, subjectId: e.target.value }); }}/></label>}
             <label className="perf-check"><input type="checkbox" checked={entry.voided} onChange={e => { setDirty(true); setEntry({ ...entry, voided: e.target.checked }); }}/>{t("기존 기록 취소")}</label>
-            {!entry.voided && <label><span>{t("실적")}</span><input type="number" step="any" required value={entry.amount} onChange={e => { setDirty(true); setEntry({ ...entry, amount: e.target.value }); }}/></label>}
-            <label className="perf-check"><input type="checkbox" checked={entry.isEstimate} onChange={e => { setDirty(true); setEntry({ ...entry, isEstimate: e.target.checked }); }}/>{t("추정 성과")}</label>
+            {!entry.voided && (actualEntry ? <FormulaFields requiredFormula draft={entry.formula} onChange={formula => setEntryFields({ formula })}/>
+              : ratioEntry ? <div className="kr-data-number-grid">
+                <label><span>{t("분자")}</span><input type="number" step="any" required value={entry.numerator} onChange={e => setEntryFields({ numerator: e.target.value })}/></label>
+                <label><span>{t("분모")}</span><input type="number" step="any" min="0" required value={entry.denominator} onChange={e => setEntryFields({ denominator: e.target.value })}/></label>
+              </div> : <label><span>{t("실적")}</span><input type="number" step="any" required value={entry.amount} onChange={e => setEntryFields({ amount: e.target.value })}/></label>)}
+            {!actualEntry && <label className="perf-check"><input type="checkbox" checked={entry.isEstimate}
+              onChange={e => setEntryFields({ isEstimate: e.target.checked })}/>{t("추정 성과")}</label>}
+            <label><span>{t("확인 근거 링크")}</span><input type="url" maxLength={2000} value={entry.evidenceUrl} onChange={e => setEntryFields({ evidenceUrl: e.target.value })}/></label>
             <label><span>{t("산정 근거")}</span><textarea required maxLength={1000} value={entry.basis} onChange={e => { setDirty(true); setEntry({ ...entry, basis: e.target.value }); }}/></label>
           </>}
           <label><span>{t("변경 사유")}</span><textarea required={date < state.asOf || tab === "entry" && entry.voided}
@@ -249,6 +297,32 @@ export default function KrPerformanceSettings({ legacy, onClose, onSaved }: { le
   </OverlayDialog>;
 }
 
+function FormulaFields({ draft, onChange, requiredFormula = false }: {
+  draft: FormulaDraft; onChange: (value: FormulaDraft) => void; requiredFormula?: boolean;
+}) {
+  const value = requiredFormula && draft.kind === "fixed" ? { ...draft, kind: "product" as const } : draft;
+  const update = (patch: Partial<FormulaDraft>) => onChange({ ...value, ...patch });
+  return <>
+    <label><span>{t("기여량 산식")}</span><select value={value.kind} onChange={e => update({ kind: e.target.value as FormulaDraft["kind"] })}>
+      {!requiredFormula && <option value="fixed">{t("고정값")}</option>}
+      <option value="product">{t("처리량 × 단위당 기여량")}</option><option value="difference">{t("처리량 × 개선 전후 차이")}</option>
+    </select></label>
+    {value.kind !== "fixed" && <>
+      <div className="kr-data-number-grid">
+        <label><span>{t("처리량")}</span><input type="number" min="0" step="any" required value={value.quantity} onChange={e => update({ quantity: e.target.value })}/></label>
+        <label><span>{t("처리량 단위")}</span><input required maxLength={24} value={value.quantityUnit} onChange={e => update({ quantityUnit: e.target.value })}/></label>
+      </div>
+      {value.kind === "product"
+        ? <label><span>{t("단위당 기여량")}</span><input type="number" step="any" required value={value.perUnit} onChange={e => update({ perUnit: e.target.value })}/></label>
+        : <div className="kr-data-number-grid">
+          <label><span>{t("개선 전")}</span><input type="number" step="any" required value={value.before} onChange={e => update({ before: e.target.value })}/></label>
+          <label><span>{t("개선 후")}</span><input type="number" step="any" required value={value.after} onChange={e => update({ after: e.target.value })}/></label>
+        </div>}
+      <label className="perf-check"><input type="checkbox" checked={value.quantityIsEstimate} onChange={e => update({ quantityIsEstimate: e.target.checked })}/>{t("처리량은 추정값")}</label>
+      <label className="perf-check"><input type="checkbox" checked={value.factorIsEstimate} onChange={e => update({ factorIsEstimate: e.target.checked })}/>{t("단위당 기여량은 추정값")}</label>
+    </>}
+  </>;
+}
 function AuditValue({ label, value }: { label: string; value: unknown }) {
   return <details className="perf-audit-value"><summary>{label}</summary><pre>{value ? JSON.stringify(value, null, 2) : "—"}</pre></details>;
 }

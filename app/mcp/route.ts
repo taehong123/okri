@@ -7,7 +7,8 @@ import { registerDataConnectionTools } from "@/lib/mcp-data-connections";
 import { registerWorkspaceInviteTools } from "@/lib/mcp-workspace-invites";
 import { registerDailyReportTools } from "@/lib/mcp-daily-reports";
 import { registerKrPerformanceTools } from "@/lib/mcp-kr-performance";
-import { hasPerformanceRule } from "@/lib/kr-performance";
+import { listCurrentKrMetrics } from "@/lib/kr-data-sources";
+import { hasPerformanceRule, readProjectPeriodContribution } from "@/lib/kr-performance";
 import { registerContributionScheduleTools } from "@/lib/mcp-contribution-schedules";
 import {
   createClient,
@@ -168,6 +169,9 @@ const itemOutput = z.object({
   progress: z.number(),
   dueDate: z.string().nullable(),
   source: z.string(),
+  createdByUserId: z.string().nullable().optional(),
+  creatorDisplayName: z.string().optional(),
+  sortOrder: z.number().optional(),
   archivedAt: z.string().nullable(),
   archivedFromStatus: z.string().nullable(),
   archiveRootId: z.string().nullable(),
@@ -2129,7 +2133,8 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
   );
 
   registerDataConnectionTools(server, env.DB, authorization);
-  registerContributionScheduleTools(server, env.DB, authorization, krId => hasPerformanceRule(env.DB, authorization.ownerId, krId));
+  registerContributionScheduleTools(server, env.DB, authorization, krId => hasPerformanceRule(env.DB, authorization.ownerId, krId),
+    (krId, projectId) => readProjectPeriodContribution(env.DB, authorization.ownerId, krId, projectId));
   registerKrPerformanceTools(server, env.DB, authorization);
   registerDailyReportTools(server, env.DB, authorization);
   registerWorkspaceInviteTools(server, env.DB, authorization);
@@ -2138,14 +2143,17 @@ export async function createOkriServer(authorization: RequestAuthorization, orig
 
 async function serializeItemsForMcp(ownerId: string, rows: Parameters<typeof serializeItem>[0][]) {
   const projectIds = rows.filter((item) => item.kind === "project").map((item) => item.id);
-  const [properties, assignments, imageCounts] = await Promise.all([
+  const [properties, assignments, imageCounts, metrics] = await Promise.all([
     getItemPropertiesByName(ownerId, rows.filter((item) => item.kind === "project").map((item) => item.id)),
     getItemAssignmentMap(ownerId, rows.map((item) => item.id)),
     getProjectImageCounts(ownerId, projectIds),
+    listCurrentKrMetrics(env.DB, ownerId, rows.filter(item => item.kind === "key_result" && !item.archivedAt).map(item => item.id)),
   ]);
+  const progress = new Map(metrics.map(metric => [metric.keyResultId, metric.progress]));
   return rows.map((item) => ({
     ...serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []),
     ...(item.kind === "project" ? { imageCount: imageCounts[item.id] ?? 0 } : {}),
+    progress: progress.get(item.id) ?? item.progress,
   }));
 }
 
