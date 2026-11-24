@@ -12,11 +12,17 @@ const ops = compile(await read("lib/project-operations.ts"), { "./kr-performance
 const service = compile(await read("lib/kr-performance.ts"), {
   "./project-metric-schedule-model": schedule, "./project-metric-schedules": legacy, "./kr-performance-model": model, "./project-operations": ops,
 });
-const mcp = compile(await read("lib/mcp-kr-performance.ts"), { "./kr-performance": service, "./project-operations": ops, "./project-metric-schedules": legacy });
+const formatter = compile(await read("lib/kr-metric-display-format.ts"));
+const display = compile(await read("lib/kr-metric-display.ts"), { "./kr-performance-model": model, "./kr-metric-display-format": formatter });
+const sources = compile(await read("lib/kr-data-sources.ts"), { "./kr-performance": service, "./kr-metric-display": display,
+  "./project-contributions": {}, "./kr-data-sync": {} });
+const mcp = compile(await read("lib/mcp-kr-performance.ts"), { "./kr-performance": service, "./project-operations": ops,
+  "./project-metric-schedules": legacy, "./kr-metric-display": display, "./kr-metric-display-format": formatter, "./kr-data-sources": sources });
 const oldTools = compile(await read("lib/mcp-contribution-schedules.ts"), { "./project-metric-schedules": legacy, "./kr-data-sources": {} });
 const route = await read("app/api/kr-performance/route.ts");
 const migration = await read("drizzle/0084_kr_performance.sql");
 const ledgerMigration = await read("drizzle/0085_metric_ledger.sql");
+const displayMigration = await read("drizzle/0086_metric_display.sql");
 const actor = { ownerId: "w", userId: "u", role: "owner" };
 const at = day => new Date(day + "T12:00:00.000Z");
 const krRule = { source: "projects", input: "events", aggregation: "sum", period: "monthly",
@@ -30,6 +36,7 @@ function dataFixture(t) {
   const f = fixture(t);
   f.sql.exec(migration);
   f.sql.exec(ledgerMigration);
+  f.sql.exec(displayMigration);
   return { ...f, write: (input, day) => service.writePerformance(f.db, actor, "kr", input, at(day)),
     state: async (day, opts = {}) => {
       await service.runDueMetricRollups(f.db, at(day));
@@ -202,7 +209,7 @@ test("MCP SDK tools/list exposes new and retained tools, and web and MCP return 
     "get_project_contribution_rule", "set_project_contribution_rule", "record_kr_performance", "get_kr_performance", "list_kr_performance_changes",
     "bulk_upsert_metric_entries", "cancel_metric_entry", "correct_metric_entry", "get_metric_rollup_status", "get_metric_series",
     "get_metric_summary", "list_metric_entries", "list_project_operations", "preview_metric_recalculation",
-    "recalculate_metric", "update_project_operations",
+    "recalculate_metric", "update_project_operations", "get_kr_metric_display", "set_kr_metric_display",
   ].sort());
   const saved = await client.callTool({ name: "set_kr_measurement_rule", arguments: {
     key_result_id: "kr", expected_revision: 0, request_id: "web-mcp-rule", effective_date: "2026-12-01", reason: "Initial migration", rule: krRule,
@@ -214,6 +221,17 @@ test("MCP SDK tools/list exposes new and retained tools, and web and MCP return 
   assert.equal(recorded.status, 200, await recorded.clone().text());
   await service.runDueMetricRollups(f.db, now);
   const fromMcp = await client.callTool({ name: "get_kr_performance", arguments: { key_result_id: "kr", grain: "week", include_estimates: false } });
+  assert.equal(fromMcp.structuredContent.display.current.value, "8시간");
+  const changedDisplay = await client.callTool({ name: "set_kr_metric_display", arguments: {
+    key_result_id: "kr", mode: "increment", increment: 5, expected_revision: 0,
+  } });
+  assert.equal(changedDisplay.structuredContent.currentValue, 8);
+  assert.equal(changedDisplay.structuredContent.display.currentValue, "약 10시간");
+  const readDisplay = await client.callTool({ name: "get_kr_metric_display", arguments: { key_result_id: "kr" } });
+  assert.deepEqual(readDisplay.structuredContent, changedDisplay.structuredContent);
+  const series = await client.callTool({ name: "get_metric_series", arguments: { key_result_id: "kr", grain: "week" } });
+  assert.equal(series.structuredContent.points.at(-1).periodValue, 8);
+  assert.equal(series.structuredContent.display.points.at(-1).periodValue, "약 10시간");
   const fromWeb = await api.GET(new Request("http://localhost/api/kr-performance?keyResultId=kr&grain=week&includeEstimates=false"));
   assert.equal(fromWeb.status, 200);
   const web = (await fromWeb.json()).performance;
@@ -359,4 +377,53 @@ test("the same API snapshot received three times remains 1,000", async t => {
   const { performance } = await f.state("2026-11-04");
   assert.equal(performance.current.value, 1000);
   assert.equal(performance.current.progress, 50);
+});
+
+test("hour labels round only in the view and distinguish a small positive value from zero", () => {
+  assert.equal(formatter.formatMetricValue(49.688095, "시간"), "약 49.5시간");
+  assert.equal(formatter.formatMetricValue(25.838095, "시간"), "약 26시간");
+  assert.equal(formatter.formatMetricValue(0.249999, "시간"), "0.5시간 미만");
+  assert.equal(formatter.formatMetricValue(0.25, "시간"), "약 0.5시간");
+  assert.equal(formatter.formatMetricValue(0, "시간"), "0시간");
+  assert.equal(formatter.formatMetricValue(0.13, "hours", undefined, "en-US"), "Less than 0.5 hours");
+  assert.equal(formatter.formatMetricValue(49.688095, "건"), "49.688095 건");
+  assert.equal(formatter.formatMetricValue(49.688095, "시간", { mode: "exact", increment: null }), "49.688095시간");
+  assert.equal(formatter.formatMetricValue(49.688095, "건", { mode: "increment", increment: 10 }), "약 50 건");
+  assert.equal(formatter.formatMetricValue(16.025, "시간", { mode: "increment", increment: 0.01 }), "약 16.03시간");
+  assert.equal(formatter.formatMetricValue(1e-23, "시간", { mode: "exact", increment: null }), "0.00000000000000000000001시간");
+  assert.equal(formatter.formatMetricValue(null, "시간"), null);
+});
+
+test("a KR display preference survives reads and accrual without changing the rule or ledger", async t => {
+  const f = dataFixture(t);
+  await f.write(change("rule", krRule, "2026-11-23", 0), "2026-11-23");
+  await f.write(change("project", { ...projectRule, mode: "daily", startDate: "2026-11-23", amount: 0.13 },
+    "2026-11-23", 1, { subjectId: "p" }), "2026-11-23");
+  const before = await f.state("2026-11-24");
+  assert.equal(before.performance.current.value, 0.13);
+  assert.equal(formatter.formatMetricValue(before.performance.current.value, "시간"), "0.5시간 미만");
+  const input = { expectedRevision: 0, mode: "increment", increment: 0.1 };
+  const [first, retry] = await Promise.all([display.saveMetricDisplaySettings(f.db, actor, "kr", input),
+    display.saveMetricDisplaySettings(f.db, actor, "kr", input)]);
+  assert.deepEqual(first, retry);
+  assert.equal(first.revision, 1);
+  await assert.rejects(display.saveMetricDisplaySettings(f.db, actor, "kr", { ...input, increment: 0.3 }),
+    { code: "metric_display_revision_conflict" });
+  await assert.rejects(display.saveMetricDisplaySettings(f.db, actor, "kr", { ...input, increment: 0.0000001 }),
+    { code: "invalid_metric_display_increment" });
+  await assert.rejects(display.saveMetricDisplaySettings(f.db, { ...actor, oauthScopes: "okri:read" }, "kr", input),
+    { code: "write_access_required" });
+  await assert.rejects(display.readMetricDisplaySettings(f.db, "other", "kr"), { code: "key_result_not_found" });
+  const after = await f.state("2026-11-25");
+  assert.equal(after.revision, 2);
+  assert.equal(after.performance.current.value, 0.26);
+  assert.equal(after.performance.selected.projectBreakdown[0].value, 0.26);
+  assert.equal(after.performance.lifetime.value, 0.26);
+  assert.deepEqual(after.performance.records.map(row => row.value), [0.13, 0.13]);
+  const settings = await display.readMetricDisplaySettings(f.db, "w", "kr");
+  assert.equal(formatter.formatMetricValue(after.performance.current.value, "시간", settings), "약 0.3시간");
+  assert.equal((await f.state("2026-11-25")).performance.current.value, 0.26);
+  const reset = await display.saveMetricDisplaySettings(f.db, actor, "kr", { expectedRevision: 1, mode: "default" });
+  assert.equal(reset.revision, 2);
+  assert.equal(formatter.formatMetricValue(after.performance.current.value, "시간", reset), "약 0.5시간");
 });

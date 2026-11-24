@@ -124,6 +124,7 @@ test("configuration routes enforce identity, Viewer reads, owner scope and priva
   const dependencies={
     "cloudflare:workers":{env:{DB:f.db}},
     "@/lib/project-contributions":contributions,
+    "@/lib/kr-metric-display":{readMetricDisplaySettings:async()=>({revision:0,mode:"default",increment:null,updatedAt:null})},
     "@/lib/kr-performance":{readProjectPeriodContribution:async()=>null},
     "@/lib/pace-data":{ensureWorkspace:async()=>{},authorizeRequest:async(_request,options)=>{
       if(auth instanceof Response)return auth;
@@ -231,6 +232,7 @@ test("an in-flight API poll cannot overwrite a newly selected Project source or 
 test("KR source and history routes enforce identity, Viewer reads and workspace ownership",async t=>{
   const f=fixture(t);let auth={ownerId:"w",userId:"user",role:"owner"};
   const dependencies={"cloudflare:workers":{env:{DB:f.db}},"@/lib/project-contributions":contributions,"@/lib/kr-data-sources":sources,"@/lib/kr-metric-history":history,
+    "@/lib/kr-metric-display":{readMetricDisplaySettings:async()=>({revision:0,mode:"default",increment:null,updatedAt:null})},
     "@/lib/kr-performance":{readKrPerformance:async()=>({revision:0,performance:null}),hasPerformanceRule:async()=>false},
     "@/lib/pace-data":{ensureWorkspace:async()=>{},authorizeRequest:async(_request,options)=>auth instanceof Response?auth:auth.role==="viewer"&&!options?.allowViewerWrite?new Response("forbidden",{status:403}):auth}};
   const routes=[];

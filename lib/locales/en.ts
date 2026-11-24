@@ -3278,6 +3278,15 @@ const messages = {
 "분자 경로": "Numerator path",
 "분모 경로": "Denominator path",
 "스냅샷 식별자 경로": "Snapshot key path",
+"숫자 표시 설정": "Number display settings",
+"표시 방식": "Display format",
+"기본 표시": "Default display",
+"반올림 단위 지정": "Custom rounding increment",
+"원본값 표시": "Show exact values",
+"반올림 단위": "Rounding increment",
+"시간은 기본으로 0.5시간 단위로 표시합니다.": "Hours are displayed in half-hour increments by default.",
+"표시 설정을 저장하지 못했습니다.": "Could not save display settings.",
+"표시 설정 저장": "Save display settings",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

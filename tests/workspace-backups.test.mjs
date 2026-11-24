@@ -25,7 +25,8 @@ const historyMigration = await readFile(new URL("../drizzle/0079_kr_metric_histo
 const recurringMigration = await readFile(new URL("../drizzle/0080_project_metric_schedules.sql", import.meta.url), "utf8");
 const metricLedgerMigration = await readFile(new URL("../drizzle/0085_metric_ledger.sql", import.meta.url), "utf8");
 const performanceMigration = await readFile(new URL("../drizzle/0084_kr_performance.sql", import.meta.url), "utf8");
-const performanceSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0076_snapshot.json", import.meta.url), "utf8"));
+const displayMigration = await readFile(new URL("../drizzle/0086_metric_display.sql", import.meta.url), "utf8");
+const performanceSchema = JSON.parse(await readFile(new URL("../drizzle/meta/0077_snapshot.json", import.meta.url), "utf8"));
 const awaitTaskGoalMigration = await readFile(new URL("../drizzle/0076_project_task_goals.sql", import.meta.url), "utf8");
 
 function fixture() {
@@ -54,6 +55,7 @@ function fixture() {
   sqlite.exec(recurringMigration.replaceAll("--> statement-breakpoint", ""));
   sqlite.exec(performanceMigration);
   sqlite.exec(metricLedgerMigration);
+  sqlite.exec(displayMigration);
   const d1 = {
     prepare(sql) {
       return { sql, params: [], bind(...params) { return { ...this, params }; },
@@ -132,7 +134,7 @@ test("snapshot uses separate storage, includes complete business hierarchy, and 
   assert.ok(!payload.includes("Other workspace"));
   const snapshot = JSON.parse(payload);
   assert.deepEqual(Object.keys(snapshot.tables), backups.BACKUP_TABLES);
-  for (const table of backups.BACKUP_TABLES.filter(table => !table.startsWith("kr_performance_") && table !== "project_operation_versions")) assert.ok(snapshot.tables[table].length, table);
+  for (const table of backups.BACKUP_TABLES.filter(table => !table.startsWith("kr_performance_") && !["project_operation_versions", "kr_metric_display_settings"].includes(table))) assert.ok(snapshot.tables[table].length, table);
   assert.equal(entry.summary.tasks, 2);
   assert.equal(Date.parse(entry.expiresAt) - Date.parse(entry.createdAt), 30 * 86400000);
   assert.equal((await backups.listWorkspaceBackups(f.ctx, "other")).backups.length, 0);

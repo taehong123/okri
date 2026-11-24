@@ -1,3 +1,5 @@
+import { listMetricDisplaySettings } from "./kr-metric-display";
+import type { MetricDisplaySettings } from "./kr-metric-display-format";
 import { listPerformanceSummaries } from "./kr-performance";
 import { ContributionError } from "./project-contributions";
 import { normalizeEndpoint } from "./kr-data-sync";
@@ -7,12 +9,13 @@ export type KrSourceSettings = {
   keyResult: { id: string; title: string; progress: number };
   mode: KrSourceMode | null;
   performanceConfigured?: boolean;
+  displaySettings?: MetricDisplaySettings;
   revision: string;
   metric: { startingValue: number; currentValue: number; targetValue: number; unit: string } | null;
   api: { name: string; endpointUrl: string; valuePath: string; baselineValue: number; targetValue: number; unit: string; cadence: string; active: boolean } | null;
   projects: { id: string; title: string; status: string; defaultValue: number | null; actualValue: number | null; applied: boolean; schedule?:{mode:string;amount:number;accruedValue:number} | null }[];
 };
-export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | "manual" | "throughput" | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean; performance?:boolean; trend?:import("./kr-performance-model").PerformanceResult["points"] };
+export type KrMetricSummary = { keyResultId: string; mode: KrSourceMode | "manual" | "throughput" | null; currentValue: number | null; targetValue: number | null; unit: string; progress: number; isEstimate?:boolean; performance?:boolean; displaySettings?: MetricDisplaySettings; trend?:import("./kr-performance-model").PerformanceResult["points"] };
 type Row = Record<string, string | number | null>;
 const children = `SELECT p.id,p.title,p.status,p.updated_at,c.id AS config_id,c.version AS config_version,c.kr_item_id,
  c.default_value,c.actual_value,c.applied,c.enabled,s.mode AS schedule_mode,s.amount AS schedule_amount,s.accrued_value AS schedule_value
@@ -63,7 +66,8 @@ export async function listCurrentKrMetrics(db: D1Database, ownerId: string, ids?
   const filter = ids && new Set(ids);
   const metrics = new Map(legacy.filter(row => !filter || filter.has(row.keyResultId)).map(row => [row.keyResultId, row]));
   for (const row of current) if (row) metrics.set(row.keyResultId, row);
-  return [...metrics.values()];
+  const display = await listMetricDisplaySettings(db, ownerId, [...metrics.keys()]);
+  return [...metrics.values()].map(metric => ({ ...metric, displaySettings: display.get(metric.keyResultId) }));
 }
 
 function numeric(v:unknown,positive=false) {

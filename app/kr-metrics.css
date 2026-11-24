@@ -68,3 +68,6 @@
  .kr-data-progress { grid-template-columns: minmax(0,1fr); gap: 8px; }
  .kr-source-projects > label { grid-template-columns: minmax(0,1fr); gap: 8px; }
 }
+
+.kr-display-settings { margin-inline: var(--space-5); }
+.kr-display-settings .property-form { padding-inline: 0; }

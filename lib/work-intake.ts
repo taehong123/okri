@@ -161,7 +161,7 @@ export const READ_ONLY_MCP_TOOLS = new Set([
   "read_manual", "prepare_work", "get_project_review", "get_workspace_rules", "list_items", "review_period", "list_properties",
   "get_project_document", "list_project_templates", "list_checklist_items", "get_daily_scrum",
   "list_project_images", "read_project_image",
-  "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members", "list_clients", "list_data_connections", "get_project_contribution_schedule", "get_metric_calendar", "get_kr_measurement_rule", "get_project_contribution_rule", "get_kr_performance", "list_kr_performance_changes", "list_project_operations", "list_metric_entries", "get_metric_summary", "get_metric_series", "preview_metric_recalculation", "get_metric_rollup_status", "get_daily_report_preferences", "get_daily_report_context", "get_workspace_invite_link",
+  "get_recommendations", "list_routines", "list_routine_properties", "list_team_members", "list_groups", "list_group_members", "list_clients", "list_data_connections", "get_project_contribution_schedule", "get_metric_calendar", "get_kr_measurement_rule", "get_project_contribution_rule", "get_kr_performance", "get_kr_metric_display", "list_kr_performance_changes", "list_project_operations", "list_metric_entries", "get_metric_summary", "get_metric_series", "preview_metric_recalculation", "get_metric_rollup_status", "get_daily_report_preferences", "get_daily_report_context", "get_workspace_invite_link",
 ]);
 
 export function isReadOnlyMcpRequest(payload: unknown) {

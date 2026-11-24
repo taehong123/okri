@@ -138,5 +138,12 @@
     "rollbackPlan": "Keep the appended tables and prior migration checks. Pause the metric rollup job during a code rollback if needed. Retain Project operations and source records for forward reconciliation.",
     "dataPreservation": "Workspace-scoped versioned operations are backed up with their receipts. Idempotent occurrence IDs are derived from the KR, Project and closed local date. A transaction guards posting against stale rules, operations and lifecycle changes. Derived occurrences can be rebuilt; configured business records are never dropped by migration.",
     "reviewedBy": "Codex source-bound SQLite, workspace backup, and frozen-client compatibility review, 2026-11-23"
+  },
+  "drizzle/0086_metric_display.sql": {
+    "sha256": "6b9262bf3e6cafacd97389b4eb2760f3112c73c078cb702ab59b2157fdd949b2",
+    "v1Compatibility": "Adds independent display preferences without touching existing KR rules, values, ledger, scheduler, or frozen mobile v1 payloads.",
+    "rollbackPlan": "Keep the additive preferences table. Older servers ignore formatting preferences while existing measurements remain available.",
+    "dataPreservation": "No existing rows are changed. Workspace ownership and revision checks scope configuration updates. Business backups preserve display settings and old snapshots supply an empty default.",
+    "reviewedBy": "Codex SQLite guards and mobile compatibility review, 2026-11-24"
   }
 }

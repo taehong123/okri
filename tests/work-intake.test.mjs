@@ -1,4 +1,5 @@
 const workspaceInviteMcpSource=await readFile(new URL("../lib/mcp-workspace-invites.ts",import.meta.url),"utf8");
+const displayFormatSource = await readFile(new URL("../lib/kr-metric-display-format.ts", import.meta.url), "utf8");
 const performanceMcpSource = await readFile(new URL("../lib/mcp-kr-performance.ts", import.meta.url), "utf8");
 const awaitDailyReportMcpSource=await readFile(new URL("../lib/mcp-daily-reports.ts",import.meta.url),"utf8");
 import assert from "node:assert/strict";
@@ -263,8 +264,10 @@ function mcpFixture() {
     "cloudflare:workers": { env: { DB: fixtureData.d1 } },
     "@/lib/pace-data": data,
     "@/lib/mcp-workspace-invites":compile(workspaceInviteMcpSource,{"./workspace-invite-links":{},"./workspace-invite-runtime":{}}),
-    "@/lib/mcp-kr-performance": compile(performanceMcpSource, { "./kr-performance": {}, "./project-operations": {}, "./project-metric-schedules": {} }),
+    "@/lib/mcp-kr-performance": compile(performanceMcpSource, { "./kr-performance": {}, "./project-operations": {}, "./project-metric-schedules": {},
+      "./kr-data-sources": {}, "./kr-metric-display": {}, "./kr-metric-display-format": compile(displayFormatSource) }),
     "@/lib/kr-performance": { hasPerformanceRule: async () => false },
+    "@/lib/kr-metric-display-format": compile(displayFormatSource),
     "@/lib/kr-data-sources": { listCurrentKrMetrics: async () => [] },
     "@/lib/mcp-daily-reports": compile(awaitDailyReportMcpSource, {"./daily-report": {},"./daily-report-config": {},"./daily-report-slack": {},"./slack-daily": {}}),
     "@/lib/mcp-contribution-schedules": compile(contributionScheduleMcpSource, {"./project-metric-schedules": {},"./kr-data-sources": {}}),
