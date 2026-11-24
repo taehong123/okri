@@ -3,11 +3,12 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { t } from "@/lib/client-language";
 import type { getMetricRollupStatus, KrPerformanceState, listMetricEntries, previewMetricRollup } from "@/lib/kr-performance";
+import type { MetricDisplaySettings } from "@/lib/kr-metric-display-format";
 import type { Grain, PerformanceResult } from "@/lib/kr-performance-model";
 import { formatContribution } from "./project-contributions";
 import "./kr-performance.css";
 
-const fmt = (value: number | null, unit: string) => value === null ? "—" : formatContribution(value, unit);
+type ValueLabel = (value: number | null, unit: string) => string;
 const periodLabel = (rule: PerformanceResult["rule"]["value"]) => ({
   daily: t("일간"), quarterly: t("분기"), monthly: t("월간"), weekly: t("주간"), fixed: t("지정 기간"), all_time: t("전체 기간"),
 })[rule.period];
@@ -15,7 +16,10 @@ const aggregationLabel = (rule: PerformanceResult["rule"]["value"]) => ({
   ratio: t("분자·분모 합산"), sum: t("합계"), last: t("마지막 값"), average: t("평균"),
 })[rule.aggregation];
 
-export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyResultId: string; refreshToken: number }) {
+export default function KrPerformanceChart({ keyResultId, refreshToken, displaySettings }: {
+  keyResultId: string; refreshToken: number; displaySettings?: MetricDisplaySettings;
+}) {
+  const fmt: ValueLabel = (value, unit) => value === null ? "—" : formatContribution(value, unit, displaySettings);
   const [state, setState] = useState<KrPerformanceState>();
   const [query, setQuery] = useState({ start: "", end: "", asOf: "", grain: "day" as Grain, includeEstimates: true });
   const [dates, setDates] = useState({ start: "", end: "", asOf: "" });
@@ -79,7 +83,7 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
       <label className="perf-check"><input type="checkbox" checked={query.includeEstimates}
         onChange={e => setQuery({ ...query, includeEstimates: e.target.checked })}/>{t("추정 포함")}</label>
     </div>
-    <PerformancePlot points={result.points} series={series}/>
+    <PerformancePlot points={result.points} series={series} fmt={fmt}/>
     <p className="perf-meta">{t("선택 기간 실적")} <strong>{fmt(selected.value, chosen?.unit ?? rule.unit)}</strong>
       {chosen && <> · {aggregationLabel(chosen)}</>}{selected.hasEstimates && <> · {t("추정 포함")}</>}
       {rule.aggregation === "sum" && <> · {t("전체 누적")} <strong>{fmt(result.lifetime?.value ?? null, rule.unit)}</strong></>}</p>
@@ -104,11 +108,11 @@ export default function KrPerformanceChart({ keyResultId, refreshToken }: { keyR
       {limit < result.records.length && <button className="secondary" type="button" onClick={() => setLimit(n => n + 50)}>{t("더 보기")}</button>}
     </details>
     <MetricLedger key={[keyResultId, result.range.start, result.range.end, result.asOf, result.includeEstimates, refreshToken].join("/")}
-      keyResultId={keyResultId} result={result}/>
+      keyResultId={keyResultId} result={result} fmt={fmt}/>
   </section>;
 }
 
-function MetricLedger({ keyResultId, result }: { keyResultId: string; result: PerformanceResult }) {
+function MetricLedger({ keyResultId, result, fmt }: { keyResultId: string; result: PerformanceResult; fmt: ValueLabel }) {
   const [ledger, setLedger] = useState<Awaited<ReturnType<typeof listMetricEntries>>>();
   const [status, setStatus] = useState<Awaited<ReturnType<typeof getMetricRollupStatus>>>();
   const [preview, setPreview] = useState<Awaited<ReturnType<typeof previewMetricRollup>>>();
@@ -159,7 +163,7 @@ function MetricLedger({ keyResultId, result }: { keyResultId: string; result: Pe
   </>;
 }
 
-function PerformancePlot({ points, series }: { points: PerformanceResult["points"]; series: "periodValue" | "cumulativeValue" | "value" }) {
+function PerformancePlot({ points, series, fmt }: { points: PerformanceResult["points"]; series: "periodValue" | "cumulativeValue" | "value"; fmt: ValueLabel }) {
   const usable = points.filter(point => point[series] !== null);
   if (!usable.length) return <p className="kr-history-empty">{t("측정 기록이 없습니다.")}</p>;
   const goalVisible = series === "periodValue";

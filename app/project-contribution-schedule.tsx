@@ -4,14 +4,15 @@ import {X} from "lucide-react";
 import {OverlayDialog} from "./overlay-dialog";
 import {getClientLocale,t} from "@/lib/client-language";
 import {localDate,scheduleCredits,scheduleInput,type MetricCalendar} from "@/lib/project-metric-schedule-model";
+import {formatMetricValue,type MetricDisplaySettings} from "@/lib/kr-metric-display-format";
 import type {ProjectScheduleState} from "@/lib/project-metric-schedules";
 import "./project-contribution.css";
 import "./contribution-schedule.css";
 type Draft={mode:"once"|"business_days"|"daily";amount:string;startDate:string;endDate:string;pauses:{startDate:string;endDate:string}[]};
-const format=(amount:number,unit:string)=>new Intl.NumberFormat(getClientLocale(),{maximumFractionDigits:6}).format(amount)+(unit?" "+unit:"");
+const formatContribution=(value:number,unit:string,settings?:MetricDisplaySettings)=>formatMetricValue(value,unit,settings,getClientLocale());
 const modeLabel=(mode:string)=>mode==="daily"?t("매일"):mode==="business_days"?t("영업일마다"):t("1회성");
 export default function ProjectContributionScheduleDialog({projectId,onClose,onSaved}:{projectId:string;onClose:()=>void;onSaved:()=>void}) {
-  const [state,setState]=useState<ProjectScheduleState|null>(null),[draft,setDraft]=useState<Draft|null>(null),[initial,setInitial]=useState("");
+  const [state,setState]=useState<(ProjectScheduleState & {displaySettings?:MetricDisplaySettings})|null>(null),[draft,setDraft]=useState<Draft|null>(null),[initial,setInitial]=useState("");
   const [calendar,setCalendar]=useState<MetricCalendar|null>(null),[timezone,setTimezone]=useState("Asia/Seoul"),[holidays,setHolidays]=useState(""),[canEditCalendar,setCanEditCalendar]=useState(false);
   const [attempt,setAttempt]=useState(0),[error,setError]=useState(""),[calendarError,setCalendarError]=useState(""),[calendarNotice,setCalendarNotice]=useState(""),[saving,setSaving]=useState(false),[savingCalendar,setSavingCalendar]=useState(false),[conflict,setConflict]=useState(false);
   const lock=useRef(false);
@@ -66,13 +67,13 @@ export default function ProjectContributionScheduleDialog({projectId,onClose,onS
           <small>{draft.mode==="once"?t("지정한 날짜에 한 번 반영합니다. Project 완료 상태와 무관합니다."):t("Project가 완료돼도 운영 기간 동안 쌓입니다. 지난 날짜까지 다음 날 자동 집계합니다.")}</small>
           {draft.mode!=="once"&&<section className="schedule-pauses"><h3>{t("일시중지 기간")}</h3>{draft.pauses.map((pause,index)=><div className="schedule-pause" key={index}><label><span>{t("중지 시작일")}</span><input type="date" required value={pause.startDate} onChange={e=>setDraft({...draft,pauses:draft.pauses.map((p,i)=>i===index?{...p,startDate:e.target.value}:p)})}/></label><label><span>{t("중지 종료일 (선택)")}</span><input type="date" min={pause.startDate} value={pause.endDate} onChange={e=>setDraft({...draft,pauses:draft.pauses.map((p,i)=>i===index?{...p,endDate:e.target.value}:p)})}/></label><button className="icon-button" type="button" aria-label={t("일시중지 기간 제거")} onClick={()=>setDraft({...draft,pauses:draft.pauses.filter((_,i)=>i!==index)})}><X size={16}/></button></div>)}<button type="button" className="secondary" disabled={draft.pauses.length>=50} onClick={()=>setDraft({...draft,pauses:[...draft.pauses,{startDate:localDate(new Date(),calendar.timezone),endDate:""}]})}>{t("일시중지 기간 추가")}</button><small>{t("시작일과 종료일을 모두 제외합니다. 종료일을 비워두면 계속 중지합니다.")}</small></section>}
         </fieldset>
-        <dl className="schedule-totals"><div><dt>{t("누적 추정 기여")}</dt><dd>{format(preview?.accruedValue??state.schedule?.accruedValue??0,state.keyResult.unit)}</dd></div><div><dt>{t("이번 달 추정 기여")}</dt><dd>{format(preview?.monthValue??state.schedule?.monthValue??0,state.keyResult.unit)}</dd></div></dl>
+        <dl className="schedule-totals"><div><dt>{t("누적 추정 기여")}</dt><dd>{formatContribution(preview?.accruedValue??state.schedule?.accruedValue??0,state.keyResult.unit,state.displaySettings)}</dd></div><div><dt>{t("이번 달 추정 기여")}</dt><dd>{formatContribution(preview?.monthValue??state.schedule?.monthValue??0,state.keyResult.unit,state.displaySettings)}</dd></div></dl>
         <p className="schedule-note">{t("설정한 기여량으로 계산한 추정치입니다. 운영 기간·기여량·제외일을 바꾸면 기존 추정값도 다시 계산합니다. 실제 API 측정값과 구분해 기록합니다.")}</p>
         <details className="schedule-calendar"><summary>{t("영업일 달력")} · {calendar.timezone}</summary><p>{t("영업일은 월~금에서 등록한 휴일을 제외합니다. 공휴일은 자동 추가하지 않습니다.")}</p><fieldset className="schedule-fields" disabled={!canEditCalendar||saving||savingCalendar}>
           <label><span>{t("워크스페이스 시간대")}</span><input value={timezone} onChange={e=>setTimezone(e.target.value)} placeholder="Asia/Seoul"/></label><label><span>{t("휴일 날짜")}</span><textarea aria-label={t("휴일 날짜")} rows={4} value={holidays} onChange={e=>setHolidays(e.target.value)} placeholder="YYYY-MM-DD"/><small>{t("한 줄에 날짜 하나를 입력합니다.")}</small></label>
           {canEditCalendar&&<button className="secondary" type="button" onClick={()=>void saveCalendar()}>{savingCalendar?t("저장 중"):t("워크스페이스 달력 저장")}</button>}
         </fieldset>{!canEditCalendar&&<small>{t("달력은 워크스페이스 관리자만 변경할 수 있습니다.")}</small>}{calendarError&&<p role="alert">{calendarError}</p>}{calendarNotice&&<p role="status">{calendarNotice}</p>}</details>
-        {state.schedule&&<details className="schedule-records"><summary>{t("날짜별 추정 기여 보기")}</summary>{state.schedule.recentCredits.length?<ul>{state.schedule.recentCredits.map(c=><li key={c.date}><time>{c.date}</time><span>{t("추정")} {format(c.amount,state.keyResult.unit)}</span></li>)}</ul>:<p>{t("아직 반영한 날짜가 없습니다.")}</p>}</details>}
+        {state.schedule&&<details className="schedule-records"><summary>{t("날짜별 추정 기여 보기")}</summary>{state.schedule.recentCredits.length?<ul>{state.schedule.recentCredits.map(c=><li key={c.date}><time>{c.date}</time><span>{t("추정")} {formatContribution(c.amount,state.keyResult.unit,state.displaySettings)}</span></li>)}</ul>:<p>{t("아직 반영한 날짜가 없습니다.")}</p>}</details>}
         {error&&<p className="contribution-error" role="alert">{error}</p>}{conflict&&<button type="button" className="secondary" onClick={reload}>{t("최신 설정 불러오기")}</button>}
         <footer><button className="secondary" type="button" disabled={saving||savingCalendar} onClick={()=>requestClose("close-button")}>{t("취소")}</button><button className="primary-action" type="submit" disabled={saving||savingCalendar||conflict||!preview||!state.keyResult.projectMode}>{saving?t("저장 중"):t("기여 방식 저장")}</button></footer>
       </form>}

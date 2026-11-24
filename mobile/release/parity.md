@@ -458,3 +458,5 @@ Web-only settings and additive external MCP tools persist scope, timing, safe co
 - 2026-11-20: Effective-dated KR rules, recurring Project performance, correction history and period charts share a web/external MCP aggregation service. Existing Project settings retain legacy behavior until a new rule applies. Migration 0084 adds storage and workspace backup support. Frozen mobile v1 keeps its existing item progress and completion behavior. Canonical period results and rule editors are deferred on native. No native release is included.
 
 - 2026-11-23: KR rules, dated/throughput inputs, Project operations and reconciliation share the web and MCP calculation. Server rollup persists closed occurrences. Migration 0085 is additive. Existing native v1 schemas and completion behavior are preserved. New configuration, ledger, operations and reconciliation surfaces are web/MCP only. Native UI parity is deferred.
+
+- 2026-11-24: KR display increments and MCP display strings are web/shared-server presentation features. Frozen mobile v1 payloads, raw measurements and scheduled accrual are unchanged. Native presentation parity is deferred.

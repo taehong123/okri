@@ -7,6 +7,7 @@ import { OverlayDialog } from "./overlay-dialog";
 import { formatContribution } from "./project-contributions";
 import "./kr-metrics.css";
 import ProjectContributionScheduleDialog from "./project-contribution-schedule";
+import KrMetricDisplayForm from "./kr-metric-display-form";
 import KrPerformanceSettings from "./kr-performance-settings";
 
 type Draft={mode:KrSourceMode;starting:string;target:string;unit:string;projects:Record<string,string>;api:{name:string;endpointUrl:string;valuePath:string;baseline:string;target:string;unit:string;cadence:string;active:boolean}};
@@ -20,6 +21,7 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
   const savingRef=useRef(false);
   const [scheduledProject,setScheduledProject]=useState<string|null>(null);
   const [performanceOpen,setPerformanceOpen]=useState(false);
+  const [displayDirty, setDisplayDirty] = useState(false);
   useEffect(()=>{
     const controller=new AbortController();
     void fetch("/api/kr-data-sources?keyResultId="+encodeURIComponent(keyResultId),{cache:"no-store",signal:controller.signal})
@@ -46,9 +48,17 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
   const api=draft?.api;
   const earned=state?.metric?(state.metric.currentValue-state.metric.startingValue):0;
   const dirty=Boolean(draft&&JSON.stringify(draft)!==initial);
-  return <><OverlayDialog title={t("KR 데이터 설정")} variant="drawer" dirty={dirty} onRequestClose={()=>{if(!savingRef.current)onClose();}}>
+  return <><OverlayDialog title={t("KR 데이터 설정")} variant="drawer" dirty={dirty || displayDirty} onRequestClose={()=>{if(!savingRef.current)onClose();}}>
     {requestClose=><aside className="property-panel kr-data-panel kr-source-panel">
       <header><div><h2>{t("KR 데이터 설정")}</h2><p>{state?.keyResult.title??t("측정 방식을 선택해 주세요.")}</p></div><button className="icon-button" disabled={saving} onClick={()=>requestClose("close-button")} aria-label={t("KR 데이터 설정 닫기")}><X size={18}/></button></header>
+      {state && <KrMetricDisplayForm keyResultId={keyResultId} settings={state.displaySettings}
+        onDirty={setDisplayDirty} onSaved={displaySettings => {
+          const next = { ...state, displaySettings };
+          setState(next);
+          onSaved(next);
+          window.dispatchEvent(new Event("okri:project-contributions"));
+          window.dispatchEvent(new Event("okri:kr-data-sources"));
+        }}/>}
       {!draft||!state?<div className="kr-source-status">{error?<><p role="alert">{error}</p><button onClick={reload}>{t("다시 시도")}</button></>:<p role="status">{t("데이터를 불러오는 중")}</p>}</div>:<form className="property-form" onSubmit={event=>void submit(event)} aria-busy={saving}>
         <button type="button" className="secondary" disabled={dirty || saving} onClick={()=>setPerformanceOpen(true)}>{t("성과 측정 설정")}</button>
         <fieldset className="kr-source-options" disabled={saving}><legend>{t("KR 수치 반영 방식")}</legend>
@@ -59,9 +69,9 @@ export default function KrSourceSettingsDialog({keyResultId,onClose,onSaved}:{ke
         {draft.mode==="projects"?(!state.performanceConfigured&&<>
           <div className="kr-data-number-grid"><label><span>{t("시작값")}</span><input type="number" step="any" min="0" max="1000000000000" required value={draft.starting} onChange={e=>setDraft({...draft,starting:e.target.value})}/></label><label><span>{t("목표값")}</span><input type="number" step="any" min="0.000000001" max="1000000000000" required value={draft.target} onChange={e=>setDraft({...draft,target:e.target.value})}/></label></div>
           <label><span>{t("단위")}</span><input maxLength={24} value={draft.unit} onChange={e=>setDraft({...draft,unit:e.target.value})} placeholder={t("예: 원, 명, %")}/></label>
-          <p className="kr-source-preview">{t("현재값")} <strong>{formatContribution(Number(draft.starting||0)+earned,draft.unit)}</strong><small>{t("시작값에 이미 반영한 Project 성과를 더한 값입니다.")}</small></p>
+          <p className="kr-source-preview">{t("현재값")} <strong>{formatContribution(Number(draft.starting||0)+earned,draft.unit,state.displaySettings)}</strong><small>{t("시작값에 이미 반영한 Project 성과를 더한 값입니다.")}</small></p>
           <div className="kr-source-projects"><h3>{t("Project별 기본 기여량")}</h3><p>{t("완료할 때 실제 증가량을 확인합니다. 비워두면 다음 완료부터 합산하지 않습니다.")}</p>
-          {state.projects.map(p=><div className="kr-source-project" key={p.id}><label><span>{p.title}{p.applied&&<small>{t("반영한 성과 {value}",{value:formatContribution(p.actualValue??0,draft.unit)})}</small>}{p.schedule?<small>{p.schedule.mode==="daily"?t("매일"):p.schedule.mode==="business_days"?t("영업일마다"):t("1회성")} · {t("추정")} {formatContribution(p.schedule.accruedValue,draft.unit)}</small>:["done","development_done"].includes(p.status)&&!p.applied&&<small>{t("설정한 기여량은 다음 완료부터 반영됩니다.")}</small>}</span><input disabled={Boolean(p.schedule)} aria-label={t("{title} 기본 기여량",{title:p.title})} type="number" step="any" min="0" max="1000000000000" value={p.schedule?String(p.schedule.amount):draft.projects[p.id]} placeholder="—" onChange={e=>setDraft({...draft,projects:{...draft.projects,[p.id]:e.target.value}})}/></label><button className="secondary" type="button" disabled={dirty||state.mode!=="projects"} onClick={()=>setScheduledProject(p.id)}>{t("KR 기여 방식")}</button></div>)}
+          {state.projects.map(p=><div className="kr-source-project" key={p.id}><label><span>{p.title}{p.applied&&<small>{t("반영한 성과 {value}",{value:formatContribution(p.actualValue??0,draft.unit,state.displaySettings)})}</small>}{p.schedule?<small>{p.schedule.mode==="daily"?t("매일"):p.schedule.mode==="business_days"?t("영업일마다"):t("1회성")} · {t("추정")} {formatContribution(p.schedule.accruedValue,draft.unit,state.displaySettings)}</small>:["done","development_done"].includes(p.status)&&!p.applied&&<small>{t("설정한 기여량은 다음 완료부터 반영됩니다.")}</small>}</span><input disabled={Boolean(p.schedule)} aria-label={t("{title} 기본 기여량",{title:p.title})} type="number" step="any" min="0" max="1000000000000" value={p.schedule?String(p.schedule.amount):draft.projects[p.id]} placeholder="—" onChange={e=>setDraft({...draft,projects:{...draft.projects,[p.id]:e.target.value}})}/></label><button className="secondary" type="button" disabled={dirty||state.mode!=="projects"} onClick={()=>setScheduledProject(p.id)}>{t("KR 기여 방식")}</button></div>)}
           {(dirty||state.mode!=="projects")&&<small>{t("KR 설정을 먼저 저장한 뒤 Project별 기여 방식을 설정할 수 있습니다.")}</small>}
           {!state.projects.length&&<p>{t("이 KR의 Initiative 아래에 Project를 연결하면 기본 기여량을 설정할 수 있습니다.")}</p>}</div>
           <small>{t("Project 자체의 API 연결은 별도로 유지됩니다.")}</small>

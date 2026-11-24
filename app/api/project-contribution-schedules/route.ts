@@ -1,11 +1,16 @@
 import {env} from "cloudflare:workers";
 import {authorizeRequest,ensureWorkspace} from "@/lib/pace-data";
 import {readProjectSchedule,saveProjectSchedule,ScheduleError} from "@/lib/project-metric-schedules";
+import {readMetricDisplaySettings} from "@/lib/kr-metric-display";
 import {hasPerformanceRule} from "@/lib/kr-performance";
 const headers={"Cache-Control":"private, no-store"};
 export async function GET(request:Request) {
   const auth=await authorizeRequest(request,{allowViewerWrite:true});if(auth instanceof Response)return auth;
-  try {await ensureWorkspace(auth.ownerId);return Response.json(await readProjectSchedule(env.DB,auth.ownerId,new URL(request.url).searchParams.get("projectId")??""),{headers});}
+  try {
+    await ensureWorkspace(auth.ownerId);
+    const value = await readProjectSchedule(env.DB, auth.ownerId, new URL(request.url).searchParams.get("projectId") ?? "");
+    return Response.json({ ...value, displaySettings: await readMetricDisplaySettings(env.DB, auth.ownerId, value.keyResult.id) }, { headers });
+  }
   catch(error){return failure(error);}
 }
 export async function PUT(request:Request) {

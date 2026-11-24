@@ -3,6 +3,7 @@ import { createContext, useContext, useEffect, useRef, useState, type FormEvent,
 import { Check, X } from "lucide-react";
 import { OverlayDialog } from "./overlay-dialog";
 import { getClientLocale, t } from "@/lib/client-language";
+import { formatMetricValue, type MetricDisplayPreference } from "@/lib/kr-metric-display-format";
 import type { CompletionContributionInput, ContributionState, ProjectMetric } from "@/lib/project-contributions";
 import "./project-contribution.css";
 import ProjectContributionScheduleDialog from "./project-contribution-schedule";
@@ -10,7 +11,9 @@ type Save = (input?: CompletionContributionInput) => Promise<boolean>;
 const Review = createContext<(id:string,save:Save)=>Promise<boolean>>(async (_id,save)=>save());
 const changed = () => window.dispatchEvent(new Event("okri:project-contributions"));
 export const useProjectCompletionReview = () => useContext(Review);
-export const formatContribution = (value:number,unit:string) => new Intl.NumberFormat(getClientLocale(),{maximumFractionDigits:6}).format(value)+(unit ? " "+unit : "");
+export function formatContribution(value: number, unit: string, display?: MetricDisplayPreference) {
+  return formatMetricValue(value, unit, display, getClientLocale())!;
+}
 const valid = (text:string) => text.trim()!=="" && Number.isFinite(Number(text)) && Number(text)>=0 && Number(text)<=1e12;
 async function load(projectId:string,signal?:AbortSignal):Promise<ContributionState>{
   const response=await fetch("/api/project-contributions?projectId="+encodeURIComponent(projectId),{cache:"no-store",signal});
@@ -54,8 +57,8 @@ export function ProjectContributionProvider({children}:{children:ReactNode}){
       <form className="property-form" onSubmit={event=>void submit(event)} aria-busy={saving}>
         <p>{pending.state.keyResult?.title}</p>
         <label><span>{t("실제로 얼마나 증가했나요?")}</span><input name="actualContribution" type="number" step="any" min="0" max="1000000000000" required value={actual} disabled={saving} onChange={event=>setActual(event.target.value)} aria-describedby="contribution-preview"/></label>
-        <small>{t("기본 기여량 {value}",{value:formatContribution(pending.state.contribution!.defaultValue,m?.unit??"")})}</small>
-        {m && <p id="contribution-preview" className="contribution-preview">{formatContribution(m.currentValue,m.unit)} → {formatContribution(m.currentValue+(valid(actual)?Number(actual):0),m.unit)}</p>}
+        <small>{t("기본 기여량 {value}",{value:formatContribution(pending.state.contribution!.defaultValue,m?.unit??"",pending.state.displaySettings)})}</small>
+        {m && <p id="contribution-preview" className="contribution-preview">{formatContribution(m.currentValue,m.unit,pending.state.displaySettings)} → {formatContribution(m.currentValue+(valid(actual)?Number(actual):0),m.unit,pending.state.displaySettings)}</p>}
         {error && <p className="contribution-error" role="alert">{error}</p>}
         <footer><button className="secondary" type="button" disabled={saving} onClick={close}>{t("취소")}</button><button className="primary-action" type="submit" disabled={saving||!valid(actual)}>{saving?t("저장 중"):<><Check size={16}/>{t("성과 반영하고 완료")}</>}</button></footer>
       </form>
@@ -93,19 +96,19 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
   if (state?.performance) {
     const period = state.performance;
     return <div className="project-contribution">
-      <div className="contribution-summary"><b>{t("기간 실적")}</b><span>{formatContribution(period.value, period.unit)}{period.isEstimate && " · " + t("추정 포함")}</span></div>
+      <div className="contribution-summary"><b>{t("기간 실적")}</b><span>{formatContribution(period.value, period.unit, state.displaySettings)}{period.isEstimate && " · " + t("추정 포함")}</span></div>
       <small>{period.start} – {period.end}{period.operating !== null && " · " + (period.operating ? t("운영 중") : t("운영 중지"))}</small>
       <a href="/?view=data">{t("성과 측정 설정")}</a>
     </div>;
   }
   return <div className="project-contribution">
     {loadError?<p role="alert">{t("성과 설정을 불러오지 못했습니다.")} <button className="secondary" onClick={()=>setAttempt(v=>v+1)}>{t("다시 시도")}</button></p>:!state?<span role="status">{t("데이터를 불러오는 중")}</span>:<>
-      <div className="contribution-summary"><b>{t("성과 쌓기")}</b>{c?.enabled&&<span>{c.applied?t("반영한 성과 {value}",{value:formatContribution(c.actualValue??0,m?.unit??"")}):t("기본 기여량 {value}",{value:formatContribution(c.defaultValue,m?.unit??"")})}</span>}</div>
-      {state.schedule&&<small>{state.schedule.mode==="daily"?t("매일"):state.schedule.mode==="business_days"?t("영업일마다"):t("1회성")} · {t("누적 추정 기여")} {formatContribution(state.schedule.accruedValue,m?.unit??"")}{!state.schedule.active&&" · "+t("운영 중지")}</small>}
+      <div className="contribution-summary"><b>{t("성과 쌓기")}</b>{c?.enabled&&<span>{c.applied?t("반영한 성과 {value}",{value:formatContribution(c.actualValue??0,m?.unit??"",state.displaySettings)}):t("기본 기여량 {value}",{value:formatContribution(c.defaultValue,m?.unit??"",state.displaySettings)})}</span>}</div>
+      {state.schedule&&<small>{state.schedule.mode==="daily"?t("매일"):state.schedule.mode==="business_days"?t("영업일마다"):t("1회성")} · {t("누적 추정 기여")} {formatContribution(state.schedule.accruedValue,m?.unit??"",state.displaySettings)}{!state.schedule.active&&" · "+t("운영 중지")}</small>}
       {!readOnly&&m?.active&&<>{!state.schedule&&<button className="secondary" type="button" disabled={!state.keyResult} onClick={edit}>{c?.enabled?t("기여량 변경"):t("기여량 설정")}</button>}<button className="secondary" type="button" onClick={()=>setScheduleOpen(true)}>{t("KR 기여 방식")}</button></>}
       {!state.keyResult&&<small>{t("상위 Initiative와 KR을 연결한 뒤 기여량을 설정해 주세요.")}</small>}
       {!m?.active&&<small>{t("데이터 탭에서 상위 KR의 측정 방식을 Project 성과 합산으로 설정해 주세요.")}</small>}
-      {m?.active&&<small>{m.title} · {formatContribution(m.currentValue,m.unit)} / {formatContribution(m.targetValue,m.unit)}</small>}
+      {m?.active&&<small>{m.title} · {formatContribution(m.currentValue,m.unit,state.displaySettings)} / {formatContribution(m.targetValue,m.unit,state.displaySettings)}</small>}
     </>}
     {open&&state&&<OverlayDialog title={t("성과 쌓기 설정")} initialFocus='input[name="defaultContribution"]' onRequestClose={()=>{if(!saveRef.current)setOpen(false);}}>
       <section className="contribution-dialog"><header><h2>{t("성과 쌓기 설정")}</h2><button className="icon-button" type="button" aria-label={t("닫기")} disabled={saving} onClick={()=>setOpen(false)}><X size={18}/></button></header>
@@ -113,7 +116,7 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
           <p>{state.keyResult?.title}</p><label><span>{t("기본 기여량")}</span><input name="defaultContribution" type="number" step="any" min="0" max="1000000000000" required value={amount} disabled={saving} onChange={event=>setAmount(event.target.value)}/></label>
           <small>{t("Project 완료 시 기본값을 보여 드립니다. 실제 증가량으로 바꿔 반영할 수 있습니다.")}</small>
           {!m&&<><div className="contribution-fields"><label><span>{t("KR 현재값")}</span><input type="number" step="any" min="0" required value={starting} disabled={saving} onChange={event=>setStarting(event.target.value)}/></label><label><span>{t("KR 목표값")}</span><input type="number" step="any" min="0.000001" required value={target} disabled={saving} onChange={event=>setTarget(event.target.value)}/></label></div><label><span>{t("단위")}</span><input value={unit} maxLength={24} disabled={saving} onChange={event=>setUnit(event.target.value)}/></label></>}
-          {m&&<p>{formatContribution(m.currentValue,m.unit)} / {formatContribution(m.targetValue,m.unit)}</p>}
+          {m&&<p>{formatContribution(m.currentValue,m.unit,state.displaySettings)} / {formatContribution(m.targetValue,m.unit,state.displaySettings)}</p>}
           {["done","development_done"].includes(status)&&!c?.applied&&<small>{t("설정한 기여량은 다음 완료부터 반영됩니다.")}</small>}
           {error&&<p className="contribution-error" role="alert">{error}</p>}
           <footer><button className="secondary" type="button" disabled={saving} onClick={()=>setOpen(false)}>{t("취소")}</button><button className="primary-action" disabled={saving||!valid(amount)}>{saving?t("저장 중"):t("저장")}</button></footer>

@@ -4,11 +4,16 @@ import type { RequestAuthorization } from "./pace-data";
 import { bulkUpsertMetricEntries, currentProjectKr, getMetricRollupStatus, listMetricEntries, performanceFailure,
   previewMetricRollup, readKrPerformance, readPerformanceChanges, recalculateMetric, reviseMetricEntry, writePerformance } from "./kr-performance";
 import { listProjectOperations, writeProjectOperations } from "./project-operations";
+import { listCurrentKrMetrics } from "./kr-data-sources";
+import { readMetricDisplaySettings, saveMetricDisplaySettings } from "./kr-metric-display";
+import { formatMetricValue, METRIC_DISPLAY_MODES, metricDisplayIncrement, type MetricDisplaySettings } from "./kr-metric-display-format";
+import type { PerformanceResult } from "./kr-performance-model";
 import { readMetricCalendar } from "./project-metric-schedules";
 
 const id = z.string().trim().min(1).max(128);
 const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
-const range = { start: date.optional(), end: date.optional(), as_of: date.optional(),
+const localeSchema = z.enum(["ko-KR", "en-US", "ja-JP", "zh-CN", "es-ES"]).optional();
+const range = { locale: localeSchema, start: date.optional(), end: date.optional(), as_of: date.optional(),
   grain: z.enum(["day", "week", "month"]).optional(), include_estimates: z.boolean().optional() };
 const versioned = { expected_revision: z.number().int().nonnegative(), request_id: id,
   effective_date: date, reason: z.string().max(1000).optional() };
@@ -44,6 +49,31 @@ const operation = async (fn: () => Promise<object>) => {
   }
 };
 
+function displayPoint(point: PerformanceResult["points"][number], settings: MetricDisplaySettings, locale?: string) {
+  return { start: point.start, end: point.end,
+    value: formatMetricValue(point.value, point.unit, settings, locale),
+    periodValue: formatMetricValue(point.periodValue, point.unit, settings, locale),
+    cumulativeValue: formatMetricValue(point.cumulativeValue, point.unit, settings, locale),
+    target: formatMetricValue(point.target, point.unit, settings, locale),
+  };
+}
+function displayPerformance(performance: PerformanceResult, settings: MetricDisplaySettings, locale?: string) {
+  const unit = performance.rule.value.unit, selectedUnit = performance.selected.rule?.value.unit ?? unit;
+  const total = (value: PerformanceResult["current"] | PerformanceResult["selected"] | PerformanceResult["lifetime"], unit: string) => ({
+    value: formatMetricValue(value.value, unit, settings, locale),
+    projectBreakdown: value.projectBreakdown.map(project => ({
+      projectId: project.projectId, value: formatMetricValue(project.value, unit, settings, locale),
+      estimatedValue: formatMetricValue(project.estimatedValue, unit, settings, locale),
+    })),
+  });
+  return { settings, effectiveIncrement: metricDisplayIncrement(unit, settings),
+    target: formatMetricValue(performance.rule.value.target, unit, settings, locale),
+    baseline: formatMetricValue(performance.rule.value.baseline, unit, settings, locale),
+    current: total(performance.current, unit), selected: total(performance.selected, selectedUnit),
+    lifetime: total(performance.lifetime, unit),
+  };
+}
+
 export function registerKrPerformanceTools(server: McpServer, db: D1Database, auth: RequestAuthorization) {
   const read = { readOnlyHint: true, destructiveHint: false, openWorldHint: false };
   const write = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
@@ -59,18 +89,49 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
     return { rules: filtered.slice(offset, offset + limit), ruleCount: filtered.length,
       nextOffset: offset + limit < filtered.length ? offset + limit : null };
   };
-  const ruleQuery = { start: date.optional(), end: date.optional(), as_of: date.optional(), ...page };
+  const ruleQuery = { locale: localeSchema, start: date.optional(), end: date.optional(), as_of: date.optional(), ...page };
   const command = (input: z.infer<z.ZodObject<typeof versioned>>, kind: "rule" | "project" | "entry", value: unknown, subjectId?: string) => ({
     kind, value, ...(subjectId ? { subjectId } : {}), expectedRevision: input.expected_revision,
     requestId: input.request_id, effectiveDate: input.effective_date, reason: input.reason ?? "",
   });
 
+  async function krDisplay(id: string, locale?: string) {
+    const [settings, metrics] = await Promise.all([
+      readMetricDisplaySettings(db, auth.ownerId, id),
+      listCurrentKrMetrics(db, auth.ownerId, [id]),
+    ]);
+    const metric = metrics[0];
+    const unit = metric?.unit ?? "";
+    const currentValue = metric?.currentValue ?? null, targetValue = metric?.targetValue ?? null;
+    return { keyResultId: id, unit, settings, effectiveIncrement: metricDisplayIncrement(unit, settings), currentValue, targetValue,
+      display: { currentValue: formatMetricValue(currentValue, unit, settings, locale),
+        targetValue: formatMetricValue(targetValue, unit, settings, locale) } };
+  }
+
+  server.registerTool("get_kr_metric_display", {
+    description: "Read a KR's presentation preference and effective increment. Numeric current/target values are exact; display contains the localized labels. Hour units default to 0.5.",
+    inputSchema: { key_result_id: id, locale: localeSchema }, annotations: read,
+  }, input => operation(() => krDisplay(input.key_result_id, input.locale)));
+
+  server.registerTool("set_kr_metric_display", {
+    description: "Set display-only rounding for one KR. Choose default, exact, or increment. For increment supply a number with up to six decimal places in the KR's existing unit. Read the current revision first.",
+    inputSchema: { key_result_id: id, mode: z.enum(METRIC_DISPLAY_MODES), increment: z.number().positive().nullable().optional(),
+      expected_revision: z.number().int().nonnegative(), locale: localeSchema }, annotations: { ...write, idempotentHint: true },
+  }, input => operation(async () => {
+    await saveMetricDisplaySettings(db, auth, input.key_result_id, {
+      mode: input.mode, increment: input.increment, expectedRevision: input.expected_revision,
+    });
+    return krDisplay(input.key_result_id, input.locale);
+  }));
+
   server.registerTool("get_kr_measurement_rule", {
     description: "Read the current workspace KR's measurement rule versions, current evaluation and optimistic revision.",
     inputSchema: { key_result_id: id, ...ruleQuery }, annotations: read,
   }, input => operation(async () => {
-    const state = await readState(input.key_result_id, input.as_of);
-    return { keyResult: state.keyResult, revision: state.revision, asOf: state.asOf, timezone: state.timezone,
+    const [state, settings] = await Promise.all([
+      readState(input.key_result_id, input.as_of), readMetricDisplaySettings(db, auth.ownerId, input.key_result_id),
+    ]);
+    return { keyResult: state.keyResult, display: state.performance ? displayPerformance(state.performance, settings, input.locale) : { settings }, revision: state.revision, asOf: state.asOf, timezone: state.timezone,
       ...rulePage(state.configuration.rules, input), current: state.performance?.current ?? null, evaluation: state.performance?.evaluation ?? null };
   }));
 
@@ -91,10 +152,15 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
     inputSchema: { project_id: id, ...ruleQuery }, annotations: read,
   }, input => operation(async () => {
     const project = await currentProjectKr(db, auth.ownerId, input.project_id);
-    const state = await readState(project.keyResultId, input.as_of);
-    return { project, revision: state.revision, asOf: state.asOf, evaluation: state.performance?.evaluation ?? null,
+    const [state, settings] = await Promise.all([
+      readState(project.keyResultId, input.as_of), readMetricDisplaySettings(db, auth.ownerId, project.keyResultId),
+    ]);
+    const contribution = state.performance?.current.projectBreakdown.find(item => item.projectId === project.id) ?? null;
+    const unit = state.performance?.rule.value.unit ?? "";
+    return { project, display: { settings, value: formatMetricValue(contribution?.value ?? null, unit, settings, input.locale),
+      estimatedValue: formatMetricValue(contribution?.estimatedValue ?? null, unit, settings, input.locale) }, revision: state.revision, asOf: state.asOf, evaluation: state.performance?.evaluation ?? null,
       ...rulePage(state.configuration.projects.filter(item => item.projectId === project.id), input),
-      contribution: state.performance?.current.projectBreakdown.find(item => item.projectId === project.id) ?? null };
+      contribution };
   }));
 
   server.registerTool("set_project_contribution_rule", {
@@ -130,8 +196,13 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
     const { records, ...summary } = performance;
     const filtered = input.project_id ? records.filter(row => row.projectId === input.project_id) : records;
     const offset = input.record_offset ?? 0, limit = input.record_limit ?? 100;
-    return { keyResult: state.keyResult, revision: state.revision, performance: { ...summary,
-      records: filtered.slice(offset, offset + limit), recordCount: filtered.length,
+    const page = filtered.slice(offset, offset + limit);
+    const settings = await readMetricDisplaySettings(db, auth.ownerId, input.key_result_id);
+    return { keyResult: state.keyResult, revision: state.revision,
+      display: { ...displayPerformance(performance, settings, input.locale),
+        points: performance.points.map(point => displayPoint(point, settings, input.locale)),
+        records: page.map(row => ({ id: row.id, value: formatMetricValue(row.value, row.unit, settings, input.locale) })) },
+      performance: { ...summary, records: page, recordCount: filtered.length,
       nextRecordOffset: offset + limit < filtered.length ? offset + limit : null } };
   }));
 
@@ -168,10 +239,17 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
     inputSchema: { key_result_id: id, ...range, ...page, project_id: id.optional(), include_undated: z.boolean().optional(),
       status: z.enum(["applied", "excluded", "undated", "cancelled"]).optional() },
     annotations: read,
-  }, input => operation(() => listMetricEntries(db, auth.ownerId, input.key_result_id, {
-    ...options(input), projectId: input.project_id, includeUndated: input.include_undated,
-    offset: input.offset, limit: input.limit, status: input.status,
-  })));
+  }, input => operation(async () => {
+    const [result, settings] = await Promise.all([
+      listMetricEntries(db, auth.ownerId, input.key_result_id, {
+        ...options(input), projectId: input.project_id, includeUndated: input.include_undated,
+        offset: input.offset, limit: input.limit, status: input.status,
+      }),
+      readMetricDisplaySettings(db, auth.ownerId, input.key_result_id),
+    ]);
+    return { ...result, displaySettings: settings,
+      entries: result.entries.map(row => ({ ...row, displayValue: formatMetricValue(row.value, row.unit, settings, input.locale) })) };
+  }));
 
   server.registerTool("bulk_upsert_metric_entries", {
     description: "Import up to 100 records with stable sourceKey and occurredOn (null if genuinely unknown). Use an effectKey to replace same-work estimates without double counting. Only action=correct edits a matching source record. Each result is inserted, duplicate, corrected or failed. Keep entry ordering and request_id unchanged on retry. " + descriptions,
@@ -208,7 +286,8 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
     const { performance, keyResult, revision } = await readKrPerformance(db, auth.ownerId, input.key_result_id, options(input));
     if (!performance) return { keyResult, revision, summary: null };
     const { records, points, ...summary } = performance;
-    return { keyResult, revision, summary };
+    const settings = await readMetricDisplaySettings(db, auth.ownerId, input.key_result_id);
+    return { keyResult, revision, summary, display: displayPerformance(performance, settings, input.locale) };
   }));
 
   server.registerTool("get_metric_series", {
@@ -218,7 +297,10 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
     const { performance, keyResult, revision } = await readKrPerformance(db, auth.ownerId, input.key_result_id, options(input));
     const points = performance?.points ?? [];
     const offset = input.offset ?? 0, limit = input.limit ?? 100;
-    return { keyResult, revision, asOf: performance?.asOf ?? null, count: points.length, points: points.slice(offset, offset + limit),
+    const settings = await readMetricDisplaySettings(db, auth.ownerId, input.key_result_id);
+    const selected = points.slice(offset, offset + limit);
+    return { keyResult, revision, asOf: performance?.asOf ?? null, count: points.length, points: selected,
+      display: { settings, points: selected.map(point => displayPoint(point, settings, input.locale)) },
       nextOffset: offset + limit < points.length ? offset + limit : null };
   }));
 

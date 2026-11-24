@@ -74,7 +74,7 @@ function SignalIcon({signal}: {signal: KrSignal}) {
 export function KrTrendSummary({data}: {data: KrMetricData}) {
   const {points, signal, unit, history} = data;
   const label = (!history && !data.metric?.performance ? t("측정 이력을 불러오는 중입니다.") : signalLabel(signal))+(data.metric?.isEstimate?" · "+t("추정 포함"):"");
-  const title = points.length > 1 ? t("최근 30일") + " · " + label + " · " + formatContribution(points[0].currentValue!, unit) + " → " + formatContribution(points.at(-1)!.currentValue!, unit) : label;
+  const title = points.length > 1 ? t("최근 30일") + " · " + label + " · " + formatContribution(points[0].currentValue!, unit, data.metric?.displaySettings) + " → " + formatContribution(points.at(-1)!.currentValue!, unit, data.metric?.displaySettings) : label;
   const values = points.map(p => p.currentValue!), low = Math.min(...values), high = Math.max(...values), span = high - low;
   const start = Date.parse(points[0]?.observedAt ?? ""), end = Date.parse(points.at(-1)?.observedAt ?? "");
   const x = (p: KrObservation) => end > start ? 3 + (Date.parse(p.observedAt) - start) / (end - start) * 90 : 48;
@@ -89,12 +89,12 @@ export function KrTrendSummary({data}: {data: KrMetricData}) {
 }
 export function KrMetricDetails({data, keyResultId}: {data: KrMetricData; keyResultId: string}) {
   const {metric, history, unit, signal, revision, retry} = data;
-  if (metric?.performance) return <div className="kr-inline-metric"><KrPerformanceChart keyResultId={keyResultId} refreshToken={revision}/></div>;
+  if (metric?.performance) return <div className="kr-inline-metric"><KrPerformanceChart keyResultId={keyResultId} refreshToken={revision} displaySettings={metric.displaySettings}/></div>;
   const latest = history?.observations.filter(p => p.currentValue !== null && p.unit === unit).at(-1);
   const current = metric?.currentValue ?? latest?.currentValue, target = metric?.targetValue ?? latest?.targetValue;
   return <div className="kr-inline-metric">
-    <KrMetricHistoryChart keyResultId={keyResultId} unit={unit} refreshToken={revision} initialHistory={history} onRetry={retry} summary={<div className="kr-inline-values">
-      <span>{current != null ? <><b>{formatContribution(current, unit)}</b>{target != null && <span className="kr-inline-target"> / {formatContribution(target, unit)}</span>}</> : t("업데이트 전")}</span>
+    <KrMetricHistoryChart keyResultId={keyResultId} unit={unit} refreshToken={revision} initialHistory={history} displaySettings={metric?.displaySettings} onRetry={retry} summary={<div className="kr-inline-values">
+      <span>{current != null ? <><b>{formatContribution(current, unit, metric?.displaySettings)}</b>{target != null && <span className="kr-inline-target"> / {formatContribution(target, unit, metric?.displaySettings)}</span>}</> : t("업데이트 전")}</span>
       {(metric?.isEstimate??latest?.isEstimate)&&<small>{t("추정 포함")}</small>}
       {history && <span className={"kr-inline-signal signal-" + signal}><SignalIcon signal={signal}/>{signalLabel(signal)}</span>}
     </div>}/>

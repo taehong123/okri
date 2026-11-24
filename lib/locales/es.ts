@@ -3278,5 +3278,14 @@ const messages = {
 "분자 경로": "Ruta del numerador",
 "분모 경로": "Ruta del denominador",
 "스냅샷 식별자 경로": "Ruta de la clave de la instantánea",
+"숫자 표시 설정": "Configuración de visualización",
+"표시 방식": "Formato de visualización",
+"기본 표시": "Visualización predeterminada",
+"반올림 단위 지정": "Intervalo de redondeo personalizado",
+"원본값 표시": "Mostrar valores originales",
+"반올림 단위": "Intervalo de redondeo",
+"시간은 기본으로 0.5시간 단위로 표시합니다.": "Las horas se muestran en intervalos de media hora de forma predeterminada.",
+"표시 설정을 저장하지 못했습니다.": "No se pudo guardar la configuración de visualización.",
+"표시 설정 저장": "Guardar configuración de visualización",
 } satisfies Catalog;
 export default messages;

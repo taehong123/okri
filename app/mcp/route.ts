@@ -7,6 +7,7 @@ import { registerDataConnectionTools } from "@/lib/mcp-data-connections";
 import { registerWorkspaceInviteTools } from "@/lib/mcp-workspace-invites";
 import { registerDailyReportTools } from "@/lib/mcp-daily-reports";
 import { registerKrPerformanceTools } from "@/lib/mcp-kr-performance";
+import { formatMetricValue } from "@/lib/kr-metric-display-format";
 import { listCurrentKrMetrics } from "@/lib/kr-data-sources";
 import { hasPerformanceRule, readProjectPeriodContribution } from "@/lib/kr-performance";
 import { registerContributionScheduleTools } from "@/lib/mcp-contribution-schedules";
@@ -167,6 +168,9 @@ const itemOutput = z.object({
   priority: z.string(),
   cadence: z.string(),
   progress: z.number(),
+  measurement: z.object({ unit: z.string(), currentValue: z.number().nullable(), targetValue: z.number().nullable(),
+    display: z.object({ currentValue: z.string().nullable(), targetValue: z.string().nullable() }),
+  }).optional(),
   dueDate: z.string().nullable(),
   source: z.string(),
   createdByUserId: z.string().nullable().optional(),
@@ -2149,12 +2153,19 @@ async function serializeItemsForMcp(ownerId: string, rows: Parameters<typeof ser
     getProjectImageCounts(ownerId, projectIds),
     listCurrentKrMetrics(env.DB, ownerId, rows.filter(item => item.kind === "key_result" && !item.archivedAt).map(item => item.id)),
   ]);
-  const progress = new Map(metrics.map(metric => [metric.keyResultId, metric.progress]));
-  return rows.map((item) => ({
-    ...serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []),
-    ...(item.kind === "project" ? { imageCount: imageCounts[item.id] ?? 0 } : {}),
-    progress: progress.get(item.id) ?? item.progress,
-  }));
+  const byId = new Map(metrics.map(metric => [metric.keyResultId, metric]));
+  return rows.map(item => {
+    const metric = byId.get(item.id);
+    return {
+      ...serializeItem(item, item.kind === "project" ? properties[item.id] ?? {} : {}, assignments[item.id] ?? []),
+      ...(item.kind === "project" ? { imageCount: imageCounts[item.id] ?? 0 } : {}),
+      progress: metric?.progress ?? item.progress,
+      ...(metric?.mode ? { measurement: { unit: metric.unit, currentValue: metric.currentValue, targetValue: metric.targetValue,
+        display: { currentValue: formatMetricValue(metric.currentValue, metric.unit, metric.displaySettings),
+          targetValue: formatMetricValue(metric.targetValue, metric.unit, metric.displaySettings) },
+      } } : {}),
+    };
+  });
 }
 
 type McpAssignmentFields = {

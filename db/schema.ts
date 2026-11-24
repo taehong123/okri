@@ -2091,3 +2091,20 @@ export const krMetricRollupRuns = sqliteTable("kr_metric_rollup_runs", {
   index("idx_kr_metric_rollup_runs_time").on(t.ownerId, t.krItemId, t.recordedAt, t.id),
   check("kr_metric_rollup_run_json", sql`json_valid(${t.resultJson})`),
 ]);
+
+export const krMetricDisplaySettings = sqliteTable("kr_metric_display_settings", {
+  id: text("id").primaryKey(),
+  ownerId: text("owner_id").notNull().references(() => workspaces.id, { onDelete: "cascade" }),
+  krItemId: text("kr_item_id").notNull().references(() => items.id, { onDelete: "cascade" }),
+  mode: text("mode").notNull(),
+  increment: real("increment"),
+  revision: integer("revision").notNull(),
+  updatedAt: text("updated_at").notNull(),
+}, t => [
+  uniqueIndex("idx_kr_metric_display_item").on(t.krItemId),
+  index("idx_kr_metric_display_owner").on(t.ownerId),
+  check("kr_metric_display_id", sql`${t.id} = ${t.krItemId}`),
+  check("kr_metric_display_revision", sql`${t.revision} > 0`),
+  check("kr_metric_display_mode", sql`(${t.mode} in ('default','exact') and ${t.increment} is null) or
+    (${t.mode} = 'increment' and ${t.increment} is not null and ${t.increment} between 0.000001 and 1000000000000)`),
+]);

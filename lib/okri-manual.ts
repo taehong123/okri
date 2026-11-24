@@ -89,6 +89,7 @@ Project 성과 합산을 저장한 뒤 Project별 ‘KR 기여 방식’에서 �
 기간별 평가가 필요하면 ‘성과 측정 설정’에서 적용 시작일, 평가 기간, 집계, 단위와 목표 방향을 지정합니다. 월간 기간 합계는 새 달에 다시 시작하며 이전 달 기록을 조회할 수 있습니다. Project 운영 규칙은 일회성·영업일마다·매일·매주, 운영 시작과 종료, 중지일, 달력, 추정 여부와 근거를 지원합니다. 같은 날짜의 실측을 등록하면 해당 Project의 추정 기여를 대체합니다. KR을 펼쳐 일·주·월 그래프와 Project별 합계를 확인하고 ‘변경 이력’에서 변경 시각과 적용일을 조회합니다. 외부 MCP의 get_kr_performance도 동일한 집계를 반환합니다.
 성과 측정 규칙에서는 직접 입력·API 스냅샷·Project 합산·실제 처리량을 선택합니다. 합계 지표는 월별·전체 누적을 함께 보며 비율은 분자·분모를 각각 합산해 계산할 수 있습니다. API 비율은 분자·분모 경로와 같은 스냅샷을 구별하는 키 경로를 함께 지정합니다. Project 상세의 ‘운영·사용 현황’에서는 기여 수치 없이 구축, 운영, 사용, 근거를 관리합니다.
 외부 MCP의 list_project_operations·update_project_operations는 운영과 사용을 조회·변경합니다. bulk_upsert_metric_entries로 원천 고유키와 발생일을 등록하고 correct_metric_entry·cancel_metric_entry로 사유를 남겨 정정합니다. 발생일을 모르면 null로 보관합니다. 같은 업무 효과에는 공유 키를 써 실측으로 추정치를 대체할 수 있습니다. get_metric_summary·get_metric_series·list_metric_entries는 웹과 같은 결과를 조회합니다. get_metric_rollup_status는 실제 자동 집계 시각과 처리 완료일을 반환하고 preview_metric_recalculation·recalculate_metric에서 예상 변경과 복구를 확인합니다. 규칙과 정정 이력은 list_kr_performance_changes에서 조회합니다.
+KR 데이터 설정의 ‘숫자 표시 설정’에서 기본 표시, 반올림 단위 지정, 원본값 표시를 고를 수 있습니다. 시간은 기본 0.5시간 단위로 표시하고 0으로 반올림되는 양수는 ‘0.5시간 미만’으로 표시합니다. 표시 설정은 KR의 원장이나 계산값을 바꾸지 않습니다. 외부 MCP의 get_kr_metric_display와 set_kr_metric_display도 같은 설정을 사용하며, 실적 조회에서 계산값과 display 문자열을 각각 반환합니다.
 보관된 대상은 자동 동기화에서 제외되지만 연결 설정은 보존됩니다. Viewer는 조회만 합니다. 데이터 설정과 시계열 조회 UI는 웹에서 제공합니다. 현재 Slack AI에는 연결 생성·설정·동기화 도구가 없으므로 웹에서 관리합니다.`,
   },
   {

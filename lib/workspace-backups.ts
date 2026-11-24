@@ -17,6 +17,7 @@ export const BACKUP_COLUMNS: Record<string, string[]> = Object.fromEntries(Objec
   kr_metric_observations: "id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at,is_estimate,numerator,denominator,snapshot_key",
   kr_performance_changes: "id,owner_id,kr_item_id,revision,request_id,kind,subject_id,effective_date,recorded_at,actor_id,reason,request_json,value_json,receipt_json",
   kr_performance_stops: "id,owner_id,kr_item_id,project_id,recorded_at",
+  kr_metric_display_settings: "id,owner_id,kr_item_id,mode,increment,revision,updated_at",
   project_operation_versions: "id,owner_id,project_id,revision,request_id,effective_date,recorded_at,actor_id,reason,value_json,receipt_json",
   project_task_goals: "id,owner_id,project_id,target_count,version,created_at,updated_at",
   project_documents: "id,owner_id,project_id,content,plain_text,version,updated_by_user_id,created_at,updated_at",
@@ -189,6 +190,7 @@ export function validateSnapshot(value: unknown, ownerId: string): Snapshot {
   data.tables.project_metric_schedules ??= [];
   data.tables.kr_performance_changes ??= [];
   data.tables.kr_performance_stops ??= [];
+  data.tables.kr_metric_display_settings ??= [];
   data.tables.project_operation_versions ??= [];
   for (const table of BACKUP_TABLES) {
     const rows = data.tables[table];

@@ -1,5 +1,7 @@
 "use client";
 
+import { formatMetricValue, metricDisplayIncrement, type MetricDisplaySettings } from "@/lib/kr-metric-display-format";
+
 import { AlertTriangle, Check, Database, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { OverlayDialog, useAppConfirm } from "./overlay-dialog";
@@ -268,7 +270,7 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
           return <article className={`kr-data-card ${connection ? "connected" : "unconnected"}`} key={item.id}>
             <header><span className={`type-icon type-${item.kind}`}>{targetLabels[item.kind]}</span><div><small>{contextLabel}</small><h2>{item.title}</h2></div><strong>{metric?.progress ?? item.progress}%</strong></header>
             {metric ? <>
-              <div className="kr-data-progress"><span><i style={{ width: `${metric.progress}%` }} /></span><b>{formatDataMetric(metric.currentValue, metric.unit)} <em>/ {formatDataMetric(metric.targetValue, metric.unit)}</em></b></div>
+              <div className="kr-data-progress"><span><i style={{ width: `${metric.progress}%` }} /></span><b>{formatDataMetric(metric.currentValue, metric.unit, metric.displaySettings)} <em>/ {formatDataMetric(metric.targetValue, metric.unit, metric.displaySettings)}</em></b></div>
               <p>{metric.performance ? t("기간 실적") : <>{t("Project 성과 합산")} · {t("Project 완료 성과와 날짜별 추정 기여를 합산합니다.")}</>}{metric.isEstimate?" · "+t("추정 포함"):""}</p>
               <footer>{metric.mode === "api" && connection && <button disabled={readOnly || syncingId === connection.id} onClick={() => void sync(connection)}><RefreshCw size={13}/>{t("지금 업데이트")}</button>}
                 <button disabled={readOnly} onClick={()=>setConfiguringKr(item.id)}><Pencil size={13}/>{t("KR 데이터 설정")}</button></footer>
@@ -306,7 +308,12 @@ export default function DataView({ cacheKey, items, cycles, readOnly, onProgress
 function emptyDraft(targetKind: DataTargetKind, itemId: string): Draft { return { targetKind, itemId, name: "", endpointUrl: "", valuePath: "", baselineValue: "0", targetValue: "", unit: "", cadence: "daily", active: true }; }
 function cadenceOrder(value?: DataCadence) { return value ? { hourly: 0, daily: 1, weekly: 2, manual: 3 }[value] : 4; }
 function statusOrder(connection?: DataConnection) { return !connection ? 3 : connection.lastSyncStatus === "error" ? 0 : connection.lastSyncStatus === "never" ? 1 : 2; }
-export function formatDataMetric(value: number | null, unit: string) { return value === null ? t("아직 값 없음") : `${new Intl.NumberFormat(getClientLocale(), { maximumFractionDigits: 2 }).format(value)}${unit}`; }
+export function formatDataMetric(value: number | null, unit: string, display?: MetricDisplaySettings) {
+  if (value === null) return t("아직 값 없음");
+  return metricDisplayIncrement(unit, display) !== null || display?.mode === "exact"
+    ? formatMetricValue(value, unit, display, getClientLocale())!
+    : `${new Intl.NumberFormat(getClientLocale(), { maximumFractionDigits: 2 }).format(value)}${unit}`;
+}
 export function dataSyncStatusLabel(connection: DataConnection) { if (connection.lastSyncStatus === "never") return t("업데이트 전"); if (connection.lastSyncStatus === "error") return t("오류"); return connection.lastSyncedAt ? new Date(connection.lastSyncedAt).toLocaleString(getClientLocale(), { dateStyle: "short", timeStyle: "short" }) : t("완료"); }
 
 function DataState({ icon: Icon, title, detail, action, onAction, loading = false }: { icon: typeof Database; title: string; detail?: string; action?: string; onAction?: () => void; loading?: boolean }) {

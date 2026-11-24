@@ -1,6 +1,7 @@
 import { env } from "cloudflare:workers";
 import { authorizeRequest, ensureWorkspace } from "@/lib/pace-data";
 import { hasPerformanceRule, readKrPerformance } from "@/lib/kr-performance";
+import { readMetricDisplaySettings } from "@/lib/kr-metric-display";
 import { ContributionError } from "@/lib/project-contributions";
 import { listCurrentKrMetrics, readKrSource, saveKrSource } from "@/lib/kr-data-sources";
 export async function GET(request: Request) {
@@ -11,9 +12,12 @@ export async function GET(request: Request) {
     const id=new URL(request.url).searchParams.get("keyResultId")?.trim();
     const headers = { "Cache-Control": "private, no-store" };
     if (id) {
-      const [legacy, state] = await Promise.all([readKrSource(env.DB, auth.ownerId, id), readKrPerformance(env.DB, auth.ownerId, id, { grain: "month" })]);
+      const [legacy, state, displaySettings] = await Promise.all([
+        readKrSource(env.DB, auth.ownerId, id), readKrPerformance(env.DB, auth.ownerId, id, { grain: "month" }),
+        readMetricDisplaySettings(env.DB, auth.ownerId, id),
+      ]);
       const performance = state.performance;
-      return Response.json({ ...legacy, performanceConfigured: Boolean(state.revision),
+      return Response.json({ ...legacy, displaySettings, performanceConfigured: Boolean(state.revision),
         keyResult: { ...legacy.keyResult, progress: performance ? performance.current.progress ?? 0 : legacy.keyResult.progress },
         metric: performance ? performance.rule.value.source === "projects" ? {
           startingValue: performance.rule.value.baseline, targetValue: performance.rule.value.target,

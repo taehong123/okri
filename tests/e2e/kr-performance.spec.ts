@@ -78,14 +78,14 @@ test("Data saves effective-dated rules and OKR shows the same period and Project
   await disclosure.focus();
   await page.keyboard.press("Enter");
   const graph = row.getByRole("region", { name: "KR 성과 추이" });
-  await expect(graph).toContainText("6 시간");
-  await expect(graph).toContainText("100 시간");
+  await expect(graph).toContainText("6시간");
+  await expect(graph).toContainText("100시간");
   await graph.getByText("Project별 기여 합계").click();
-  await expect(graph.getByRole("list")).toContainText("6 시간");
+  await expect(graph.getByRole("list")).toContainText("6시간");
   await graph.getByLabel("집계 단위").selectOption("month");
   await expect(graph.locator(".kr-history-point")).toHaveCount(1);
   await graph.getByLabel("추정 포함").uncheck();
-  await expect(graph.locator(".kr-inline-values b")).toHaveText("0 시간");
+  await expect(graph.locator(".kr-inline-values b")).toHaveText("0시간");
 
   for (const width of [320, 390, 1440, 3840]) {
     await page.setViewportSize({ width, height: 900 });
@@ -111,4 +111,98 @@ test("Data saves effective-dated rules and OKR shows the same period and Project
   expect(fonts.length).toBeGreaterThan(0);
   expect(fonts.every(font => font.isCustomFont && /Pretendard/.test(font.familyName))).toBe(true);
   await session.detach();
+});
+
+test("hour display settings persist on reload and the next daily value uses the same labels", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium");
+  await installApiMocks(page);
+  const mock = await installKrDataMocks(page, { configured: true });
+  const kr = mock.state().keyResult;
+  const project = mock.state().projects[0];
+  const first = "2026-11-22";
+  let asOf = "2026-11-23";
+  let displaySettings: import("../../lib/kr-metric-display-format").MetricDisplaySettings =
+    { mode: "default", increment: null, revision: 0, updatedAt: null };
+  const rule: MeasurementRule = { source: "projects", input: "events", aggregation: "sum", period: "monthly",
+    start: null, end: null, unit: "시간", baseline: 0, target: 100, direction: "increase", timezone: "Asia/Seoul" };
+  const ruleVersion = { value: rule, effectiveDate: first, recordedAt: first + "T12:00:00Z", revision: 1 };
+  const aggregate = () => {
+    const entries = (asOf === "2026-11-23" ? [25.838095] : [25.838095, 23.85]).map((value, index) => ({
+      id: "credit-" + index, date: index === 0 ? first : "2026-11-23", value, basis: "Test",
+      projectId: project.id, title: project.title, unit: "시간", input: "events" as const, source: "projects" as const,
+      recordedAt: asOf + "T01:00:00Z", isEstimate: false,
+    }));
+    return aggregatePerformance({ rules: [ruleVersion], entries, projects: [], samples: [], stops: [] }, {
+      asOf, grain: "day", includeEstimates: true,
+    }, new Date(asOf + "T02:00:00Z"))!;
+  };
+  await page.route("**/api/kr-metric-display**", route => {
+    if (route.request().method() === "PUT") {
+      const body = route.request().postDataJSON();
+      expect(body).toMatchObject({ keyResultId: kr.id, expectedRevision: displaySettings.revision });
+      displaySettings = { mode: body.mode, increment: body.increment, revision: displaySettings.revision + 1, updatedAt: asOf };
+    }
+    return json(route, { settings: displaySettings });
+  });
+  await page.route("**/api/kr-data-sources**", route => {
+    const value = aggregate();
+    const metric = { keyResultId: kr.id, performance: true, mode: "projects", currentValue: value.current.value,
+      unit: "시간", targetValue: 100, progress: value.current.progress, trend: value.points, displaySettings };
+    return json(route, new URL(route.request().url()).searchParams.has("keyResultId")
+      ? { ...mock.state(), performanceConfigured: true, displaySettings }
+      : { metrics: [metric] });
+  });
+  await page.route("**/api/kr-performance**", route => json(route, {
+    keyResult: kr, revision: 1, timezone: "Asia/Seoul", asOf,
+    configuration: { rules: [ruleVersion], projects: [] }, performance: aggregate(),
+  }));
+  await page.route("**/api/project-contributions**", route => {
+    if (!new URL(route.request().url()).searchParams.has("projectId")) return route.fallback();
+    return json(route, { projectId: project.id, projectStatus: project.status, keyResult: kr, apiConnected: false,
+      contribution: null, metric: null, displaySettings, performance: {
+        start: "2026-11-01", end: "2026-11-30", unit: "시간", value: aggregate().current.value, isEstimate: false, operating: true,
+      },
+    });
+  });
+  const row = page.locator("#okr-search-kr-1");
+  const openGraph = async () => {
+    const graph = row.getByRole("region", { name: "KR 성과 추이" });
+    if (!(await graph.isVisible())) await row.locator(":scope > .okr-tree-kr-row").press("Enter");
+    await expect(graph).toBeVisible();
+    return graph;
+  };
+  await page.goto("/?view=okr");
+  let graph = await openGraph();
+  await expect(graph.locator(".kr-inline-values b")).toHaveText("약 26시간");
+
+  asOf = "2026-11-24";
+  await page.reload();
+  graph = await openGraph();
+  await expect(graph.locator(".kr-inline-values b")).toHaveText("약 49.5시간");
+  await expect(graph.getByText("전체 누적")).toContainText("약 49.5시간");
+  await expect(graph.locator(".kr-history-point title").last()).toHaveText(/약 49\.5시간/);
+  await graph.getByText("Project별 기여 합계").click();
+  await expect(graph.getByRole("list")).toContainText("약 49.5시간");
+  await expect(graph).not.toContainText("49.688095");
+
+  await page.goto("/?view=work&project=project-1");
+  const projectDetail = page.getByRole("dialog", { name: /Project 상세/ });
+  await expect(projectDetail.getByText("약 49.5시간", { exact: true })).toBeVisible();
+
+  await page.goto("/?view=data");
+  const card = page.locator(".kr-data-card").filter({ has: page.getByRole("heading", { name: kr.title, exact: true }) });
+  await expect(card.locator(".kr-data-progress")).toContainText("약 49.5시간");
+  await card.getByRole("button", { name: "KR 데이터 설정" }).click();
+  const settings = page.getByRole("dialog", { name: "KR 데이터 설정", exact: true });
+  await settings.getByText("숫자 표시 설정", { exact: true }).click();
+  await settings.getByLabel("표시 방식").selectOption("increment");
+  await settings.getByLabel("반올림 단위", { exact: true }).fill("2");
+  await settings.getByRole("button", { name: "표시 설정 저장" }).click();
+  await expect(settings.getByRole("status").filter({ hasText: "저장했습니다." })).toBeVisible();
+  await page.reload();
+  await expect(card.locator(".kr-data-progress")).toContainText("약 50시간");
+  await page.goto("/?view=okr");
+  graph = await openGraph();
+  await expect(graph.locator(".kr-inline-values b")).toHaveText("약 50시간");
+  expect(aggregate().current.value).toBeCloseTo(49.688095, 8);
 });
