@@ -265,7 +265,7 @@ function mcpFixture() {
     "@/lib/pace-data": data,
     "@/lib/mcp-workspace-invites":compile(workspaceInviteMcpSource,{"./workspace-invite-links":{},"./workspace-invite-runtime":{}}),
     "@/lib/mcp-kr-performance": compile(performanceMcpSource, { "./kr-performance": {}, "./project-operations": {}, "./project-metric-schedules": {},
-      "./kr-data-sources": {}, "./kr-metric-display": {}, "./kr-metric-display-format": compile(displayFormatSource) }),
+      "./kr-data-sources": {}, "./kr-metric-display": {}, "./metric-comparisons": {}, "./kr-metric-display-format": compile(displayFormatSource) }),
     "@/lib/kr-performance": { hasPerformanceRule: async () => false },
     "@/lib/kr-metric-display-format": compile(displayFormatSource),
     "@/lib/kr-data-sources": { listCurrentKrMetrics: async () => [] },

@@ -1,6 +1,7 @@
 "use client";
 import DailyReportSettings from "./daily-report-settings";
 /* eslint-disable @next/next/no-img-element */
+import MetricComparisons from "./metric-comparisons";
 import ProjectOperationsSettings from "./project-operations-settings";
 import { DailyWorkPicker } from "@/app/daily-work-picker";
 import { SlackMemberConnections } from "@/app/slack-member-connections";
@@ -3708,6 +3709,7 @@ function ProjectDataSection({ project }: { project: OkriItem }) {
           <div><small>{t("갱신")}</small><b>{projectDataCadenceLabel(connection.cadence)} · {connection.active ? t("활성") : t("일시정지")}</b></div>
           <div><small>{t("최근 결과")}</small><b className={`sync-${connection.lastSyncStatus}`}>{projectDataSyncLabel(connection)}</b></div>
         </div>
+        <MetricComparisons projectId={project.id}/>
         <div className="project-data-progress"><span><i style={{ width: `${project.progress}%` }} /></span><b>{project.progress}%</b></div>
         {connection.lastError && <p className="kr-data-error"><AlertTriangle size={13} />{t("최근 데이터 갱신에 실패했습니다. 연결 설정을 확인해 주세요.")}</p>}
       </> : <div className="project-data-state"><Database size={15} />{t("데이터 화면에서 이 Project에 API를 연결할 수 있습니다.")}</div>}

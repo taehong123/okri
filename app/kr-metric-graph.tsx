@@ -7,6 +7,7 @@ import type { KrObservation } from "@/lib/kr-metric-history";
 import { t } from "@/lib/client-language";
 import { formatContribution } from "./project-contributions";
 import { latestKrTrendSegment, krTrendSignal, type KrSignal } from "./kr-trend-model";
+import MetricComparisons from "./metric-comparisons";
 import KrMetricHistoryChart from "./kr-metric-history-chart";
 import KrPerformanceChart from "./kr-performance-chart";
 import "./kr-metrics.css";
@@ -93,6 +94,7 @@ export function KrMetricDetails({data, keyResultId}: {data: KrMetricData; keyRes
   const latest = history?.observations.filter(p => p.currentValue !== null && p.unit === unit).at(-1);
   const current = metric?.currentValue ?? latest?.currentValue, target = metric?.targetValue ?? latest?.targetValue;
   return <div className="kr-inline-metric">
+    <MetricComparisons keyResultId={keyResultId} refreshToken={revision}/>
     <KrMetricHistoryChart keyResultId={keyResultId} unit={unit} refreshToken={revision} initialHistory={history} displaySettings={metric?.displaySettings} onRetry={retry} summary={<div className="kr-inline-values">
       <span>{current != null ? <><b>{formatContribution(current, unit, metric?.displaySettings)}</b>{target != null && <span className="kr-inline-target"> / {formatContribution(target, unit, metric?.displaySettings)}</span>}</> : t("업데이트 전")}</span>
       {(metric?.isEstimate??latest?.isEstimate)&&<small>{t("추정 포함")}</small>}

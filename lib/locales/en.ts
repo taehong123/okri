@@ -3287,6 +3287,18 @@ const messages = {
 "시간은 기본으로 0.5시간 단위로 표시합니다.": "Hours are displayed in half-hour increments by default.",
 "표시 설정을 저장하지 못했습니다.": "Could not save display settings.",
 "표시 설정 저장": "Save display settings",
+"전일 대비": "Day over day",
+"전주 대비": "Week over week",
+"전월 대비": "Month over month",
+"전년 대비": "Year over year",
+"직접 비교": "Custom comparison",
+"기간 비교": "Compare periods",
+"이전 시작": "Previous start",
+"이전 종료": "Previous end",
+"현재 시작": "Current start",
+"현재 종료": "Current end",
+"비교": "Compare",
+"비교할 데이터가 없습니다. 기간을 확인해 주세요.": "No comparison data for these dates.",
 } as const;
 export default messages;
 export type MessageKey = keyof typeof messages;

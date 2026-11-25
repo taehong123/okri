@@ -90,7 +90,7 @@ async function syncConnection(d1: D1Database, connection: ConnectionRow) {
         .bind(crypto.randomUUID(), connection.owner_id, target.id, value, connection.baseline_value, connection.target_value,
           connection.unit, timestamp, ratio.numerator, ratio.denominator, ratio.key)
       : d1.prepare(`INSERT INTO kr_metric_observations(id,owner_id,kr_item_id,source,event_kind,current_value,baseline_value,target_value,unit,observed_at)
-        SELECT ?,?,?, 'api','synced',?,?,?,?,? WHERE ?='key_result'`).bind(crypto.randomUUID(),connection.owner_id,target.id,value,connection.baseline_value,connection.target_value,connection.unit,timestamp,target.kind),
+        SELECT ?,?,?, 'api','synced',?,?,?,?,? WHERE ? IN ('key_result','project')`).bind(crypto.randomUUID(),connection.owner_id,target.id,value,connection.baseline_value,connection.target_value,connection.unit,timestamp,target.kind),
       d1.prepare(`INSERT INTO activity_log (id, owner_id, item_id, action, source, payload, created_at)
         VALUES (?, ?, ?, 'data_synced', 'api', ?, ?)`)
         .bind(crypto.randomUUID(), connection.owner_id, target.id, JSON.stringify({ connectionId: connection.id, targetKind: target.kind, value, progress }), timestamp),
