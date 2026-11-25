@@ -3287,5 +3287,17 @@ const messages = {
 "시간은 기본으로 0.5시간 단위로 표시합니다.": "Las horas se muestran en intervalos de media hora de forma predeterminada.",
 "표시 설정을 저장하지 못했습니다.": "No se pudo guardar la configuración de visualización.",
 "표시 설정 저장": "Guardar configuración de visualización",
+"전일 대비": "Día anterior",
+"전주 대비": "Semana anterior",
+"전월 대비": "Mes anterior",
+"전년 대비": "Año anterior",
+"직접 비교": "Comparación personalizada",
+"기간 비교": "Comparar períodos",
+"이전 시작": "Inicio anterior",
+"이전 종료": "Fin anterior",
+"현재 시작": "Inicio actual",
+"현재 종료": "Fin actual",
+"비교": "Comparar",
+"비교할 데이터가 없습니다. 기간을 확인해 주세요.": "No hay datos para comparar en estas fechas.",
 } satisfies Catalog;
 export default messages;

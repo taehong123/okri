@@ -16,8 +16,11 @@ const formatter = compile(await read("lib/kr-metric-display-format.ts"));
 const display = compile(await read("lib/kr-metric-display.ts"), { "./kr-performance-model": model, "./kr-metric-display-format": formatter });
 const sources = compile(await read("lib/kr-data-sources.ts"), { "./kr-performance": service, "./kr-metric-display": display,
   "./project-contributions": {}, "./kr-data-sync": {} });
+const comparison = compile(await read("lib/metric-comparisons.ts"), { "./project-metric-schedule-model": schedule,
+  "./kr-performance-model": model, "./kr-performance": service, "./kr-metric-display": display, "./kr-metric-display-format": formatter,
+  "./project-metric-schedules": legacy });
 const mcp = compile(await read("lib/mcp-kr-performance.ts"), { "./kr-performance": service, "./project-operations": ops,
-  "./project-metric-schedules": legacy, "./kr-metric-display": display, "./kr-metric-display-format": formatter, "./kr-data-sources": sources });
+  "./project-metric-schedules": legacy, "./kr-metric-display": display, "./kr-metric-display-format": formatter, "./kr-data-sources": sources, "./metric-comparisons": comparison });
 const oldTools = compile(await read("lib/mcp-contribution-schedules.ts"), { "./project-metric-schedules": legacy, "./kr-data-sources": {} });
 const route = await read("app/api/kr-performance/route.ts");
 const migration = await read("drizzle/0084_kr_performance.sql");
@@ -209,7 +212,7 @@ test("MCP SDK tools/list exposes new and retained tools, and web and MCP return 
     "get_project_contribution_rule", "set_project_contribution_rule", "record_kr_performance", "get_kr_performance", "list_kr_performance_changes",
     "bulk_upsert_metric_entries", "cancel_metric_entry", "correct_metric_entry", "get_metric_rollup_status", "get_metric_series",
     "get_metric_summary", "list_metric_entries", "list_project_operations", "preview_metric_recalculation",
-    "recalculate_metric", "update_project_operations", "get_kr_metric_display", "set_kr_metric_display",
+    "recalculate_metric", "update_project_operations", "get_kr_metric_display", "set_kr_metric_display", "get_metric_comparisons",
   ].sort());
   const saved = await client.callTool({ name: "set_kr_measurement_rule", arguments: {
     key_result_id: "kr", expected_revision: 0, request_id: "web-mcp-rule", effective_date: "2026-12-01", reason: "Initial migration", rule: krRule,
@@ -241,6 +244,14 @@ test("MCP SDK tools/list exposes new and retained tools, and web and MCP return 
   assert.equal(web.current.value, 8);
   assert.equal(web.points.at(-1).periodValue, web.current.value);
   assert.equal(web.current.projectBreakdown[0].value, web.current.value);
+  const fromComparison = await client.callTool({ name: "get_metric_comparisons", arguments: {
+    key_result_id: "kr", as_of: "2026-12-05", current: { start: "2026-12-04", end: "2026-12-04" },
+    previous: { start: "2026-12-03", end: "2026-12-03" }, include_estimates: false,
+  } });
+  const directComparison = await comparison.readMetricComparisons(f.db, "w", "kr", { asOf: "2026-12-05", includeEstimates: false,
+    current: { start: "2026-12-04", end: "2026-12-04" }, previous: { start: "2026-12-03", end: "2026-12-03" } }, now);
+  assert.deepEqual(fromComparison.structuredContent, directComparison);
+  assert.equal(fromComparison.structuredContent.comparisons[0].currentValue, 2);
   const mcpHistory = await client.callTool({ name: "list_kr_performance_changes", arguments: { key_result_id: "kr" } });
   const webHistory = await (await api.GET(new Request("http://localhost/api/kr-performance?keyResultId=kr&view=changes"))).json();
   assert.deepEqual(mcpHistory.structuredContent, webHistory);
@@ -426,4 +437,69 @@ test("a KR display preference survives reads and accrual without changing the ru
   const reset = await display.saveMetricDisplaySettings(f.db, actor, "kr", { expectedRevision: 1, mode: "default" });
   assert.equal(reset.revision, 2);
   assert.equal(formatter.formatMetricValue(after.performance.current.value, "시간", reset), "약 0.5시간");
+});
+
+test("period comparisons exclude missing data, preserve zero and return exact and formatted deltas", async t => {
+  const f=dataFixture(t), now=at("2026-11-24");
+  const rule={...krRule,source:"manual"};
+  await f.write(change("rule",rule,"2026-10-01",0),"2026-10-01");
+  const put=async (date,value,rev)=>f.write(change("entry",{value,basis:"observed"},date,rev,{subjectId:"v"+rev}),date);
+  await put("2026-10-23",10,1);
+  await put("2026-11-23",0,2);
+  await put("2026-11-24",0.13,3);
+  const data=await comparison.readMetricComparisons(f.db,"w","kr",{asOf:"2026-11-24"},now);
+  const day=data.comparisons.find(c=>c.kind==="dod");
+  assert.equal(day.previousValue,0);
+  assert.equal(day.currentValue,0.13);
+  assert.equal(day.percent,null);
+  assert.equal(day.display.change,"+0.5시간 미만");
+  assert.equal(data.comparisons.some(c=>c.kind==="yoy"),false);
+  const month=data.comparisons.find(c=>c.kind==="mom");
+  assert.equal(month.previousValue,10);
+  assert.equal(month.currentValue,0.13);
+  assert.equal(month.current.end,"2026-11-24");
+  assert.equal(month.previous.end,"2026-10-24");
+  const custom=await comparison.readMetricComparisons(f.db,"w","kr",{asOf:"2026-11-24",
+    current:{start:"2026-11-24",end:"2026-11-24"},previous:{start:"2026-11-23",end:"2026-11-23"}},now);
+  assert.equal(custom.comparisons[0].change,0.13);
+  assert.equal((await comparison.readMetricComparisons(f.db,"w","kr",{asOf:"2026-11-02"},at("2026-11-02"))).comparisons.length,0);
+  const same=await comparison.readMetricComparisons(f.db,"w","kr",{asOf:"2026-11-24"},now);
+  assert.deepEqual(data,same);
+});
+
+test("monthly comparisons align full months and averages retain their aggregation", async t => {
+  const periods=comparison.comparisonPeriods("2024-03-31");
+  assert.deepEqual(periods.find(x=>x.kind==="mom").previous,{start:"2024-02-01",end:"2024-02-29"});
+  const f=dataFixture(t);
+  await f.write(change("rule",{...krRule,source:"manual",input:"samples",aggregation:"average"},"2026-10-01",0),"2026-10-01");
+  for (const [date,value,rev] of [["2026-10-05",10,1],["2026-10-06",20,2],["2026-11-05",30,3],["2026-11-06",50,4]]) {
+    await f.write(change("entry",{value,basis:"measure"},date,rev,{subjectId:"m"+rev}),date);
+  }
+  const value=(await comparison.readMetricComparisons(f.db,"w","kr",{asOf:"2026-11-24"},at("2026-11-24"))).comparisons.find(c=>c.kind==="mom");
+  assert.equal(value.previousValue,15);assert.equal(value.currentValue,40);
+});
+
+test("Project API snapshots retain their own history and comparisons use latest values", async t => {
+  const f=dataFixture(t);
+  f.seed("kr_data_connections",{id:"project-api",owner_id:"w",kr_item_id:"p",name:"project",endpoint_url:"https://example.test",
+    unit:"시간",baseline_value:0,target_value:100});
+  for (const [id,day,value] of [["a","2026-11-23",0],["b","2026-11-24",0.5],["c","2026-11-24",0.75]]) {
+    f.seed("kr_metric_observations",{id,owner_id:"w",kr_item_id:"p",source:"api",event_kind:"synced",current_value:value,
+      baseline_value:0,target_value:100,unit:"시간",observed_at:day+"T03:00:00.000Z"});
+  }
+  const result=await comparison.readMetricComparisons(f.db,"w","",{projectId:"p",asOf:"2026-11-24"},at("2026-11-24"));
+  assert.equal(result.comparisons.find(row=>row.kind==="dod").currentValue,0.75);
+  assert.equal(result.comparisons.find(row=>row.kind==="dod").percent,null);
+});
+
+test("pooled ratios compare numerator and denominator without averaging percentages", async t => {
+  const f=dataFixture(t);
+  await f.write(change("rule",{...krRule,source:"manual",input:"ratio",aggregation:"ratio",unit:"%"},"2026-10-01",0),"2026-10-01");
+  for(const [date,numerator,denominator,rev] of [["2026-10-05",1,10,1],["2026-10-06",9,10,2],["2026-11-05",1,2,3],["2026-11-06",9,18,4]]) {
+    await f.write(change("entry",{numerator,denominator,basis:"ratio"},date,rev,{subjectId:"ratio"+rev}),date);
+  }
+  const result=(await comparison.readMetricComparisons(f.db,"w","kr",{asOf:"2026-11-24"},at("2026-11-24"))).comparisons.find(c=>c.kind==="mom");
+  assert.equal(result.previousValue,50);
+  assert.equal(result.currentValue,50);
+  assert.equal(result.percent,0);
 });

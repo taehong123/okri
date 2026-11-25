@@ -1,0 +1,18 @@
+.metric-comparisons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.metric-comparison-list { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.metric-comparison { position: relative; }
+.metric-comparison > summary, .metric-custom > summary {
+  cursor: pointer; list-style: none; border: 1px solid var(--border-default);
+  border-radius: 999px; padding: var(--space-1) var(--space-2); font-size: var(--type-meta);
+  background: var(--bg-subtle); color: var(--text-primary);
+}
+.metric-comparison.is-positive > summary { color: var(--success-fg); }
+.metric-comparison.is-negative > summary { color: var(--danger-fg); }
+.metric-comparison-detail { display: none; position: absolute; z-index: 10; min-width: 15rem;
+  padding: var(--space-2); border: 1px solid var(--border-default); border-radius: var(--radius-control);
+  background: var(--bg-raised); color: var(--text-primary); font-size: var(--type-meta); }
+.metric-comparison[open] .metric-comparison-detail, .metric-comparison:hover .metric-comparison-detail,
+.metric-comparison:focus-within .metric-comparison-detail { display: block; }
+.metric-comparison-detail p { margin: var(--space-1) 0; }
+.metric-custom form { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
+.metric-custom label { display: grid; gap: var(--space-1); font-size: var(--type-meta); }

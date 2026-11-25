@@ -4,6 +4,7 @@ import type { RequestAuthorization } from "./pace-data";
 import { bulkUpsertMetricEntries, currentProjectKr, getMetricRollupStatus, listMetricEntries, performanceFailure,
   previewMetricRollup, readKrPerformance, readPerformanceChanges, recalculateMetric, reviseMetricEntry, writePerformance } from "./kr-performance";
 import { listProjectOperations, writeProjectOperations } from "./project-operations";
+import { readMetricComparisons } from "./metric-comparisons";
 import { listCurrentKrMetrics } from "./kr-data-sources";
 import { readMetricDisplaySettings, saveMetricDisplaySettings } from "./kr-metric-display";
 import { formatMetricValue, METRIC_DISPLAY_MODES, metricDisplayIncrement, type MetricDisplaySettings } from "./kr-metric-display-format";
@@ -107,6 +108,20 @@ export function registerKrPerformanceTools(server: McpServer, db: D1Database, au
       display: { currentValue: formatMetricValue(currentValue, unit, settings, locale),
         targetValue: formatMetricValue(targetValue, unit, settings, locale) } };
   }
+
+  server.registerTool("get_metric_comparisons", {
+    description: "Compare available daily, weekly, monthly and year-over-year periods or two custom periods using the same calculation as the web. Numeric fields are exact and display contains formatted labels.",
+    inputSchema: { key_result_id: id.optional(), project_id: id.optional(), as_of: date.optional(), include_estimates: z.boolean().optional(),
+      current: z.object({ start: date, end: date }).optional(), previous: z.object({ start: date, end: date }).optional(), locale: localeSchema },
+    annotations: read,
+  }, input => operation(async () => {
+    if (Boolean(input.current) !== Boolean(input.previous)) throw new Error("Both comparison periods are required");
+    if (!input.key_result_id && !input.project_id) throw new Error("Select a KR or Project");
+    return readMetricComparisons(db, auth.ownerId, input.key_result_id ?? "", {
+      projectId: input.project_id, asOf: input.as_of, includeEstimates: input.include_estimates,
+      current: input.current, previous: input.previous, locale: input.locale,
+    });
+  }));
 
   server.registerTool("get_kr_metric_display", {
     description: "Read a KR's presentation preference and effective increment. Numeric current/target values are exact; display contains the localized labels. Hour units default to 0.5.",

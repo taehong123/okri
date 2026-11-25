@@ -4,6 +4,7 @@ import { Check, X } from "lucide-react";
 import { OverlayDialog } from "./overlay-dialog";
 import { getClientLocale, t } from "@/lib/client-language";
 import { formatMetricValue, type MetricDisplayPreference } from "@/lib/kr-metric-display-format";
+import MetricComparisons from "./metric-comparisons";
 import type { CompletionContributionInput, ContributionState, ProjectMetric } from "@/lib/project-contributions";
 import "./project-contribution.css";
 import ProjectContributionScheduleDialog from "./project-contribution-schedule";
@@ -97,6 +98,7 @@ export function ProjectContributionSettings({projectId,status,readOnly,onMetricC
     const period = state.performance;
     return <div className="project-contribution">
       <div className="contribution-summary"><b>{t("기간 실적")}</b><span>{formatContribution(period.value, period.unit, state.displaySettings)}{period.isEstimate && " · " + t("추정 포함")}</span></div>
+      <MetricComparisons keyResultId={state.keyResult?.id} projectId={projectId} refreshToken={attempt}/>
       <small>{period.start} – {period.end}{period.operating !== null && " · " + (period.operating ? t("운영 중") : t("운영 중지"))}</small>
       <a href="/?view=data">{t("성과 측정 설정")}</a>
     </div>;

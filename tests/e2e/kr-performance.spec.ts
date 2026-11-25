@@ -206,3 +206,39 @@ test("hour display settings persist on reload and the next daily value uses the 
   await expect(graph.locator(".kr-inline-values b")).toHaveText("약 50시간");
   expect(aggregate().current.value).toBeCloseTo(49.688095, 8);
 });
+
+test("comparison chips omit missing periods and reveal values with keyboard", async ({ page }, info) => {
+  test.skip(info.project.name !== "desktop-chromium");
+  await installApiMocks(page);
+  const mock=await installKrDataMocks(page,{configured:true});
+  const kr=mock.state().keyResult;
+  const rule: MeasurementRule={source:"projects",input:"events",aggregation:"sum",period:"monthly",start:null,end:null,
+    unit:"시간",baseline:0,target:100,direction:"increase",timezone:"Asia/Seoul"};
+  const version={value:rule,effectiveDate:"2026-10-01",recordedAt:"2026-10-01T00:00:00Z",revision:1};
+  const result=aggregatePerformance({rules:[version],projects:[],entries:[],samples:[],stops:[]},
+    {asOf:"2026-11-20",grain:"day",includeEstimates:true},new Date("2026-11-20T12:00:00Z"))!;
+  await page.route("**/api/metric-comparisons**",route=>json(route,{asOf:"2026-11-20",comparisons:[{
+    kind:"mom",current:{start:"2026-11-01",end:"2026-11-20"},previous:{start:"2026-10-01",end:"2026-10-20"},
+    currentValue:49.688095,previousValue:25.838095,change:23.85,percent:92.306,favorable:true,unit:"시간",aggregation:"sum",direction:"increase",
+    display:{currentValue:"약 49.5시간",previousValue:"약 26시간",change:"+약 24시간",percent:"+92.3%"},
+  }]}));
+  await page.route("**/api/kr-performance**",route=>json(route,{keyResult:kr,revision:1,timezone:"Asia/Seoul",asOf:"2026-11-20",
+    configuration:{rules:[version],projects:[]},performance:result}));
+  await page.route("**/api/kr-data-sources**",route=>json(route,new URL(route.request().url()).searchParams.has("keyResultId")
+    ? {...mock.state(),performanceConfigured:true}
+    : {metrics:[{keyResultId:kr.id,performance:true,mode:"projects",unit:"시간",currentValue:49.688095,targetValue:100,progress:50,trend:result.points}]}));
+  await page.goto("/?view=okr");
+  await page.locator("#okr-search-kr-1 > .okr-tree-kr-row").press("Enter");
+  const graph=page.getByRole("region",{name:"KR 성과 추이"});
+  const chip=graph.locator(".metric-comparison");
+  await expect(chip).toHaveCount(1);
+  await expect(chip.locator("summary")).toContainText("전월 대비 +92.3%");
+  await expect(graph.locator(".metric-comparison-list")).not.toContainText("전년 대비");
+  await chip.locator("summary").focus();
+  await page.keyboard.press("Enter");
+  await expect(chip.locator(".metric-comparison-detail")).toContainText("약 26시간");
+  await expect(chip.locator(".metric-comparison-detail")).toContainText("약 49.5시간");
+  await page.reload();
+  await page.locator("#okr-search-kr-1 > .okr-tree-kr-row").press("Enter");
+  await expect(page.locator(".metric-comparison summary")).toContainText("전월 대비 +92.3%");
+});

@@ -5,6 +5,7 @@ import { t } from "@/lib/client-language";
 import type { getMetricRollupStatus, KrPerformanceState, listMetricEntries, previewMetricRollup } from "@/lib/kr-performance";
 import type { MetricDisplaySettings } from "@/lib/kr-metric-display-format";
 import type { Grain, PerformanceResult } from "@/lib/kr-performance-model";
+import MetricComparisons from "./metric-comparisons";
 import { formatContribution } from "./project-contributions";
 import "./kr-performance.css";
 
@@ -64,6 +65,7 @@ export default function KrPerformanceChart({ keyResultId, refreshToken, displayS
       <small>{periodLabel(rule)} · {aggregationLabel(rule)} · {evaluation.start} – {evaluation.end}</small>
       {current.hasEstimates && <small>{t("추정 포함")}</small>}
     </div>
+    <MetricComparisons keyResultId={keyResultId} asOf={result.asOf} includeEstimates={query.includeEstimates} refreshToken={refreshToken}/>
     <p className="perf-meta">{t("집계 기준일")} <time>{result.asOf}</time> · {rule.timezone}</p>
     <form className="perf-range" onSubmit={applyRange}>
       <label>{t("조회 시작일")}<input type="date" required value={dates.start} onChange={e => setDates({ ...dates, start: e.target.value })}/></label>
