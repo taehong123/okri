@@ -188,5 +188,9 @@ test("timeline covers distant deadlines and places monthly bars on their dates",
   expect(taskRect!.x).toBeGreaterThan(scrollRect!.x);
   expect(taskRect!.x + taskRect!.width).toBeLessThanOrEqual(scrollRect!.x + scrollRect!.width + 2);
   expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  const farScroll = await schedule.evaluate(element => element.scrollLeft);
+  await page.getByRole("group", { name: "날짜", exact: true }).getByRole("button", { name: "오늘", exact: true }).click();
+  await expect.poll(() => schedule.evaluate(element => element.scrollLeft)).toBeLessThan(farScroll);
+  await expect(page.locator(".gantt-days .today")).toBeInViewport();
   await page.screenshot({ path: info.outputPath("gantt-future.png"), fullPage: true });
 });

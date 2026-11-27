@@ -127,7 +127,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   const visibleRange = useMemo(() => rangeFor(anchor, zoom), [anchor, zoom]);
   const { start, end } = useMemo(() => {
-    const dates = [visibleRange.start, visibleRange.end, today];
+    const dates = [visibleRange.start, visibleRange.end, today, addDays(anchor, -14), addDays(anchor, 14)];
     const projectIds = new Set(projects.map(project => project.id));
     for (const item of items) {
       if ((item.kind === "project" || item.kind === "task" && item.parentId && projectIds.has(item.parentId)) &&
@@ -139,7 +139,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
     const first = new Date(Math.min(...dates.map(date => date.getTime())));
     const last = new Date(Math.max(...dates.map(date => date.getTime())));
     return { start: startOfWeek(first), end: addDays(startOfWeek(last), 6) };
-  }, [items, projects, today, visibleRange]);
+  }, [items, projects, today, anchor, visibleRange]);
   const days = useMemo(() => Array.from({ length: dateDifference(start, end) + 1 }, (_, index) => addDays(start, index)), [start, end]);
   const overdueCount = projects.filter((project) => project.dueDate && project.dueDate < todayIso && !isComplete(project.status)).length;
   const undatedCount = projects.filter((project) => !project.dueDate).length;
@@ -175,7 +175,10 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
   }
 
   function moveRange(direction: -1 | 1) {
-    setAnchor((current) => zoom === "fortnight" ? addDays(current, direction * 14) : addMonths(current, direction));
+    setAnchor((current) => {
+      const basis = displayRange?.start ?? current;
+      return zoom === "fortnight" ? addDays(basis, direction * 14 + (direction > 0 ? 3 : -3)) : addMonths(basis, direction);
+    });
   }
 
   function chooseZoom(next: Zoom) {
@@ -198,7 +201,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
         <div className="gantt-range-control">
           <div className="gantt-range-navigation" role="group" aria-label={t("날짜")}>
             <button type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
-            <button className="gantt-today" type="button" aria-current={(displayRange ? displayRange.start <= today && today <= displayRange.end : isoDate(anchor) === todayIso) ? "date" : undefined} onClick={() => setAnchor(today)}>{t("오늘")}</button>
+            <button className="gantt-today" type="button" aria-current={(displayRange ? displayRange.start <= today && today <= displayRange.end : isoDate(anchor) === todayIso) ? "date" : undefined} onClick={() => setAnchor(new Date(today))}>{t("오늘")}</button>
             <button type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
           </div>
           <strong>{rangeLabel((displayRange ?? visibleRange).start, (displayRange ?? visibleRange).end, locale)}</strong>
