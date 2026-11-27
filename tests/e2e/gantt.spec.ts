@@ -6,8 +6,7 @@ async function openGantt(page: Parameters<typeof installApiMocks>[0], mobile: bo
   await installApiMocks(page);
   await page.goto("/?view=work");
   if (mobile) {
-    await page.getByRole("button", { name: "더보기", exact: true }).click();
-    await page.getByRole("button", { name: "간트", exact: true }).click();
+    await page.locator(".mobile-navigation").getByRole("button", { name: "간트", exact: true }).click();
   } else {
     await page.locator(".desktop-navigation").getByRole("button", { name: "간트", exact: true }).click();
   }
@@ -52,7 +51,7 @@ test("Gantt is a real menu view with Project bars and expandable Task milestones
   });
   expect(barVisual.backgroundColor).toBe("rgba(0, 0, 0, 0)");
   expect(barVisual.borderTopWidth).toBe("0px");
-  expect(barVisual.progressHeight).toBeLessThanOrEqual(2.1);
+  expect(barVisual.progressHeight).toBeGreaterThanOrEqual(6);
 
   const expander = schedule.locator(".gantt-project-label .gantt-expand");
   await expect(expander).toHaveAccessibleName(/모바일 사용성 개선 · 펼치기/);
@@ -140,4 +139,54 @@ test("Gantt system labels follow all supported workspace languages", async ({ pa
     await expect(page.locator("html")).toHaveAttribute("lang", id === "zh" ? "zh-Hans" : id);
     expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
   }
+});
+
+test("timeline covers distant deadlines and places monthly bars on their dates", async ({ page }, info) => {
+  await installApiMocks(page);
+  const now = new Date();
+  const date = (offset: number) => {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + offset);
+    return [d.getFullYear(), String(d.getMonth() + 1).padStart(2,"0"), String(d.getDate()).padStart(2,"0")].join("-");
+  };
+  const projectDue = date(180), taskDue = date(215);
+  await page.route("**/api/bootstrap**", route => json(route, {
+    ...bootstrap, items: bootstrap.items.map(item => item.id === "project-1" ? { ...item, dueDate: projectDue }
+      : item.id === "task-1" ? { ...item, dueDate: taskDue } : item),
+  }));
+  await page.goto("/?view=gantt");
+  const schedule = page.getByRole("group", { name: "Project와 Task 일정표" });
+  await expect(schedule).toBeVisible();
+  const header = schedule.locator(".gantt-days > span");
+  expect(await header.count()).toBeGreaterThanOrEqual(216);
+  const inspect = async () => schedule.locator(".gantt-project-row").evaluate(row => {
+    const bar = row.querySelector<HTMLElement>(".gantt-bar")!;
+    const track = row.querySelector<HTMLElement>(".gantt-track")!;
+    const last = document.querySelector<HTMLElement>(".gantt-days > span:last-child")!;
+    const b = bar.getBoundingClientRect(), t = track.getBoundingClientRect();
+    return { row: getComputedStyle(bar).gridRowStart, top: b.top, trackTop: t.top, trackBottom: t.bottom,
+      barRight: b.right, trackLeft: t.left, barWidth: b.width, last: last.textContent };
+  });
+  const first = await inspect();
+  expect(first.row).toBe("1");
+  expect(first.top).toBeGreaterThanOrEqual(first.trackTop);
+  expect(first.top).toBeLessThan(first.trackBottom);
+  expect(first.barWidth).toBeGreaterThan(400);
+  await page.getByRole("button", { name: "월간", exact: true }).click();
+  const month = await inspect();
+  expect(month.row).toBe("1");
+  expect(month.top).toBeGreaterThanOrEqual(month.trackTop);
+  expect(month.top).toBeLessThan(month.trackBottom);
+  expect(month.barWidth).toBeGreaterThan(300);
+  await schedule.locator(".gantt-expand").click();
+  const milestone = schedule.locator(".gantt-milestone");
+  await expect(milestone).toHaveCSS("grid-row-start", "1");
+  await schedule.evaluate(element => { element.scrollLeft = element.scrollWidth; });
+  const taskRect = await milestone.boundingBox();
+  const scrollRect = await schedule.boundingBox();
+  expect(taskRect).not.toBeNull();
+  expect(scrollRect).not.toBeNull();
+  expect(taskRect!.x).toBeGreaterThan(scrollRect!.x);
+  expect(taskRect!.x + taskRect!.width).toBeLessThanOrEqual(scrollRect!.x + scrollRect!.width + 2);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)).toBeLessThanOrEqual(1);
+  await page.screenshot({ path: info.outputPath("gantt-future.png"), fullPage: true });
 });

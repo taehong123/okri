@@ -1,7 +1,7 @@
 "use client";
 
 import { Check, ChevronDown, ChevronLeft, ChevronRight, Diamond, FolderKanban } from "lucide-react";
-import { useMemo, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { displayDate, getClientLocale, messageValue, t, useLanguage } from "@/lib/client-language";
 
 type GanttStatus = "backlog" | "todo" | "policy_discussion" | "in_progress" | "developing" | "development_done" | "done" | "blocked" | "archived";
@@ -122,15 +122,57 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
     for (const tasks of result.values()) tasks.sort((left, right) => (left.dueDate ?? "9999-12-31").localeCompare(right.dueDate ?? "9999-12-31") || left.title.localeCompare(right.title));
     return result;
   }, [items]);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const [displayRange, setDisplayRange] = useState<{ start: Date; end: Date }>();
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
-  const { start, end } = useMemo(() => rangeFor(anchor, zoom), [anchor, zoom]);
+  const visibleRange = useMemo(() => rangeFor(anchor, zoom), [anchor, zoom]);
+  const { start, end } = useMemo(() => {
+    const dates = [visibleRange.start, visibleRange.end, today];
+    const projectIds = new Set(projects.map(project => project.id));
+    for (const item of items) {
+      if ((item.kind === "project" || item.kind === "task" && item.parentId && projectIds.has(item.parentId)) &&
+          item.dueDate && /^\d{4}-\d{2}-\d{2}$/.test(item.dueDate)) {
+        const date = parseDate(item.dueDate);
+        if (Number.isFinite(date.getTime()) && isoDate(date) === item.dueDate) dates.push(date);
+      }
+    }
+    const first = new Date(Math.min(...dates.map(date => date.getTime())));
+    const last = new Date(Math.max(...dates.map(date => date.getTime())));
+    return { start: startOfWeek(first), end: addDays(startOfWeek(last), 6) };
+  }, [items, projects, today, visibleRange]);
   const days = useMemo(() => Array.from({ length: dateDifference(start, end) + 1 }, (_, index) => addDays(start, index)), [start, end]);
   const overdueCount = projects.filter((project) => project.dueDate && project.dueDate < todayIso && !isComplete(project.status)).length;
   const undatedCount = projects.filter((project) => !project.dueDate).length;
   const locale = getClientLocale();
   const weekdayFormat = useMemo(() => new Intl.DateTimeFormat(locale, { weekday: "narrow", timeZone: "UTC" }), [locale]);
   const dateFormat = useMemo(() => new Intl.DateTimeFormat(locale, { month: "numeric", day: "numeric", timeZone: "UTC" }), [locale]);
-  const timelineStyle = { "--gantt-day-count": days.length, "--gantt-day-width": zoom === "fortnight" ? "3.5rem" : "2.25rem" } as CSSProperties;
+  const dayFormat = useMemo(() => new Intl.DateTimeFormat(locale, { day: "numeric", timeZone: "UTC" }), [locale]);
+  const timelineStyle = { "--gantt-day-count": days.length, "--gantt-day-width": zoom === "fortnight" ? "3.5rem" : "2.75rem" } as CSSProperties;
+
+  useLayoutEffect(() => {
+    const scroll = scrollRef.current;
+    const day = scroll?.querySelector<HTMLElement>(".gantt-days > span");
+    if (!scroll || !day) return;
+    const width = day.getBoundingClientRect().width;
+    const label = scroll.querySelector<HTMLElement>(".gantt-label-header");
+    const availableDays = Math.max(1, Math.floor((scroll.clientWidth - (label?.getBoundingClientRect().width ?? 0)) / width));
+    const lead = Math.min(3, Math.floor((availableDays - 1) / 3));
+    const index = Math.max(0, dateDifference(start, anchor) - lead);
+    scroll.scrollLeft = index * width;
+    updateDisplayRange(scroll);
+  }, [start, anchor, visibleRange, zoom]);
+
+  function updateDisplayRange(scroll: HTMLDivElement) {
+    const day = scroll.querySelector<HTMLElement>(".gantt-days > span");
+    const label = scroll.querySelector<HTMLElement>(".gantt-label-header");
+    if (!day || !label) return;
+    const width = day.getBoundingClientRect().width;
+    if (!width) return;
+    const first = Math.max(0, Math.floor(scroll.scrollLeft / width));
+    const count = Math.max(1, Math.floor((scroll.clientWidth - label.getBoundingClientRect().width) / width));
+    const next = { start: days[Math.min(first, days.length - 1)], end: days[Math.min(first + count - 1, days.length - 1)] };
+    setDisplayRange(current => current && isoDate(current.start) === isoDate(next.start) && isoDate(current.end) === isoDate(next.end) ? current : next);
+  }
 
   function moveRange(direction: -1 | 1) {
     setAnchor((current) => zoom === "fortnight" ? addDays(current, direction * 14) : addMonths(current, direction));
@@ -156,10 +198,10 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
         <div className="gantt-range-control">
           <div className="gantt-range-navigation" role="group" aria-label={t("날짜")}>
             <button type="button" onClick={() => moveRange(-1)} aria-label={t("이전")} title={t("이전")}><ChevronLeft size={17} /></button>
-            <button className="gantt-today" type="button" aria-current={isoDate(anchor) === todayIso ? "date" : undefined} onClick={() => setAnchor(today)}>{t("오늘")}</button>
+            <button className="gantt-today" type="button" aria-current={(displayRange ? displayRange.start <= today && today <= displayRange.end : isoDate(anchor) === todayIso) ? "date" : undefined} onClick={() => setAnchor(today)}>{t("오늘")}</button>
             <button type="button" onClick={() => moveRange(1)} aria-label={t("다음")} title={t("다음")}><ChevronRight size={17} /></button>
           </div>
-          <strong>{rangeLabel(start, end, locale)}</strong>
+          <strong>{rangeLabel((displayRange ?? visibleRange).start, (displayRange ?? visibleRange).end, locale)}</strong>
         </div>
         <div className="gantt-zoom" role="group" aria-label={t("일정 범위")}>
           <button type="button" className={zoom === "fortnight" ? "selected" : ""} aria-pressed={zoom === "fortnight"} onClick={() => chooseZoom("fortnight")}>{t("2주")}</button>
@@ -176,7 +218,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
       {!projects.length ? (
         <div className="gantt-empty"><FolderKanban size={22} /><div><h2>{t("간트에 표시할 Project가 없습니다.")}</h2><p>{t("Project를 만들면 마감 일정과 하위 Task가 여기에 표시됩니다.")}</p></div></div>
       ) : (
-        <div className="gantt-scroll" role="group" aria-label={t("Project와 Task 일정표")}>
+        <div ref={scrollRef} className="gantt-scroll" onScroll={event => updateDisplayRange(event.currentTarget)} role="group" tabIndex={0} aria-label={t("Project와 Task 일정표")}>
           <div className="gantt-table" style={timelineStyle}>
             <div className="gantt-row gantt-date-row">
               <div className="gantt-label gantt-label-header"><span>{t("Project")}</span><small>{t("오늘과 마감일 기준")}</small></div>
@@ -184,7 +226,7 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
                 {days.map((day) => {
                   const value = isoDate(day);
                   const weekend = day.getUTCDay() === 0 || day.getUTCDay() === 6;
-                  return <span className={`${weekend ? "weekend" : ""} ${value === todayIso ? "today" : ""}`} key={value}><small>{weekdayFormat.format(day)}</small><b>{dateFormat.format(day)}</b></span>;
+                  return <span className={`${weekend ? "weekend" : ""} ${value === todayIso ? "today" : ""}`} key={value}><small>{weekdayFormat.format(day)}</small><b>{zoom === "month" && day.getUTCDate() !== 1 ? dayFormat.format(day) : dateFormat.format(day)}</b></span>;
                 })}
               </div>
             </div>
@@ -218,7 +260,8 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
                     <button className="gantt-title" type="button" onClick={() => onOpenProject(project.id)}><b>{project.title}</b><small><span className={`status-tag status-${project.status}`}>{statusLabel(project.status)}</span><span>{assigneeLabel(project)}</span><span>{project.dueDate ? displayDate(project.dueDate) : t("기한 없음")}</span></small></button>
                   </div>
                   <div className="gantt-track" aria-label={`${project.title} · ${project.dueDate ? displayDate(project.dueDate) : t("기한 없음")}`}>
-                    {days.map((day) => <span className={`gantt-cell ${day.getUTCDay() === 0 || day.getUTCDay() === 6 ? "weekend" : ""} ${isoDate(day) === todayIso ? "today" : ""}`} key={isoDate(day)} />)}
+                    {days.map((day, index) => day.getUTCDay() === 0 || day.getUTCDay() === 6 || isoDate(day) === todayIso
+                      ? <span className={`gantt-cell ${day.getUTCDay() === 0 || day.getUTCDay() === 6 ? "weekend" : ""} ${isoDate(day) === todayIso ? "today" : ""}`} style={{ gridColumn: index + 1 }} key={isoDate(day)} /> : null)}
                     {interval && <button type="button" className={`gantt-bar ${overdue ? "overdue" : completed ? "complete" : ""} ${position?.edge ? `edge-${position.edge}` : ""}`} style={{ gridColumn: `${interval.start + 1} / ${interval.end + 2}` }} onClick={() => onOpenProject(project.id)} aria-label={`${project.title} · ${barLabel}`} title={`${project.title} · ${barLabel}`}><span className="gantt-bar-progress" style={{ width: `${Math.max(0, Math.min(100, project.progress))}%` }} /><span className="gantt-bar-copy">{position?.edge === "before" ? "‹ " : ""}{barLabel}{position?.edge === "after" ? " ›" : ""}</span></button>}
                     {!projectDue && <span className="gantt-no-date">{t("기한 없음")}</span>}
                   </div>
@@ -229,7 +272,8 @@ export default function GanttView({ items, onOpenProject, onOpenTask }: GanttVie
                   return <div className="gantt-row gantt-task-row" key={task.id}>
                     <div className="gantt-label gantt-task-label"><span className={`gantt-task-icon ${isComplete(task.status) ? "complete" : ""}`}>{isComplete(task.status) ? <Check size={13} /> : <Diamond size={12} />}</span><button className="gantt-title" type="button" onClick={() => onOpenTask(task.id)}><b>{task.title}</b><small><span>{statusLabel(task.status)}</span><span>{task.dueDate ? displayDate(task.dueDate) : t("기한 없음")}</span></small></button></div>
                     <div className="gantt-track" aria-label={`${task.title} · ${task.dueDate ? displayDate(task.dueDate) : t("기한 없음")}`}>
-                      {days.map((day) => <span className={`gantt-cell ${day.getUTCDay() === 0 || day.getUTCDay() === 6 ? "weekend" : ""} ${isoDate(day) === todayIso ? "today" : ""}`} key={isoDate(day)} />)}
+                      {days.map((day, index) => day.getUTCDay() === 0 || day.getUTCDay() === 6 || isoDate(day) === todayIso
+                      ? <span className={`gantt-cell ${day.getUTCDay() === 0 || day.getUTCDay() === 6 ? "weekend" : ""} ${isoDate(day) === todayIso ? "today" : ""}`} style={{ gridColumn: index + 1 }} key={isoDate(day)} /> : null)}
                       {taskPosition && <button type="button" className={`gantt-milestone ${isComplete(task.status) ? "complete" : task.dueDate! < todayIso ? "overdue" : ""} ${taskPosition.edge ? `edge-${taskPosition.edge}` : ""}`} style={{ gridColumn: `${taskPosition.index + 1}` }} onClick={() => onOpenTask(task.id)} aria-label={`${task.title} · ${displayDate(task.dueDate!)}`} title={`${task.title} · ${displayDate(task.dueDate!)}`}><span /></button>}
                       {!taskDue && <span className="gantt-no-date">{t("기한 없음")}</span>}
                     </div>
