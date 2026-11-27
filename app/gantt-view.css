@@ -1,5 +1,7 @@
 .gantt-view {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: var(--space-4);
 }
 
@@ -167,6 +169,7 @@
 
 .gantt-scroll {
   --gantt-label-width: min(18rem, 36vw);
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
@@ -230,11 +233,18 @@
   grid-template-columns: repeat(var(--gantt-day-count), var(--gantt-day-width));
   min-width: 0;
   min-height: 3.5rem;
-  background: var(--bg-surface);
+  background-color: var(--bg-surface);
+  background-image: linear-gradient(to right, transparent calc(100% - 1px), var(--border-subtle) 0);
+  background-size: var(--gantt-day-width) 100%;
 }
 
 .gantt-days {
+  background-image: none;
   min-height: 3.75rem;
+}
+
+.gantt-cell, .gantt-bar, .gantt-milestone, .gantt-no-date {
+  grid-row: 1;
 }
 
 .gantt-days > span,
@@ -343,12 +353,11 @@
 
 .gantt-title b {
   min-width: 0;
-  overflow: hidden;
+  overflow-wrap: anywhere;
   font-size: var(--type-ui);
   font-weight: 400;
   line-height: 1.5;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .gantt-title small {
@@ -408,8 +417,8 @@
 .gantt-bar::before {
   content: "";
   position: absolute;
-  inset: calc(50% - .0625rem) 0 auto;
-  height: .125rem;
+  inset: calc(50% - .25rem) 0 auto;
+  height: .5rem;
   border-radius: 999px;
   background: var(--progress-track);
 }
@@ -419,8 +428,8 @@
   position: absolute;
   top: 50%;
   right: 0;
-  width: .625rem;
-  height: .625rem;
+  width: .875rem;
+  height: .875rem;
   box-sizing: border-box;
   border: .125rem solid var(--progress-fill);
   border-radius: 50%;
@@ -436,20 +445,21 @@
 
 .gantt-bar-progress {
   position: absolute;
-  inset: calc(50% - .0625rem) auto auto 0;
-  height: .125rem;
+  inset: calc(50% - .25rem) auto auto 0;
+  height: .5rem;
   border-radius: 999px;
   background: var(--progress-fill);
 }
 
 .gantt-bar-copy {
-  position: relative;
+  position: sticky;
+  left: calc(var(--gantt-label-width) + var(--space-2));
   z-index: 1;
   display: block;
   width: max-content;
   max-width: 100%;
   overflow: hidden;
-  margin-inline: auto;
+  margin-inline: 0;
   padding-inline: var(--space-2);
   background: var(--bg-surface);
   color: var(--text-secondary);

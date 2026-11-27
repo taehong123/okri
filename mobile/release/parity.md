@@ -462,3 +462,5 @@ Web-only settings and additive external MCP tools persist scope, timing, safe co
 - 2026-11-24: KR display increments and MCP display strings are web/shared-server presentation features. Frozen mobile v1 payloads, raw measurements and scheduled accrual are unchanged. Native presentation parity is deferred.
 
 - 2026-11-25: Period comparisons use shared web and MCP calculation. Mobile v1 payloads remain unchanged. Native comparison chips are deferred.
+
+- 2026-11-27: Gantt timeline navigation and presentation are web-only. Native Gantt presentation parity is deferred. Frozen mobile v1 APIs and scheduling semantics are unchanged.
